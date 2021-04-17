@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<!-- This is an timestamper for timestamping piano wav file audio recordings.
+  -
+  - Most digital pianos don't have a sense of wallclock time, so they
+  - timestamp all audio recordings with some fixed time or a fixed time and
+  - date plus the time since the unit has been powered on.
+  -->
+<html>
+<head>
+  <style type="text/css">
+    .param-control {
+      display: flex;
+    }
+    input[type=range] {
+      vertical-align: middle;
+      flex: 1;
+    }
+    input[type=number] {
+      width: 7ch;
+      vertical-align: middle;
+    }
+    input[type=color] {
+      width: calc(7ch - 0.3ch);
+      vertical-align: middle;
+    }
+    #run-clock-button {
+      width: 3rem;
+    }
+    .param-label-text {
+      display: inline-block;
+      width: 8rem;
+      vertical-align: middle;
+      text-align: right;
+      margin-right: 0.5rem;
+    }
+    .pad {
+      display: inline-block;
+      width: 2rem;
+      vertical-align: middle;
+    }
+    .slider-min,
+    .slider-max {
+      display: inline-block;
+      vertical-align: middle; /* no effect in flexbox :( */
+      margin: 0.1rem; /* setting a small margin helps vertial alignment */
+    }
+    .slider-min {
+      width: 4ch;
+      text-align: right;
+    }
+    .slider-max {
+      width: 4ch;
+      text-align: left;
+    }
+    #size-control,
+    .param-group-control {
+      border: 1.2px solid gray;
+      border-bottom-width: 0.6px;
+      border-top-width: 0.6px;
+      padding: 0.2rem;
+    }
+    .param-group-header {
+      font-weight: bold;
+    }
+    #params-json {
+      flex: 1;
+      overflow: auto;
+      min-height: 2rem;
+      font-family: monospace;
+      white-space: pre-wrap;
+    }
+  </style>
+
+
+  <script type="text/javascript" defer>
+    const ns_xlink = 'http://www.w3.org/1999/xlink';
+
+    //=====================================================================
+    // Data-driven parameters
+    //=====================================================================
+
+    // Control configuration
+    const config = {
+      interval: {step: 1, min: 10, max: 1000},
+      rate: {step: 0.1, min: 0, max: 2},
+      pitch: {step: 0.1, min: 0, max: 2},
+    };
+
+    // Slider-controlled logo parameters
+    // Names are split with _ and the final element is looked up in the config
+    // object to determine additional properties for the input controls.
+    var params = {
+      ms_interval: 1000,
+      speech_rate: 1.2,
+      speech_pitch: 0.9,
+    };
+
+    var redraw = {
+      ms_interval: e => restart_clock(),
+      speech_rate: e => sayTime(),
+      speech_pitch: e => sayTime(),
+    };
+
+
+    //=====================================================================
+    // Linked sliders
+    //=====================================================================
+    // Handle nested objects according to a path list.
+    // Inspired by https://stackoverflow.com/a/22129960
+    function getPropByPath(o, path) {
+      return path.reduce((prev, cur) => prev && prev[cur], o);
+    }
+    function setPropByPath(o, path, value) {
+      return path.reduce((prev, curr, i) => {
+        return (i + 1 == path.length)
+          ? prev[curr] = value
+          : prev[curr] = prev[curr] || {};
+      }, o);
+    }
+
+    function path_to_id(...path) {
+      return path.join('-');
+    }
+
+
+    // Tie sibling elements together for linked updates
+    function update_sibling(e) {
+      var el = e.target;
+      if ("other" in el) {
+        el.other.value = el.value;
+      }
+    }
+
+
+    // Return a phrase from the given - or _ separated identifier
+    function wordify_ident(ident) {
+      ident = ident.replace(/[-_]/g, ' ');
+      ident = ident.replace(/\b\w/g, c => c.toUpperCase());
+      return ident;
+    }
+
+
+    function create_control_div(container_el, item, ...path) {
+      var param = path[path.length - 1];
+      const control_type = param.replace(/.*_/, '');
+
+      var param_div = document.createElement('div');
+      param_div.id = path_to_id(...path, 'control');  // TODO consider extra -
+      if (param_div.id === 'size-control') {
+        // Don't ever stick the main SVG size control next to the clock,
+        // it makes resizing using the slider impossible.
+        let body = document.getElementById('body');
+        body.insertBefore(param_div, body.firstChild);
+        // wrapper.appendChild(param_div);
+      } else {
+        container_el.appendChild(param_div);
+      }
+      param_div.setAttribute('class', 'param-control');
+
+      // The label also contains all linked input elements, allowing one to
+      // click anywhere on the control line to focus the main input
+      // (for sliders, this is the number box)
+      var param_label = document.createElement('label');
+      param_div.appendChild(param_label);
+      param_label.setAttribute('class', 'param-label');
+
+
+      var param_label_span = document.createElement('span');
+      param_label.appendChild(param_label_span);
+      param_label_span.setAttribute('class', 'param-label-span');
+
+
+      var span = document.createElement('span');
+      param_label_span.appendChild(span);
+      span.setAttribute('class', 'param-label-text');
+      span.textContent = wordify_ident(param);
+
+      // Add an input of the given type to the param control's label
+      function add_input_el(type, updater) {
+        var el = document.createElement('input');
+
+        el.type = type;
+        el.id = path_to_id(...path, type);
+        el.value = item;
+        el.addEventListener("input", updater);
+
+        if (typeof config[control_type] === 'object') {
+          for (const [attr, value] of Object.entries(config[control_type])) {
+            el.setAttribute(attr, value);
+          }
+        }
+        return el;
+      }
+
+      // Add min or max <span> to a slider's <label> contents
+      function add_slider_limit(attr) {
+        var el = document.createElement('span');
+
+        el.id = path_to_id(...path, attr);
+        el.setAttribute('class', `slider-${attr}`);
+        el.textContent = config[control_type][attr];
+        return el;
+      }
+
+      // Main <input> callback for input events
+      function update_param(e) {
+        const value = e.target.value;
+        setPropByPath(params, path, value);
+
+        // dispatch the update to the associated SVG updater
+        var curprop = redraw;
+        for (const pathidx in path) {
+          let pathbit = path[pathidx];
+          if (!(pathbit in curprop)) {
+            pathbit = "_else";
+          }
+
+          let nextprop = curprop[pathbit];
+          console.assert(nextprop !== undefined && nextprop !== null,
+            {msg: "Missing entry in redraw!", pathidx: pathidx, pathbit: pathbit},
+            path, curprop);
+          if (typeof nextprop === "function") {
+            // We found a redraw function - call it and stop the search
+            nextprop(e);
+            break;
+          } else {
+            // Descend to the next path-element depth in the redraw structure
+            curprop = nextprop;
+          }
+        }
+      }
+
+      // The <input> element to target with this control's label via its
+      // "for" attribute.  This element is also used to generate the
+      // synthetic "input" event to initialize the generated SVG and JSON.
+      let main_input;
+
+      if (control_type == 'color') {
+        main_input = param_label_span.appendChild(add_input_el('color', update_param));
+
+      } else {
+        // Link the range and number box inputs for the slider
+        function update_slider(e) {
+          update_sibling(e);
+          update_param(e);
+        }
+
+        main_input = add_input_el('number', update_slider);
+        other_input = add_input_el('range', update_slider);
+        main_input.other = other_input;
+        other_input.other = main_input;
+        if (control_type == 'size') {
+          main_input.addEventListener("change", resquare_logo);
+          other_input.addEventListener("change", resquare_logo);
+        }
+
+        param_div.appendChild(main_input);
+        param_div.appendChild(add_slider_limit('min'));
+        param_div.appendChild(other_input);
+        param_div.appendChild(add_slider_limit('max'));
+      }
+
+      param_label.setAttribute('for', main_input.id);
+      main_input.dispatchEvent(new Event("input"));
+    }
+
+
+    // Handle a control group entry
+    function create_control_group(container_el, item, ...path) {
+      var group_div = document.createElement('div');
+      container_el.appendChild(group_div);
+
+      group_div.id = path_to_id(...path, '-control_group');
+      group_div.setAttribute('class', 'param-group-control');
+
+      var group_label = document.createElement('label');
+      group_div.appendChild(group_label);
+      group_label.textContent = wordify_ident(path[path.length - 1]);
+      group_label.setAttribute('class', 'param-group-header');
+
+      // recurse
+      create_param_controls(group_div, item, ...path);
+    }
+
+
+    // Construct all controls based on the current params data object.
+    // Called recursively on nested objects.
+    // * container: HTML element to put the controls in (<div>)
+    // * param_obj: object whose keys to iterate over
+    // * ...path: strings describing path into the global params data opbject
+    // Outermost call should call this with an empty path.
+    function create_param_controls(container_el, param_obj, ...path) {
+      for (const key in param_obj) {
+        const item = param_obj[key];
+        const control_type = key.replace(/.*_/, '');
+        let f;
+
+        if (typeof item === 'object') {
+          f = create_control_group;
+        } else {
+          f = create_control_div;
+        }
+
+        f(container_el, item, ...path, key);
+      }
+    }
+
+
+    //=====================================================================
+    // Main entry point
+    //=====================================================================
+    document.addEventListener("DOMContentLoaded", function() {
+      create_param_controls(document.getElementById('config-control'), params);
+
+      // hook up button actions
+      function set_click_handler(id, fn) {
+        document.getElementById(id).addEventListener("click", fn);
+      }
+
+      set_click_handler('run-clock-button', toggleClockRun);
+      // Start clock by default
+      toggleClockRun();
+
+      // Hook up time-reading speech synthesis
+      set_up_voices();
+      if (speechSynthesis.onvoiceschanged !== undefined) {
+        speechSynthesis.onvoiceschanged = set_up_voices;
+      }
+      set_click_handler('speak-button', sayTime);
+      set_click_handler('silence-button', stopTalking);
+    });
+
+
+    //=====================================================================
+    // Clock and time functions
+    //=====================================================================
+    let interval_id = null;
+    function restart_clock() {
+      if (interval_id !== null) {
+        toggleClockRun();
+        toggleClockRun();
+      }
+    }
+
+
+    function toggleClockRun(e) {
+      var button = document.getElementById('run-clock-button');
+      if (interval_id === null) {
+        // Start the clock running
+        const time_hash = updateTimeText();
+        if (time_hash.fractionalSecond) {
+          const frac_sec = parseInt(time_hash.fractionalSecond, 10);
+          const ms_offset = frac_sec * (10 ** (3 - time_hash.fractionalSecond.length));
+        }
+        interval_id = window.setInterval(updateTimeText, params.ms_interval /*ms*/);
+        button.value = "Stop!";
+      } else {
+        // Stop the clock and reset the hands
+        // TODO make it configurable whether the hands reset or the params stick
+        window.clearInterval(interval_id);
+        interval_id = null;
+        button.value = "Go!";
+      }
+    }
+
+
+    function showParamsJson(json) {
+      var element = document.getElementById("params-json");
+      text = JSON.stringify(json, null, 2);
+      var lines = text.split("\n");
+
+      function remove_quote (s) {
+        return s.replace('"', '').replace('"', '');
+      }
+      lines = lines.map(remove_quote);
+      text = lines.join("\n");
+
+      element.textContent = text;
+      return text;
+    }
+
+
+    //=====================================================================
+    // Time speech synthesis
+    //=====================================================================
+    let synth = window.speechSynthesis;
+    let voiceMap = {};
+
+    function set_up_voices() {
+      const default_lang = "en-US";
+      let voiceSelect = document.getElementById('voice-selector');
+      const selectedIndex = voiceSelect.selectedIndex < 0 ? 0 : voiceSelect.selectedIndex;
+
+      // Clear the contents in case the voices updated
+      voiceSelect.innerHTML = '';
+
+      voices = synth.getVoices().sort(function(a_obj, b_obj) {
+        const [a, b] = [a_obj, b_obj].flatMap(
+          x => [x.lang + "." + x.name.toUpperCase()]);
+        return (a < b) ? -1 : (a == b) ? 0 : 1;
+      });
+      //console.log("voice list:", voices);
+
+      // Copy the default voices into the beginning of the list
+      let default_lang_voice, default_voice;
+      for (const i in voices) {
+        let voice = voices[i];
+        voiceMap[voice.name] = voice;
+        if (voice.lang == default_lang) {
+          default_lang_voice = voice;
+        }
+        if (voice.default) {
+          default_voice = voice;
+        }
+      }
+
+      let default_voices = [];
+      if (default_voice) {
+        default_voices.unshift(default_voice);
+      }
+      if (default_lang_voice) {
+        default_voices.unshift(default_lang_voice);
+      }
+
+      voiceSelect.appendChild(make_voice_group(default_voices, "Defaults"));
+      voiceSelect.appendChild(make_voice_group(voices, "All"));
+
+      function make_voice_group(voice_list, label) {
+        let optgroup = document.createElement('optgroup');
+        optgroup.label = label;
+        for (const i in voice_list) {
+          const voice = voice_list[i];
+          optgroup.appendChild(make_voice_option(voice));
+        }
+        return optgroup;
+      }
+
+      function make_voice_option(voice) {
+        let option = document.createElement('option');
+        option.textContent = `${voice.lang} (${voice.name})`;
+        if (voice.localService) {
+          option.textContent += " [local]";
+        }
+        if (voice.default) {
+          option.textContent += " *";
+        }
+        // This is used to look up the voice in the voiceMap
+        option.setAttribute('data-name', voice.name);
+        return option;
+      }
+
+      voiceSelect.selectedIndex = selectedIndex;
+    }
+
+    const date_formatter = new Intl.DateTimeFormat('en-us', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      fractionalSecondDigits: 3,
+      hour12: false,
+      timeZoneName: "long",
+      timeZone: 'PST'
+    });
+
+
+    function hashify_time_parts(time_parts) {
+      //0: {type: "weekday", value: "Sunday"}
+      //1: {type: "literal", value: ", "}
+      //2: {type: "month", value: "4"}
+      //3: {type: "literal", value: "/"}
+      //4: {type: "day", value: "4"}
+      //5: {type: "literal", value: "/"}
+      //6: {type: "year", value: "2021"}
+      //7: {type: "literal", value: ", "}
+      //8: {type: "hour", value: "16"}
+      //9: {type: "literal", value: ":"}
+      //10: {type: "minute", value: "30"}
+      //11: {type: "literal", value: ":"}
+      //12: {type: "second", value: "02"}
+      //13: {type: "literal", value: "."}
+      //14: {type: "fractionalSecond", value: "675"}
+
+      let part_hash = {}
+      for (const i in time_parts) {
+        part = time_parts[i];
+        part_hash[part.type] = part.value;
+      }
+      return part_hash;
+      //day: "4"
+      //fractionalSecond: "595"
+      //hour: "16"
+      //literal: "."
+      //minute: "28"
+      //month: "4"
+      //second: "45"
+      //weekday: "Sunday"
+      //year: "2021"
+    }
+
+
+    function updateTimeText() {
+      const now = new Date();
+      const time_parts = date_formatter.formatToParts(now);
+      //showParamsJson(time_parts);
+      const t = hashify_time_parts(time_parts);
+      //console.log(t);
+      showParamsJson(t);
+
+      const time_str = `${t.hour}:${t.minute} hours, ${t.weekday}. ${t.month} ${t.day}, ${t.year}`;
+      const timeText = document.getElementById("time-string");
+      timeText.value = time_str;
+
+      return t;
+    }
+
+
+    function sayTime() {
+      if (synth.speaking) {
+        stopTalking();
+      }
+
+      let voiceSelect = document.getElementById('voice-selector');
+      if (voiceSelect.selectedIndex < 0) {
+        return;
+      }
+
+      updateTimeText();
+
+      const timeText = document.getElementById("time-string");
+      utterance = new SpeechSynthesisUtterance(timeText.value);
+
+      utterance.onerror = function(event) {
+          console.log('SpeechSynthesisUtterance.onerror', event);
+      }
+
+      let voiceName = voiceSelect.selectedOptions[0].getAttribute('data-name');
+      utterance.voice = voiceMap[voiceName];
+
+      console.log(`saying '${timeText.value}' in ${voiceName}`);
+      utterance.pitch = params.speech_pitch;
+      utterance.rate = params.speech_rate;
+      synth.speak(utterance);
+    }
+
+    function stopTalking() {
+      synth.cancel();
+    }
+
+    //=====================================================================
+    // end of Javascript
+    //=====================================================================
+  </script>
+</head>
+
+<body id="body">
+  <title>Talky Time!</title>
+  <p>Click "Speak!" to get an audio time and date stamp for all your recording needs.</p>
+  <div>
+    <input type="button" id="run-clock-button" value="Go" />
+  </div>
+  <div>
+    <span>Prefix</span>
+    <input type="text" id="time-prefix" value="The time is:" />
+  </div>
+  <div>
+    <span>Timestamp</span>
+    <input type="text" id="time-string" value="So there!" />
+  </div>
+  <div>
+    <span>Suffix</span>
+    <input type="text" id="time-suffix" value="Nice!" />
+  </div>
+  <div>
+    <input type="button" id="speak-button" value="Speak" />
+    <input type="button" id="silence-button" value="Silence" />
+  </div>
+  <div>
+    <select id="voice-selector"> </select>
+  </div>
+
+  <div class="config" id="config-control"> </div>
+
+  <div id="params-json"> </div>
+<!-- Note: only void elements can self-close with />, e.g. <br />.  They are:
+  - area, base, br, col, embed, hr, img, input, link, meta, param, source, track, wbr -->
+</body>
+</html>
