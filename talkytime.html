@@ -504,11 +504,18 @@
     }
 
 
+    // Replace instances of ${foo} in template with obj[foo]
     function formatString(template, obj) {
       function replacer(match, name, offset, str) {
-        return obj[name].toString();
+        if (name in obj) {
+          return obj[name].toString();
+        } else {
+          return `\${*UnknownKey:'${name}'}`;
+        }
       }
-      return template.replace(/\$\{([^}]+)\}/g, replacer);
+      let regex = new RegExp(`\\$\\{(${Object.keys(obj).join('|')})\\}`, 'g');
+      //return template.replace(/\$\{([^}]+)\}/g, replacer);
+      return template.replace(regex, replacer);
     }
 
 
@@ -522,7 +529,6 @@
 
       const time_fmt = document.getElementById('time-format').value;
       const time_str = formatString(time_fmt, t)
-      //const time_str = `${t.hour}:${t.minute} hours, ${t.weekday}. ${t.month} ${t.day}, ${t.year}`;
       const timeText = document.getElementById("time-string");
       timeText.value = time_str;
 
@@ -573,8 +579,8 @@
   <title>Talky Time!</title>
   <p>Click "Speak!" to get an audio time and date stamp for all your recording needs.</p>
   <div>
-    <span>Time format string</span>
-    <input type="text" id="time-format" value="${hour}:${minute} hours, ${weekday}. ${month} ${day}, ${year}" />
+    <span>Time format string - use ${key} to substitute possible keys from the list below.</span>
+    <input type="text" id="time-format" value="${hour}:${minute}:${second}, ${weekday}. ${month} ${day}, ${year}" />
   </div>
   <div>
     <span>Timestamp</span>
