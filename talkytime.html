@@ -19,12 +19,8 @@
       width: 7ch;
       vertical-align: middle;
     }
-    input[type=color] {
-      width: calc(7ch - 0.3ch);
-      vertical-align: middle;
-    }
-    #run-clock-button {
-      width: 3rem;
+    input[type=text] {
+      width: 100%;
     }
     .param-label-text {
       display: inline-block;
@@ -84,6 +80,7 @@
       interval: {step: 1, min: 10, max: 1000},
       rate: {step: 0.1, min: 0, max: 2},
       pitch: {step: 0.1, min: 0, max: 2},
+      volume: {step: 0.05, min: 0, max: 1},
     };
 
     // Slider-controlled logo parameters
@@ -93,12 +90,14 @@
       ms_interval: 1000,
       speech_rate: 1.2,
       speech_pitch: 0.9,
+      speech_volume: 1,
     };
 
     var redraw = {
       ms_interval: e => restart_clock(),
       speech_rate: e => sayTime(),
       speech_pitch: e => sayTime(),
+      speech_volume: e => sayTime(),
     };
 
 
@@ -328,6 +327,9 @@
       }
       set_click_handler('speak-button', sayTime);
       set_click_handler('silence-button', stopTalking);
+
+      // Focus the speak button
+      document.getElementById('speak-button').focus();
     });
 
 
@@ -353,13 +355,13 @@
           const ms_offset = frac_sec * (10 ** (3 - time_hash.fractionalSecond.length));
         }
         interval_id = window.setInterval(updateTimeText, params.ms_interval /*ms*/);
-        button.value = "Stop!";
+        button.value = "Stop Time!";
       } else {
         // Stop the clock and reset the hands
         // TODO make it configurable whether the hands reset or the params stick
         window.clearInterval(interval_id);
         interval_id = null;
-        button.value = "Go!";
+        button.value = "Start Time!";
       }
     }
 
@@ -502,6 +504,14 @@
     }
 
 
+    function formatString(template, obj) {
+      function replacer(match, name, offset, str) {
+        return obj[name].toString();
+      }
+      return template.replace(/\$\{([^}]+)\}/g, replacer);
+    }
+
+
     function updateTimeText() {
       const now = new Date();
       const time_parts = date_formatter.formatToParts(now);
@@ -510,7 +520,9 @@
       //console.log(t);
       showParamsJson(t);
 
-      const time_str = `${t.hour}:${t.minute} hours, ${t.weekday}. ${t.month} ${t.day}, ${t.year}`;
+      const time_fmt = document.getElementById('time-format').value;
+      const time_str = formatString(time_fmt, t)
+      //const time_str = `${t.hour}:${t.minute} hours, ${t.weekday}. ${t.month} ${t.day}, ${t.year}`;
       const timeText = document.getElementById("time-string");
       timeText.value = time_str;
 
@@ -541,8 +553,9 @@
       utterance.voice = voiceMap[voiceName];
 
       console.log(`saying '${timeText.value}' in ${voiceName}`);
-      utterance.pitch = params.speech_pitch;
       utterance.rate = params.speech_rate;
+      utterance.pitch = params.speech_pitch;
+      utterance.volume = params.speech_volume;
       synth.speak(utterance);
     }
 
@@ -560,23 +573,17 @@
   <title>Talky Time!</title>
   <p>Click "Speak!" to get an audio time and date stamp for all your recording needs.</p>
   <div>
-    <input type="button" id="run-clock-button" value="Go" />
-  </div>
-  <div>
-    <span>Prefix</span>
-    <input type="text" id="time-prefix" value="The time is:" />
+    <span>Time format string</span>
+    <input type="text" id="time-format" value="${hour}:${minute} hours, ${weekday}. ${month} ${day}, ${year}" />
   </div>
   <div>
     <span>Timestamp</span>
-    <input type="text" id="time-string" value="So there!" />
-  </div>
-  <div>
-    <span>Suffix</span>
-    <input type="text" id="time-suffix" value="Nice!" />
+    <input type="text" id="time-string" value="" />
   </div>
   <div>
     <input type="button" id="speak-button" value="Speak" />
     <input type="button" id="silence-button" value="Silence" />
+    <input type="button" id="run-clock-button" value="Start Time!" />
   </div>
   <div>
     <select id="voice-selector"> </select>
