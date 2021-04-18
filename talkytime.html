@@ -389,7 +389,6 @@
     let voiceMap = {};
 
     function set_up_voices() {
-      showParamsJson(window.navigator.languages); // FIXME - remove
       let voiceSelect = document.getElementById('voice-selector');
       const selectedIndex = voiceSelect.selectedIndex < 0 ? 0 : voiceSelect.selectedIndex;
 
@@ -401,7 +400,7 @@
           x => [x.lang + "." + x.name.toUpperCase()]);
         return (a < b) ? -1 : (a == b) ? 0 : 1;
       });
-      console.log("voice list:", voices);
+      //console.log("voice list:", voices);
 
       // Build voiceMap so we can select a voice from its name
       let default_lang_voice, default_voice;
@@ -422,7 +421,7 @@
         if (lang.match(sep_re)) {
           lang_re = RegExp(`^${lang.replace(sep_re, sep_re.source)}\$`, "i");
         }
-        console.log(lang_re);
+        //console.log(lang_re);
         for (const voice_i in voices) {
           let voice = voices[voice_i];
           if (voice.lang.match(lang_re)) {
@@ -543,7 +542,7 @@
       //showParamsJson(time_parts);
       const t = hashify_time_parts(time_parts);
       //console.log(t);
-      //FIXME - uncomment: showParamsJson(t);
+      showParamsJson(t);
 
       const time_fmt = document.getElementById('time-format').value;
       const time_str = formatString(time_fmt, t)
@@ -598,7 +597,7 @@
   <p>Click "Speak!" to get an audio time and date stamp for all your recording needs.</p>
   <div>
     <span>Time format string - use ${key} to substitute possible keys from the list below.</span>
-    <input type="text" id="time-format" value="${hour}:${minute}:${second}, ${weekday}. ${month} ${day}, ${year}" />
+    <input type="text" id="time-format" value="${hour}:${minute} ${second}, ${weekday}. ${month} ${day}, ${year}" />
   </div>
   <div>
     <span>Timestamp</span>
