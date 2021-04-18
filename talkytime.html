@@ -389,7 +389,6 @@
     let voiceMap = {};
 
     function set_up_voices() {
-      const default_lang = "en-US";
       let voiceSelect = document.getElementById('voice-selector');
       const selectedIndex = voiceSelect.selectedIndex < 0 ? 0 : voiceSelect.selectedIndex;
 
@@ -401,31 +400,43 @@
           x => [x.lang + "." + x.name.toUpperCase()]);
         return (a < b) ? -1 : (a == b) ? 0 : 1;
       });
-      //console.log("voice list:", voices);
+      console.log("voice list:", voices);
 
-      // Copy the default voices into the beginning of the list
+      // Build voiceMap so we can select a voice from its name
       let default_lang_voice, default_voice;
       for (const i in voices) {
         let voice = voices[i];
         voiceMap[voice.name] = voice;
-        if (voice.lang == default_lang) {
-          default_lang_voice = voice;
-        }
-        if (voice.default) {
-          default_voice = voice;
-        }
       }
 
+      // Build the default voice list
       let default_voices = [];
-      if (default_voice) {
-        default_voices.unshift(default_voice);
+
+      // Add any voices that match the default languages,
+      // in the order of those languages
+      for (const lang_i in window.navigator.languages) {
+        const lang = window.navigator.languages[lang_i];
+        for (const voice_i in voices) {
+          let voice = voices[voice_i];
+          if (voice.lang == lang) {
+            default_voices.push(voice);
+          }
+        }
+        voices = voices.filter(voice => voice.lang != lang);
       }
-      if (default_lang_voice) {
-        default_voices.unshift(default_lang_voice);
+
+      // Append the default voice.  This is often just the first voice in the
+      // list, so make sure it's at the end of the default voices list.
+      for (const i in voices) {
+        let voice = voices[i];
+        if (voice.default) {
+          default_voices.push(voice);
+        }
       }
+      voices = voices.filter(voice => !voice.default);
 
       voiceSelect.appendChild(make_voice_group(default_voices, "Defaults"));
-      voiceSelect.appendChild(make_voice_group(voices, "All"));
+      voiceSelect.appendChild(make_voice_group(voices, "Others"));
 
       function make_voice_group(voice_list, label) {
         let optgroup = document.createElement('optgroup');
