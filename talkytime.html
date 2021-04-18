@@ -389,6 +389,7 @@
     let voiceMap = {};
 
     function set_up_voices() {
+      showParamsJson(window.navigator.languages); // FIXME - remove
       let voiceSelect = document.getElementById('voice-selector');
       const selectedIndex = voiceSelect.selectedIndex < 0 ? 0 : voiceSelect.selectedIndex;
 
@@ -412,17 +413,23 @@
       // Build the default voice list
       let default_voices = [];
 
+      const sep_re = /[-_]/;
       // Add any voices that match the default languages,
       // in the order of those languages
       for (const lang_i in window.navigator.languages) {
         const lang = window.navigator.languages[lang_i];
+        let lang_re = RegExp(`^${lang}`, "i");
+        if (lang.match(sep_re)) {
+          lang_re = RegExp(`^${lang.replace(sep_re, sep_re.source)}\$`, "i");
+        }
+        console.log(lang_re);
         for (const voice_i in voices) {
           let voice = voices[voice_i];
-          if (voice.lang == lang) {
+          if (voice.lang.match(lang_re)) {
             default_voices.push(voice);
           }
         }
-        voices = voices.filter(voice => voice.lang != lang);
+        voices = voices.filter(voice => !voice.lang.match(lang_re));
       }
 
       // Append the default voice.  This is often just the first voice in the
@@ -536,7 +543,7 @@
       //showParamsJson(time_parts);
       const t = hashify_time_parts(time_parts);
       //console.log(t);
-      showParamsJson(t);
+      //FIXME - uncomment: showParamsJson(t);
 
       const time_fmt = document.getElementById('time-format').value;
       const time_str = formatString(time_fmt, t)
