@@ -201,7 +201,9 @@ def grok_digit_pair(word_list):
 
 
 def grok_time_words(word_list):
-    """Returns a triplet of (hour, minutes, seconds) from the word_list"""
+    """Returns a triplet of (hour, minutes, seconds, extra) from the word_list
+
+    The final list contains any unparsed words."""
 
     # Parse hours
     hours = grok_digit_pair(word_list)
@@ -215,7 +217,17 @@ def grok_time_words(word_list):
     seconds = grok_digit_pair(word_list)
     pop_optional_words(word_list, "seconds")
 
-    return hours, minutes, seconds
+    return hours, minutes, seconds, list(word_list)
+
+
+def grok_date_words(word_list):
+    day_of_week = word_list.pop(0)
+    month = TimestampWords.months[word_list.pop(0)] + 1
+
+    year = 1902
+    day = 45
+
+    return year, month, day, day_of_week, list(word_list)
 
 
 def words_to_timestamp(text):
@@ -254,15 +266,17 @@ def words_to_timestamp(text):
     for i, word in enumerate(words):
         if word in TimestampWords.days:
             time_words = words[:i]
-            day_of_week = words[i]
-            month = TimestampWords.months[words[i+1]] + 1
-            date_words = words[i+2:]
+            date_words = words[i:]
             break
 
-    print(f"  Time: {time_words}\n  Day: {day_of_week}\n  Month: {month}\n  Day,Year: {date_words}")
+    # TODO - catch IndexError: pop from empty list
+    print(f"  Time: {time_words}")
+    hours, minutes, seconds, extra = grok_time_words(time_words)
+    print(f"-> {hours:02d}:{minutes:02d}:{seconds:02d} (extra: {extra})")
 
-    hours, minutes, seconds = grok_time_words(time_words)
-    print(f"-> {hours:02d}:{minutes:02d}:{seconds:02d}")
+    print(f"  Date: {date_words}")
+    year, month, day, day_of_week, extra = grok_date_words(date_words)
+    print(f"-> {year:04d}-{month:02d}-{day:02d} {day_of_week} (extra: {extra})")
 
 
 def process_file(f):
