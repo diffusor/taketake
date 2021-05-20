@@ -182,7 +182,7 @@ def pop_optional_words(word_list, opt_words):
             word_list.pop(0)
 
 
-def parse_digit_pair(word_list):
+def grok_digit_pair(word_list):
     """Parse the given 1 or 2 digit doublet of timey numbers"""
     value = 0
     pop_optional_words(word_list, "oh")
@@ -198,6 +198,24 @@ def parse_digit_pair(word_list):
                     word_list.pop(0)
     #print(" * got", value)
     return value
+
+
+def grok_time_words(word_list):
+    """Returns a triplet of (hour, minutes, seconds) from the word_list"""
+
+    # Parse hours
+    hours = grok_digit_pair(word_list)
+    pop_optional_words(word_list, "hundred hours oh clock oclock o'clock")
+
+    # Parse minutes
+    minutes = grok_digit_pair(word_list)
+    pop_optional_words(word_list, "oh clock oclock o'clock minutes and")
+
+    # Parse seconds
+    seconds = grok_digit_pair(word_list)
+    pop_optional_words(word_list, "seconds")
+
+    return hours, minutes, seconds
 
 
 def words_to_timestamp(text):
@@ -227,6 +245,7 @@ def words_to_timestamp(text):
     words = text.split()
 
     time_words = []
+    day_of_week = None
     month = 0
     date_words = []
 
@@ -235,24 +254,14 @@ def words_to_timestamp(text):
     for i, word in enumerate(words):
         if word in TimestampWords.days:
             time_words = words[:i]
+            day_of_week = words[i]
             month = TimestampWords.months[words[i+1]] + 1
             date_words = words[i+2:]
             break
 
-    print(f"  Hours: {time_words}\n  Month: {month}\n  Day,Year: {date_words}")
+    print(f"  Time: {time_words}\n  Day: {day_of_week}\n  Month: {month}\n  Day,Year: {date_words}")
 
-    # Parse hours
-    hours = parse_digit_pair(time_words)
-    pop_optional_words(time_words, "hundred hours oh clock oclock o'clock")
-
-    # Parse minutes
-    minutes = parse_digit_pair(time_words)
-    pop_optional_words(time_words, "oh clock oclock o'clock minutes and")
-
-    # Parse seconds
-    seconds = parse_digit_pair(time_words)
-    pop_optional_words(time_words, "seconds")
-
+    hours, minutes, seconds = grok_time_words(time_words)
     print(f"-> {hours:02d}:{minutes:02d}:{seconds:02d}")
 
 
