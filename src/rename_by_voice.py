@@ -66,7 +66,10 @@ class Config:
 
     duration_cmd = "ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1".split()
 
-#silence_cmd = "ffmpeg -af silencedetect=noise=-50dB:d=1 -f null - -i".split()
+
+#============================================================================
+# Audio file processing
+#============================================================================
 
 def detect_silence(f, threshold_dbfs=-50):
     """Use ffmpeg silencedetect to find all silent segments.
@@ -129,6 +132,10 @@ def find_likely_audio_span(f):
     #raise RuntimeError(f"Could not find any span of audio greater than {Config.min_talk_duration_s}s in file '{f}'")
 
 
+#============================================================================
+# Speech recognition and parsing
+#============================================================================
+
 def speech_to_text(f, offset, duration):
     """Uses the PocketSphinx speech recognizer to decode the spoken timestamp
     and any notes.
@@ -153,16 +160,21 @@ def reverse_hashify(s):
         d[word] = i
     return d
 
+
 class TimestampWords:
     days = reverse_hashify("sunday monday tuesday wednesday thursday friday saturday sunday")
     months = reverse_hashify("january february march april may june july august september october november december")
-    corrections = {"why": "one"}
+    corrections = {"why": "one", "oh": "zero"}
     ordinals = reverse_hashify(
         "zeroth    first    second  third      fourth     fifth     sixth     seventh     eighth     ninth "
         "tenth     eleventh twelfth thirteenth fourteenth fifteenth sixteenth seventeenth eighteenth nineteenth "
         "twentieth 21st     22nd    23rd       24th       25th      26th      27th        28th       29th "
         "thirtieth")
     ordinal_suffixes = reverse_hashify("th st nd rd")
+
+
+class TimestampGrokError(RuntimeError):
+    pass
 
 
 def to_num(word):
@@ -182,15 +194,21 @@ def pop_optional_words(word_list, opt_words):
     Arg word_list is a list of words being parsed.
     Arg opt_words is a space-separated string of words to consider.
     """
+    popped = []
     for word in opt_words.split():
         if word_list and word_list[0] == word:
-            word_list.pop(0)
+            popped.append(word_list.pop(0))
+
+    return " ".join(popped)
 
 
 def grok_digit_pair(word_list):
-    """Parse the given 1 or 2 digit doublet of timey numbers"""
+    """Parses the given 1 or 2 digit doublet of timey numbers.
+
+    If no number is found, the list is not modified and 0 is returned.
+    This allows for datestamps with missing timestamps.
+    """
     value = 0
-    pop_optional_words(word_list, "oh")
     if word_list:
         next_num = to_num(word_list[0])
         if next_num is not None:
@@ -198,7 +216,7 @@ def grok_digit_pair(word_list):
             word_list.pop(0)
             if word_list and (value == 0 or value >= 20):
                 next_num = to_num(word_list[0])
-                if next_num < 10:
+                if next_num is not None and next_num < 10:
                     value += next_num
                     word_list.pop(0)
     #print(" * got", value)
@@ -210,17 +228,36 @@ def grok_time_words(word_list):
 
     The final list contains any unparsed words."""
 
+    done = False
+
     # Parse hour
     hour = grok_digit_pair(word_list)
-    pop_optional_words(word_list, "hundred hours oh clock oclock o'clock")
+    if pop_optional_words(word_list, "second seconds"):
+        second = hour
+        hour = 0
+        done = True
 
-    # Parse minute
-    minute = grok_digit_pair(word_list)
-    pop_optional_words(word_list, "oh clock oclock o'clock minutes and")
+    if not done and pop_optional_words(word_list, "minute minutes"):
+        minute = hour
+        hour = 0
+        pop_optional_words(word_list, "and")
 
-    # Parse seconds
-    second = grok_digit_pair(word_list)
-    pop_optional_words(word_list, "seconds")
+    else:
+        pop_optional_words(word_list, "hundred hour hours oh clock oclock o'clock and")
+
+        # Parse minute
+        minute = grok_digit_pair(word_list)
+        if pop_optional_words(word_list, "second seconds"):
+            second = minute
+            minute = 0
+            done = True
+        else:
+            pop_optional_words(word_list, "oh clock oclock o'clock minute minutes and")
+
+    if not done:
+        # Parse seconds
+        second = grok_digit_pair(word_list)
+        pop_optional_words(word_list, "second seconds")
 
     return hour, minute, second, list(word_list)
 
@@ -451,6 +488,10 @@ def words_to_timestamp(text):
 
     return datetime.datetime(year, month, day, hour, minute, second), extra
 
+
+#============================================================================
+# File processing
+#============================================================================
 
 def process_file(f):
     print(f"Scanning '{f}'")
