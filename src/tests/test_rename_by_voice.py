@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 
 import unittest
+
+# Import rename_by_voice.py from the parent dir for in-situ testing
+# From https://codeolives.com/2020/01/10/python-reference-module-in-parent-directory/
+import sys
+import os
+import inspect
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.append(parentdir)
 import rename_by_voice
 
 

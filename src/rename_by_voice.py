@@ -18,7 +18,7 @@ Silence detection:
     $ ffmpeg -i in.flac -af silencedetect=noise=-50dB:d=1 -f null -
 
 Run tests:
-    $ ./test_rename_by_voice.py
+    $ tests/test_rename_by_voice.py
 """
 
 # Silence detection example:
