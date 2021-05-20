@@ -170,6 +170,36 @@ def to_num(word):
         return None
 
 
+def pop_optional_words(word_list, opt_words):
+    """Pops off the given words in the order specified, skipping those that
+    aren't present.
+
+    Arg word_list is a list of words being parsed.
+    Arg opt_words is a space-separated string of words to consider.
+    """
+    for word in opt_words.split():
+        if word_list and word_list[0] == word:
+            word_list.pop(0)
+
+
+def parse_digit_pair(word_list):
+    """Parse the given 1 or 2 digit doublet of timey numbers"""
+    value = 0
+    pop_optional_words(word_list, "oh")
+    if word_list:
+        next_num = to_num(word_list[0])
+        if next_num is not None:
+            value = next_num
+            word_list.pop(0)
+            if word_list and (value == 0 or value >= 20):
+                next_num = to_num(word_list[0])
+                if next_num < 10:
+                    value += next_num
+                    word_list.pop(0)
+    #print(" * got", value)
+    return value
+
+
 def words_to_timestamp(text):
     """Converts the given text to a feasible timestamp, followed by any
     remaining comments or notes encoded in the time string.
@@ -211,50 +241,17 @@ def words_to_timestamp(text):
 
     print(f"  Hours: {time_words}\n  Month: {month}\n  Day,Year: {date_words}")
 
-    def pop_if(word_list, word):
-        if word_list and word_list[0] == word:
-            word_list.pop(0)
-
-    def parse_segment(word_list):
-        """Parse the given 1 or 2 digit segment of timey numbers"""
-        segment = 0
-        pop_if(word_list, "oh")
-        if word_list:
-            next_num = to_num(word_list[0])
-            if next_num is not None:
-                segment = next_num
-                word_list.pop(0)
-                if word_list and (segment == 0 or segment >= 20):
-                    next_num = to_num(word_list[0])
-                    if next_num < 10:
-                        segment += next_num
-                        word_list.pop(0)
-        print(" * got", segment) # XXX
-        return segment
-
     # Parse hours
-    hours = parse_segment(time_words)
-
-    pop_if(time_words, "hundred")
-    pop_if(time_words, "hours")
-    pop_if(time_words, "oh")
-    pop_if(time_words, "clock")
-    pop_if(time_words, "oclock")
-    pop_if(time_words, "o'clock")
+    hours = parse_digit_pair(time_words)
+    pop_optional_words(time_words, "hundred hours oh clock oclock o'clock")
 
     # Parse minutes
-    minutes = parse_segment(time_words)
-
-    pop_if(time_words, "oh")
-    pop_if(time_words, "clock")
-    pop_if(time_words, "oclock")
-    pop_if(time_words, "o'clock")
-    pop_if(time_words, "minutes")
-    pop_if(time_words, "and")
+    minutes = parse_digit_pair(time_words)
+    pop_optional_words(time_words, "oh clock oclock o'clock minutes and")
 
     # Parse seconds
-    seconds = parse_segment(time_words)
-    pop_if(time_words, "seconds")
+    seconds = parse_digit_pair(time_words)
+    pop_optional_words(time_words, "seconds")
 
     print(f"-> {hours:02d}:{minutes:02d}:{seconds:02d}")
 
