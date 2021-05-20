@@ -46,10 +46,12 @@ Run tests:
 
 
 import sys
-import subprocess
 import re
-import speech_recognition
 import itertools
+import subprocess
+import datetime
+
+import speech_recognition
 from word2number import w2n
 
 class Config:
@@ -208,19 +210,19 @@ def grok_time_words(word_list):
 
     The final list contains any unparsed words."""
 
-    # Parse hours
-    hours = grok_digit_pair(word_list)
+    # Parse hour
+    hour = grok_digit_pair(word_list)
     pop_optional_words(word_list, "hundred hours oh clock oclock o'clock")
 
-    # Parse minutes
-    minutes = grok_digit_pair(word_list)
+    # Parse minute
+    minute = grok_digit_pair(word_list)
     pop_optional_words(word_list, "oh clock oclock o'clock minutes and")
 
     # Parse seconds
-    seconds = grok_digit_pair(word_list)
+    second = grok_digit_pair(word_list)
     pop_optional_words(word_list, "seconds")
 
-    return hours, minutes, seconds, list(word_list)
+    return hour, minute, second, list(word_list)
 
 
 def grok_day_of_month(word_list):
@@ -402,7 +404,7 @@ def words_to_timestamp(text):
     """Converts the given text to a feasible timestamp, followed by any
     remaining comments or notes encoded in the time string.
 
-    Returns a pair of (Datetime, str) containing the timestamp and any comments.
+    Returns a pair of (datetime, str) containing the timestamp and any comments.
     """
     # Sample recognized text for this TalkyTime setup:
     #   format:  ${hour}:${minute}, ${weekday}. ${month} ${day}, ${year}
@@ -438,14 +440,16 @@ def words_to_timestamp(text):
             break
 
     # TODO - catch IndexError: pop from empty list
-    print(f"  Time: {time_words}")
-    hours, minutes, seconds, extra = grok_time_words(time_words)
-    print(f"-> {hours:02d}:{minutes:02d}:{seconds:02d} (extra: {extra})")
+    #print(f"  Time: {time_words}")
+    hour, minute, second, extra = grok_time_words(time_words)
+    #print(f"-> {hour:02d}:{minute:02d}:{second:02d} (extra: {extra})")
 
-    print(f"  Date: {date_words}")
+    #print(f"  Date: {date_words}")
     year, month, day, day_of_week, extra = grok_date_words(date_words)
-    print(f"-> {year}-{month}-{day} {day_of_week} (extra: {extra})")
-    print(f"-> {year:04d}-{month:02d}-{day:02d} {day_of_week} (extra: {extra})")
+    #print(f"-> {year}-{month}-{day} {day_of_week} (extra: {extra})")
+    #print(f"-> {year:04d}-{month:02d}-{day:02d} {day_of_week} (extra: {extra})")
+
+    return datetime.datetime(year, month, day, hour, minute, second), extra
 
 
 def process_file(f):
@@ -457,8 +461,9 @@ def process_file(f):
         print(f"Parsing {duration:.2f}s of audio starting at offset {start:.2f}s in '{f}'...")
         text = speech_to_text(f, start, duration)
         if text is not None:
-            print(f'"{text}"')
-            words_to_timestamp(text)  # TODO returns Datetime, str
+            print(f' "{text}"')
+            timestamp, extra = words_to_timestamp(text)
+            print(f" -> {timestamp}\n -> {' '.join(extra)}")
         else:
             print("No speech found")
     else:
