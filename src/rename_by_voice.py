@@ -16,6 +16,9 @@ Setup:
 
 Silence detection:
     $ ffmpeg -i in.flac -af silencedetect=noise=-50dB:d=1 -f null -
+
+Run tests:
+    $ python3 -m unittest rename_by_voice.py
 """
 
 # Silence detection example:
@@ -48,6 +51,7 @@ import re
 import speech_recognition
 import itertools
 from word2number import w2n
+import unittest
 
 class Config:
     silence_threshold_dbfs = -55    # Audio above this threshold is not considered silence
@@ -220,12 +224,289 @@ def grok_time_words(word_list):
     return hours, minutes, seconds, list(word_list)
 
 
-def grok_date_words(word_list):
-    day_of_week = word_list.pop(0)
-    month = TimestampWords.months[word_list.pop(0)] + 1
+def grok_day_of_month(word_list):
+    """Pop out the day of month from the word_list and return the resulting int.
 
-    year = 1902
-    day = 45
+    The final word popped will be an ordinal type, like first, second, twentieth.
+    If such a word isn't found, None is returned and no words are popped.
+    """
+
+    day = None
+    idx = 0
+    if word_list:
+        day = to_num(word_list[idx])
+        if day is None:
+            # Assume the word is probably an "Nth"-style ordinal
+            # and allow adding the "Nth" for the case where day <= 20
+            day = 0
+        else:
+            idx += 1
+
+        if len(word_list) > idx and word_list[idx] in TimestampWords.ordinals:
+            day += TimestampWords.ordinals[word_list[idx]]
+            idx += 1
+        else:
+            day = None # Did not find an Nth-style ordinal, give up
+
+    # Sanity check the day
+    if day is not None and (day < 1 or day > 31):
+        print(f" * Ignoring invalid day '{day}'")
+        day = None
+
+    # Success, pop the words we used
+    if day is not None:
+        for i in range(idx):
+            word_list.pop(0)
+
+    return day
+
+
+class Test_grok_year(unittest.TestCase):
+
+    def check_impl(self, expected_year, word_str, expected_rem=""):
+        """Check that the given string word_str decodes to the given expected_year,
+        with the given remaining words joined into a string passed in as expected_rem.
+        """
+        word_list = word_str.split()
+        got_year = grok_year(word_list)
+        got_rem = " ".join(word_list)
+        self.assertEqual(got_year, expected_year)
+        self.assertEqual(got_rem, expected_rem)
+
+    def check(self, expected_year, word_str):
+        self.check_impl(expected_year, word_str)
+        self.check_impl(expected_year, word_str + " with stuff", "with stuff")
+
+    def test_1900(self):
+        self.check(1900, "one thousand nine hundred")
+        self.check(1900, "nineteen hundred")
+        self.check(1900, "nineteen oh oh")
+
+    def test_2000(self):
+        self.check(2000, "two thousand")
+        self.check(2000, "twenty oh oh")
+
+    def test_2001(self):
+        self.check(2001, "two thousand one")
+        self.check(2001, "two thousand and one")
+        self.check(2001, "twenty oh one")
+
+    def test_2009(self):
+        self.check(2009, "two thousand nine")
+        self.check(2009, "two thousand and nine")
+        self.check(2009, "twenty oh nine")
+
+    def test_2010(self):
+        self.check(2010, "two thousand ten")
+        self.check(2010, "two thousand and ten")
+        self.check(2010, "twenty ten")
+
+    def test_2011(self):
+        self.check(2011, "two thousand eleven")
+        self.check(2011, "two thousand and eleven")
+        self.check(2011, "twenty eleven")
+        self.check(2011, "twenty hundred eleven")
+
+    def test_2019(self):
+        self.check(2019, "two thousand nineteen")
+        self.check(2019, "two thousand and nineteen")
+        self.check(2019, "twenty nineteen")
+
+    def test_2020(self):
+        self.check(2020, "two thousand twenty")
+        self.check(2020, "two thousand and twenty")
+        self.check(2020, "twenty twenty")
+
+    def test_2021(self):
+        # Sometimes PocketSphinx mishears "one" as "why"
+        self.check(2021, "two thousand twenty why")
+        self.check(2021, "two thousand and twenty one")
+        self.check(2021, "twenty twenty one")
+
+    def test_2022(self):
+        self.check(2022, "two thousand twenty two")
+        self.check(2022, "two thousand and twenty two")
+        self.check(2022, "twenty twenty two")
+
+    def test_2029(self):
+        self.check(2029, "two thousand twenty nine")
+        self.check(2029, "two thousand and twenty nine")
+        self.check(2029, "twenty twenty nine")
+
+    def test_2100(self):
+        self.check(2100, "two thousand one hundred")
+        self.check(2100, "two thousand and one hundred")
+        self.check(2100, "twenty one hundred")
+        self.check(2100, "twenty one oh oh")
+
+    def test_2101(self):
+        self.check(2101, "two thousand one hundred one")
+        self.check(2101, "two thousand and one hundred and one")
+        self.check(2101, "twenty one hundred one")
+        self.check(2101, "twenty one hundred and one")
+        self.check(2101, "twenty one oh one")
+
+    def test_2119(self):
+        self.check(2119, "two thousand one hundred nineteen")
+        self.check(2119, "two thousand and one hundred and nineteen")
+        self.check(2119, "twenty one hundred nineteen")
+        self.check(2119, "twenty one hundred and nineteen")
+        self.check(2119, "twenty one nineteen")
+
+    def test_2120(self):
+        self.check(2120, "two thousand one hundred twenty")
+        self.check(2120, "two thousand and one hundred and twenty")
+        self.check(2120, "twenty one hundred twenty")
+        self.check(2120, "twenty one hundred and twenty")
+        self.check(2120, "twenty one twenty")
+
+    def test_2121(self):
+        self.check(2121, "two thousand one hundred twenty one")
+        self.check(2121, "two thousand and one hundred and twenty one")
+        self.check(2121, "twenty one hundred twenty one")
+        self.check(2121, "twenty one hundred and twenty one")
+        self.check(2121, "twenty one twenty one")
+
+    def test_2129(self):
+        self.check(2129, "two thousand one hundred twenty nine")
+        self.check(2129, "two thousand and one hundred and twenty nine")
+        self.check(2129, "twenty one twenty nine")
+
+
+def grok_year(word_list):
+    """Pop out the year from the word_list and return the resulting int.
+
+    We expect a year in the 19xx-2999 range.
+    Otherwise the word_list is not modified and None is returned.
+    """
+
+    year = None
+    idx = 0
+
+    def cur_word():
+        return word_list[idx] if len(word_list) > idx else None
+
+    year = to_num(cur_word())
+    if year is not None:
+        idx += 1
+        if 1 <= year <= 3:
+            year *= 1000
+            # Parse as a normal number
+            # May need a "thousand", or could be individual digits
+            if cur_word() == "thousand":
+                idx += 1
+            if cur_word() == "and":
+                idx += 1
+            if cur_word() == "oh":
+                idx += 1
+
+            # Double oh's finish the year
+            if cur_word() == "oh":
+                idx += 1
+
+            else:
+
+                # parse hundreds or digit pair
+                num = to_num(cur_word())
+                if num is not None:
+                    idx += 1
+                    # could be hundreds, 10s, or ones
+                    if num < 10:
+                        # could be the final digit, or followed by "hundred"
+                        if cur_word() == "hundred":
+                            idx += 1
+                            year += num * 100
+                            if cur_word() == "and":
+                                idx += 1
+                            if cur_word() == "oh":
+                                idx += 1
+
+                            # tens and ones
+                            num = to_num(cur_word())
+                            if num is not None:
+                                idx += 1
+                                year += num
+                                num = to_num(cur_word())
+                                if num is not None and num < 10:
+                                    idx += 1
+                                    year += num
+
+                        else:
+                            year += num
+
+                    elif 10 <= num < 20:
+                        year += num
+
+                    elif num < 30:
+                        year += num
+                        num = to_num(cur_word())
+                        if num is not None and num < 10:
+                            idx += 1
+                            year += num
+
+                    else:
+                        pass # probably this is not a year digit.  Like for 2000
+
+        elif 19 <= year <= 29:
+            num = to_num(cur_word())
+            if year > 19 and num is not None and num < 10:
+                idx += 1
+                year += num
+
+            year *=100
+            if cur_word() == "hundred":
+                idx += 1
+            if cur_word() == "and":
+                idx += 1
+            if cur_word() == "oh":
+                idx += 1
+
+            # Double oh's finish the year
+            if cur_word() == "oh":
+                idx += 1
+
+            else:
+
+                # parse digit pair
+                num = to_num(cur_word())
+                if num is not None:
+                    idx += 1  # TODO - this is premature!  Year may be 20 hundred!
+
+                    if num < 10:
+                        year += num
+
+                    elif 10 <= num < 30:
+                        year += num
+                        num = to_num(cur_word())
+                        if num is not None and num < 10:
+                            idx += 1
+                            year += num
+
+    # Sanity check the year
+    if year is not None and (year < 1900 or year > 2999):
+        print(f" * Ignoring invalid year '{year}'")
+        year = None
+
+    # Success, pop the words we used
+    if year is not None:
+        for i in range(idx):
+            word_list.pop(0)
+
+    return year
+
+
+def grok_date_words(word_list):
+    year, month, day, day_of_week = (None,) * 4
+
+    if word_list and word_list[0] in TimestampWords.days:
+        day_of_week = word_list.pop(0)
+
+    if word_list and word_list[0] in TimestampWords.months:
+        month = TimestampWords.months[word_list.pop(0)] + 1
+
+    # Parse day-of-month:
+    day = grok_day_of_month(word_list)
+    year = grok_year(word_list)
 
     return year, month, day, day_of_week, list(word_list)
 
@@ -276,6 +557,7 @@ def words_to_timestamp(text):
 
     print(f"  Date: {date_words}")
     year, month, day, day_of_week, extra = grok_date_words(date_words)
+    print(f"-> {year}-{month}-{day} {day_of_week} (extra: {extra})")
     print(f"-> {year:04d}-{month:02d}-{day:02d} {day_of_week} (extra: {extra})")
 
 
