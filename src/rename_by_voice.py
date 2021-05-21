@@ -447,6 +447,9 @@ def words_to_timestamp(text):
     #   format:  ${hour}:${minute}, ${weekday}. ${month} ${day}, ${year}
     #   example: 19:38, Wednesday. May 19, 2021
 
+    if text is None:
+        raise TimestampGrokError(f"Given text is None")
+
     words = text.split()
 
     time_words = []
@@ -488,12 +491,12 @@ def process_file(f):
         start, duration = span
         print(f"Parsing {duration:.2f}s of audio starting at offset {start:.2f}s in '{f}'...")
         text = speech_to_text(f, start, duration)
-        if text is not None:
-            print(f' "{text}"')
+        print(f'> {text!r}')
+        try:
             timestamp, extra = words_to_timestamp(text)
             print(f" -> {timestamp}\n -> {' '.join(extra)}")
-        else:
-            print("No speech found")
+        except TimestampGrokError as e:
+            print(f"No speech found: {e}")
     else:
         print("No likely span of audio found")
 

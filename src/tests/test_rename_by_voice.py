@@ -644,6 +644,15 @@ class Test_TimestampGrokError(unittest.TestCase):
         self.check("foo")
         self.check("uh the man")
         self.check("one eight fifty nine")
+        # Known example cases
+        self.check('man a man man who')
+        self.check('in')
+        self.check('lou in the and hang on and on')
+        self.check('the known and why')
+        self.check("by hand now you when ryan and the it only one hundred and one they do and and and let and knew who the more dead and am now you are now i'm i'm i'm")
+        self.check('you do')
+        self.check('the')
+        self.check('oh')
 
     def test_no_day_of_month(self):
         self.regex = "^word_list is empty, no day of month found"
@@ -654,11 +663,8 @@ class Test_TimestampGrokError(unittest.TestCase):
         self.regex = "^Could not find Nth-like ordinal in"
         self.check("eighteen twenty one may twenty twenty one")
         self.check("eighteen twenty one thirteenth of may twenty twenty one")
-
-    def test_no_day_of_month(self):
-        self.regex = "^Could not find year"
-        self.check("may first")
-        self.check("5 oh clock august fourth")
+        # Known example cases
+        self.check("you mean there are or power or come to new you to do to move them our earnings and no there you didn't do to in june it no you didn't do didn't know ah there are so than it june")
 
     def test_bad_month_day(self):
         self.regex = r"^Parsed month day \d+ from .* is out of range"
@@ -669,6 +675,8 @@ class Test_TimestampGrokError(unittest.TestCase):
         self.regex = "^Could not find year in"
         self.check("may first blah")
         self.check("may first man")
+        self.check("may first")
+        self.check("5 oh clock august fourth")
 
     def test_year_parse_failure(self):
         self.regex = "^Expected 'thousand' after \d+ parsing year from"
@@ -686,6 +694,10 @@ class Test_TimestampGrokError(unittest.TestCase):
         self.check("5 oh clock august fourth five")
         self.check("may first oh")
 
+    def test_None(self):
+        self.regex = "^Given text is None$"
+        self.check(None)
+
 
 class Test_words_to_timestamp(unittest.TestCase):
     def check_impl(self, text, expect, expected_rem=""):
@@ -702,7 +714,7 @@ class Test_words_to_timestamp(unittest.TestCase):
         self.check_impl(text, dt)
         self.check_impl(text + " with stuff", dt, "with stuff")
 
-    def test_known_examples(self):
+    def test_contrived_examples(self):
         self.check("zero oh one wednesday may nineteenth twenty twenty one",
                    2021, 5, 19, 0, 1, 0)
         self.check("zero fifty one wednesday may nineteenth twenty twenty one",
@@ -721,6 +733,8 @@ class Test_words_to_timestamp(unittest.TestCase):
                    2021, 5, 19, 19, 0, 0)
         self.check("nineteen hundred hours wednesday may nineteenth twenty twenty one",
                    2021, 5, 19, 19, 0, 0)
+
+    def test_known_examples(self):
         self.check("twenty twenty monday march eighteenth two thousand twenty why",
                    2021, 3, 18, 20, 20, 0)
         self.check("eleven fifteen sunday march twenty first two thousand twenty one",
@@ -730,10 +744,11 @@ class Test_words_to_timestamp(unittest.TestCase):
         self.check("twenty one forty one thursday march twenty fifth two thousand twenty one",
                    2021, 3, 25, 21, 41, 0)
 
-    #def test_no_time(self):
-    #    self.regex = "^Could not find year"
-    #    self.check("may first nineteen thirteen")
-    #    self.check("5 oh clock august fourth twenty two oh five")
+    def test_no_time(self):
+        self.check("may first nineteen thirteen",
+                   1913, 5, 1)
+        self.check("5 oh clock august fourth twenty two oh five",
+                   2205, 8, 4, 5)
 
 if __name__ == '__main__':
     unittest.main()
