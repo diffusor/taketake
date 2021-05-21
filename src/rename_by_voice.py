@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# TODO - timestamp word parsing, renaming, file touch
+# TODO - duration, renaming, touch, flac conversion, par2, copy, verify
 
 """Rename file[s] based on the spoken information at the front of the file.
 
