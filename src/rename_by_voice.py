@@ -67,6 +67,38 @@ Run tests:
 # YOURUSERNAME     ALL = NOPASSWD: /sbin/sysctl vm.drop_caches=3
 # $ sudo /sbin/sysctl vm.drop_caches=3
 
+# USB drive transfer process
+# Design goals:
+# * Don't modify the USB contents until data has been copied off and verified
+# * Do post-copy verification after flushing filesystem caches
+#
+# Steps:
+# For all wav files to copy:
+# * make symlink from dest folder to wav file on USB drive
+# * generate 2% par2 file of wav file
+# * extract timestamp and duration from wave file (speech_to_text, words_to_timestamp)
+# * convert to flac, named with timestamp, notes, and duration
+# * generate 2x 5% par2 files of flac file
+#
+# Once:
+# * flush FS caches
+#
+# For all copied wav files:
+# * Verify wav par2 against wav symlink (testing copy on USB drive)
+# * Verify flac file against both of its par2 files
+# * Convert flac back to wav temporarily and verify against wav par2
+# * Delete temporary wav
+#
+# For all copied wav files:
+# * Delete wav file from USB device
+# * Delete wav par2 and symlink
+# * Copy flac and its par2 files to the USB drive (in a subdir)
+#
+# Once:
+# * flush FS caches
+#
+# For all copied wav files:
+# * On USB: Verify all copied flac files against both of their par2 files
 
 import sys
 import re
@@ -80,8 +112,11 @@ from word2number import w2n
 class Config:
     silence_threshold_dbfs = -55    # Audio above this threshold is not considered silence
     silence_min_duration_s = 0.5    # Silence shorter than this is not detected
-    file_scan_duration_s = 120      # -t (time duration).  Note -ss is startseconds
-    min_talk_duration_s = 2.5         # Only consider non-silence intervals longer than this for timestamps
+    file_scan_duration_s = 60       # -t (time duration).  Note -ss is startseconds
+    min_talk_duration_s = 2.5       # Only consider non-silence intervals longer than this for timestamps
+    max_talk_duration_s = 20        # Do recognition on up to this many seconds of audio at most
+    talk_attack_s = 0.2             # Added to the start offset to avoid clipping the start of talking
+    talk_release_s = 0.2            # Added to the duration to avoid clipping the end of talking
 
     ffmpeg_cmd = "ffmpeg"
     ffmpeg_silence_filter = "silencedetect=noise={threshold}dB:d={duration}" # precede with -af
@@ -513,6 +548,11 @@ def process_file(f):
 
     if span is not None:
         start, duration = span
+        # Expand the window a bit to allow for attack and decay below the
+        # silence threshold.
+        start = max(0, start - Config.talk_attack_s)
+        duration += Config.talk_attack_s + Config.talk_release_s
+        duration = min(duration, Config.max_talk_duration_s)
         print(f"Parsing {duration:.2f}s of audio starting at offset {start:.2f}s in '{f}'...")
         text = speech_to_text(f, start, duration)
         print(f'> {text!r}')
