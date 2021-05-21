@@ -17,6 +17,9 @@ Setup:
 Silence detection:
     $ ffmpeg -i in.flac -af silencedetect=noise=-50dB:d=1 -f null -
 
+par2 parity archive creation:
+    $ par2 create -s4096 -r5 -n2 -u in.flac
+
 Run tests:
     $ tests/test_rename_by_voice.py
 """
@@ -44,6 +47,26 @@ Run tests:
 #[silencedetect @ 0x564be015b400] silence_end: 199.932 | silence_duration: 5.55898
 #...
 
+# par2 considerations:
+#   $ par2 create -s4096 -r5 -n2 -u in.flac
+#   -> makes two par2 volumes of equal size, each 5% of the full size, using 4096b blocks
+#   (then remove in.flac.par2 - it's redundant with the vol par2)
+#   -> Want block size in multiples of 4096 to match disk blocks
+#   -> But there is a limit of how many blocks: probably 32K of them for the full file
+#   -> par2 exits with non-zero code if it has an error
+
+# flush FS caches for copy verification:
+# $ sync
+# $ echo 3 > /proc/sys/vm/drop_caches
+# https://linuxhint.com/clear_cache_linux/
+# But we need root...
+# sudo sh -c "/bin/echo 3 > /proc/sys/vm/drop_caches"
+#
+# -> To get around needing the admin password for this:
+# $ visudo /etc/sudoers.d/drop_caches
+# YOURUSERNAME     ALL = NOPASSWD: /sbin/sysctl vm.drop_caches=3
+# $ sudo /sbin/sysctl vm.drop_caches=3
+
 
 import sys
 import re
@@ -64,6 +87,7 @@ class Config:
     ffmpeg_silence_filter = "silencedetect=noise={threshold}dB:d={duration}" # precede with -af
     ffmpeg_silence_extra_args = "-f null -".split()
 
+    # Add filename as final parameter.  Gets number of seconds
     duration_cmd = "ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1".split()
 
 
@@ -385,7 +409,7 @@ def grok_year(word_list):
         # parse digit pair
         num = to_num(cur_word())
         if num is not None:
-            idx += 1  # TODO - this is premature!  Year may be 20 hundred!
+            idx += 1
 
             if num == 0 or 10 <= num < 30:
                 year += num
