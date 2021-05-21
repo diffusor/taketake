@@ -658,16 +658,26 @@ class Test_TimestampGrokError(unittest.TestCase):
         self.check("may forty first nineteen thirteen")
         self.check("5 oh clock august thirty fourth twenty two oh five")
 
+    def test_no_year(self):
+        self.regex = "^Could not find year in"
+        self.check("may first blah")
+        self.check("may first man")
+
     def test_year_parse_failure(self):
         self.regex = "^Expected 'thousand' after \d+ parsing year from"
         self.check("may first one")
 
-    def test_bad_year(self):
+    def test_year_parse_failure(self):
+        self.regex = "^Year parse error: missing second doublet after"
+        self.check("may first twenty one")
+
+    def test_year_out_of_range(self):
         self.regex = "^Parsed year \d+ from '.*' is out of range"
         self.check("may first twenty four thousand")
         self.check("may first eighteen oh four")
         self.check("5 oh clock august fourth thirty oh one")
         self.check("5 oh clock august fourth five")
+        self.check("may first oh")
 
     #def test_no_time(self):
     #    self.regex = "^Could not find year"

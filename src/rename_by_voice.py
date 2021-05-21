@@ -400,9 +400,6 @@ def grok_year(word_list):
         elif more_required:
             raise TimestampGrokError(f"Year parse error: missing second doublet after {year} in '{' '.join(word_list)}'")
 
-    if year is None:
-        raise TimestampGrokError(f"Failed to parse year from '{' '.join(word_list)}'")
-
     # Sanity check the year
     if year is not None and (year < 1900 or year > 2999):
         raise TimestampGrokError(f"Parsed year {year} from '{' '.join(word_list[:idx])}' is out of range")
