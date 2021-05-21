@@ -415,6 +415,7 @@ def grok_date_words(word_list):
     """Parses out the (year, month, day, and day_of_week)"""
     year, month, day, day_of_week = (None,) * 4
 
+    # Optional Day-of-week might come first
     if word_list and word_list[0] in TimestampWords.days:
         day_of_week = word_list.pop(0)
 
@@ -426,7 +427,7 @@ def grok_date_words(word_list):
     # Parse day-of-month:
     day = grok_day_of_month(word_list)
 
-    # Day-of-week might come in between the monthday and the year
+    # Optional Day-of-week might come in between the monthday and the year
     if word_list and word_list[0] in TimestampWords.days:
         day_of_week = word_list.pop(0)
 
@@ -445,20 +446,6 @@ def words_to_timestamp(text):
     # Sample recognized text for this TalkyTime setup:
     #   format:  ${hour}:${minute}, ${weekday}. ${month} ${day}, ${year}
     #   example: 19:38, Wednesday. May 19, 2021
-    #
-    #"zero oh one wednesday may nineteenth twenty twenty one", "00:01"
-    #"zero fifty one wednesday may nineteenth twenty twenty one", "00:51"
-    #"zero hundred wednesday may nineteenth twenty twenty one", "00:00"
-    #"five oh clock wednesday may nineteenth twenty twenty one", "05:00"
-    #"five oclock wednesday may nineteenth twenty twenty one", "05:00"
-    #"zero five wednesday may nineteenth twenty twenty one", "00:05"
-    #"five oh five wednesday may nineteenth twenty twenty one", "05:05"
-    #"nineteen hundred wednesday may nineteenth twenty twenty one", "19:00"
-    #"nineteen hundred hours wednesday may nineteenth twenty twenty one"
-    #"twenty twenty monday march eighteenth two thousand twenty why"
-    #"eleven fifteen sunday march twenty first two thousand twenty one"
-    #"thirteen hundred hours sunday march twenty first two thousand twenty one"
-    #"twenty one forty one thursday march twenty fifth two thousand twenty one"
 
     words = text.split()
 
@@ -477,7 +464,6 @@ def words_to_timestamp(text):
     else:
         raise TimestampGrokError(f"Failed to find a month name in '{text}'")
 
-    # TODO - catch IndexError: pop from empty list
     #print(f"  Time: {time_words}")
     hour, minute, second, extra = grok_time_words(time_words)
     #print(f"-> {hour:02d}:{minute:02d}:{second:02d} (extra: {extra})")

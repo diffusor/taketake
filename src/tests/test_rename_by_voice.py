@@ -7,6 +7,7 @@ import unittest
 import sys
 import os
 import inspect
+import datetime
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 parentdir = os.path.dirname(currentdir)
 sys.path.append(parentdir)
@@ -622,7 +623,13 @@ class Test_grok_date_words(check_word_list_grok):
         return f"{year} {month} {day} {day_of_week}"
 
     def test_2021_1_1_monday(self):
-        self
+        self.expected_value = "2021 1 1 monday"
+        self.check("january first monday twenty twenty one")
+        self.check("monday january first twenty twenty one")
+
+    def test_2021_1_1_None(self):
+        self.expected_value = "2021 1 1 None"
+        self.check("january first twenty twenty one")
 
 
 class Test_TimestampGrokError(unittest.TestCase):
@@ -678,6 +685,50 @@ class Test_TimestampGrokError(unittest.TestCase):
         self.check("5 oh clock august fourth thirty oh one")
         self.check("5 oh clock august fourth five")
         self.check("may first oh")
+
+
+class Test_words_to_timestamp(unittest.TestCase):
+    def check_impl(self, text, expect, expected_rem=""):
+        """Checks that the given string text decodes to self.expected_value,
+        with the given remaining words joined into a string passed in as expected_rem.
+        """
+        got_value, extra = rename_by_voice.words_to_timestamp(text)
+        got_rem = " ".join(extra)
+        self.assertEqual(got_value, expect)
+        self.assertEqual(got_rem, expected_rem)
+
+    def check(self, text, *expect_ymdhms):
+        dt = datetime.datetime(*expect_ymdhms)
+        self.check_impl(text, dt)
+        self.check_impl(text + " with stuff", dt, "with stuff")
+
+    def test_known_examples(self):
+        self.check("zero oh one wednesday may nineteenth twenty twenty one",
+                   2021, 5, 19, 0, 1, 0)
+        self.check("zero fifty one wednesday may nineteenth twenty twenty one",
+                   2021, 5, 19, 0, 51, 0)
+        self.check("zero hundred wednesday may nineteenth twenty twenty one",
+                   2021, 5, 19, 0, 0, 0)
+        self.check("five oh clock wednesday may nineteenth twenty twenty one",
+                   2021, 5, 19, 5, 0, 0)
+        self.check("five oclock wednesday may nineteenth twenty twenty one",
+                   2021, 5, 19, 5, 0, 0)
+        self.check("zero five wednesday may nineteenth twenty twenty one",
+                   2021, 5, 19, 5, 0)
+        self.check("five oh five wednesday may nineteenth twenty twenty one",
+                   2021, 5, 19, 5, 5, 0)
+        self.check("nineteen hundred wednesday may nineteenth twenty twenty one",
+                   2021, 5, 19, 19, 0, 0)
+        self.check("nineteen hundred hours wednesday may nineteenth twenty twenty one",
+                   2021, 5, 19, 19, 0, 0)
+        self.check("twenty twenty monday march eighteenth two thousand twenty why",
+                   2021, 3, 18, 20, 20, 0)
+        self.check("eleven fifteen sunday march twenty first two thousand twenty one",
+                   2021, 3, 21, 11, 15, 0)
+        self.check("thirteen hundred hours sunday march twenty first two thousand twenty one",
+                   2021, 3, 21, 13, 0, 0)
+        self.check("twenty one forty one thursday march twenty fifth two thousand twenty one",
+                   2021, 3, 25, 21, 41, 0)
 
     #def test_no_time(self):
     #    self.regex = "^Could not find year"
