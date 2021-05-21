@@ -271,30 +271,30 @@ def grok_day_of_month(word_list):
 
     day = None
     idx = 0
-    if word_list:
-        day = to_num(word_list[idx])
-        if day is None:
-            # Assume the word is probably an "Nth"-style ordinal
-            # and allow adding the "Nth" for the case where day <= 20
-            day = 0
-        else:
-            idx += 1
+    if not word_list:
+        raise TimestampGrokError(f"word_list is empty, no day of month found")
 
-        if len(word_list) > idx and word_list[idx] in TimestampWords.ordinals:
-            day += TimestampWords.ordinals[word_list[idx]]
-            idx += 1
-        else:
-            day = None # Did not find an Nth-style ordinal, give up
+    day = to_num(word_list[idx])
+    if day is None:
+        # Assume the word is probably an "Nth"-style ordinal
+        # and allow adding the "Nth" for the case where day <= 20
+        day = 0
+    else:
+        idx += 1
+
+    if len(word_list) > idx and word_list[idx] in TimestampWords.ordinals:
+        day += TimestampWords.ordinals[word_list[idx]]
+        idx += 1
+    else:
+        raise TimestampGrokError(f"Could not find Nth-like ordinal in {' '.join(word_list)}")
 
     # Sanity check the day
-    if day is not None and (day < 1 or day > 31):
-        print(f" * Ignoring invalid day '{day}'")
-        day = None
+    if day < 1 or day > 31:
+        raise TimestampGrokError(f"Parsed month day {day} from '{' '.join(word_list[:idx])}' is out of range")
 
     # Success, pop the words we used
-    if day is not None:
-        for i in range(idx):
-            word_list.pop(0)
+    for i in range(idx):
+        word_list.pop(0)
 
     return day
 
@@ -313,115 +313,109 @@ def grok_year(word_list):
         return word_list[idx] if len(word_list) > idx else None
 
     year = to_num(cur_word())
-    if year is not None:
-        idx += 1
-        if 1 <= year <= 3:
+    if year is None:
+        raise TimestampGrokError(f"Could not find year in '{' '.join(word_list)}'")
+
+    idx += 1
+    if 1 <= year <= 3:
+        # need a "thousand"
+        if cur_word() == "thousand":
+            idx += 1
             year *= 1000
-            # Parse as a normal number
-            # May need a "thousand", or could be individual digits
-            if cur_word() == "thousand":
-                idx += 1
-            if cur_word() == "and":
-                idx += 1
-            if cur_word() == "oh":
-                idx += 1
+        else:
+            raise TimestampGrokError(f"Expected 'thousand' after {year} parsing year from '{' '.join(word_list)}'")
 
-            # Double oh's finish the year
-            if cur_word() == "oh":
-                idx += 1
+        if cur_word() == "and":
+            idx += 1
 
-            else:
-
-                # parse hundreds or digit pair
-                num = to_num(cur_word())
-                if num is not None:
+        # parse hundreds or digit pair
+        num = to_num(cur_word())
+        if num is not None:
+            idx += 1
+            # could be hundreds, 10s, or ones
+            if num < 10:
+                # could be the final digit, or followed by "hundred"
+                if cur_word() == "hundred":
                     idx += 1
-                    # could be hundreds, 10s, or ones
-                    if num < 10:
-                        # could be the final digit, or followed by "hundred"
-                        if cur_word() == "hundred":
-                            idx += 1
-                            year += num * 100
-                            if cur_word() == "and":
-                                idx += 1
-                            if cur_word() == "oh":
-                                idx += 1
+                    year += num * 100
+                    if cur_word() == "and":
+                        idx += 1
 
-                            # tens and ones
-                            num = to_num(cur_word())
-                            if num is not None:
-                                idx += 1
-                                year += num
-                                num = to_num(cur_word())
-                                if num is not None and num < 10:
-                                    idx += 1
-                                    year += num
-
-                        else:
-                            year += num
-
-                    elif 10 <= num < 20:
-                        year += num
-
-                    elif num < 30:
+                    # tens and ones
+                    num = to_num(cur_word())
+                    if num is not None:
+                        idx += 1
                         year += num
                         num = to_num(cur_word())
                         if num is not None and num < 10:
                             idx += 1
                             year += num
 
-                    else:
-                        pass # probably this is not a year digit.  Like for 2000
+                else:
+                    year += num
 
-        elif 19 <= year <= 29:
-            num = to_num(cur_word())
-            if year > 19 and num is not None and num < 10:
-                idx += 1
+            elif 10 <= num < 20:
                 year += num
 
-            year *=100
-            if cur_word() == "hundred":
-                idx += 1
-            if cur_word() == "and":
-                idx += 1
-            if cur_word() == "oh":
-                idx += 1
-
-            # Double oh's finish the year
-            if cur_word() == "oh":
-                idx += 1
+            elif num < 30:
+                year += num
+                num = to_num(cur_word())
+                if num is not None and num < 10:
+                    idx += 1
+                    year += num
 
             else:
+                pass # probably this is not a year digit.  Like for 2000
 
-                # parse digit pair
+    elif 19 <= year <= 29:
+        # Parse as a pair-of-digit-doublets style year (e.g. "twenty twenty one")
+        num = to_num(cur_word())
+        if year > 19 and num is not None and num < 10:
+            idx += 1
+            year += num
+
+        year *=100
+        more_required = True
+        if cur_word() == "hundred":
+            idx += 1
+            more_required = False
+        if cur_word() == "and":
+            idx += 1
+
+        # parse digit pair
+        num = to_num(cur_word())
+        if num is not None:
+            idx += 1  # TODO - this is premature!  Year may be 20 hundred!
+
+            if num == 0 or 10 <= num < 30:
+                year += num
                 num = to_num(cur_word())
-                if num is not None:
-                    idx += 1  # TODO - this is premature!  Year may be 20 hundred!
+                if num is not None and num < 10:
+                    idx += 1
+                    year += num
 
-                    if num < 10:
-                        year += num
+            else:
+                year += num
 
-                    elif 10 <= num < 30:
-                        year += num
-                        num = to_num(cur_word())
-                        if num is not None and num < 10:
-                            idx += 1
-                            year += num
+        elif more_required:
+            raise TimestampGrokError(f"Year parse error: missing second doublet after {year} in '{' '.join(word_list)}'")
+
+    if year is None:
+        raise TimestampGrokError(f"Failed to parse year from '{' '.join(word_list)}'")
 
     # Sanity check the year
     if year is not None and (year < 1900 or year > 2999):
-        print(f" * Ignoring invalid year '{year}'")
-        year = None
+        raise TimestampGrokError(f"Parsed year {year} from '{' '.join(word_list[:idx])}' is out of range")
 
     # Success, pop the words we used
-    if year is not None:
-        for i in range(idx):
-            word_list.pop(0)
+    for i in range(idx):
+        word_list.pop(0)
 
     return year
 
 
 def grok_date_words(word_list):
+    """Parses out the (year, month, day, and day_of_week)"""
     year, month, day, day_of_week = (None,) * 4
 
     if word_list and word_list[0] in TimestampWords.days:
@@ -429,9 +423,17 @@ def grok_date_words(word_list):
 
     if word_list and word_list[0] in TimestampWords.months:
         month = TimestampWords.months[word_list.pop(0)] + 1
+    else:
+        assert False, f"Should have found a month name in '{' '.join(word_list)}'"
 
     # Parse day-of-month:
     day = grok_day_of_month(word_list)
+
+    # Day-of-week might come in between the monthday and the year
+    if word_list and word_list[0] in TimestampWords.days:
+        day_of_week = word_list.pop(0)
+
+    # Parse the year
     year = grok_year(word_list)
 
     return year, month, day, day_of_week, list(word_list)
@@ -468,13 +470,15 @@ def words_to_timestamp(text):
     month = 0
     date_words = []
 
-    # Find the day of week name
+    # Find the day of week name or the month name
     # This separates the timestamp from the month, day, and year
     for i, word in enumerate(words):
-        if word in TimestampWords.days:
+        if word in TimestampWords.days or word in TimestampWords.months:
             time_words = words[:i]
             date_words = words[i:]
             break
+    else:
+        raise TimestampGrokError(f"Failed to find a month name in '{text}'")
 
     # TODO - catch IndexError: pop from empty list
     #print(f"  Time: {time_words}")

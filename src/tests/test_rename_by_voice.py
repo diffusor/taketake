@@ -511,6 +511,7 @@ class Test_grok_year(check_word_list_grok):
         self.expected_value = 2000
         self.check("two thousand")
         self.check("twenty oh oh")
+        self.check("twenty hundred")
 
     def test_2001(self):
         self.expected_value = 2001
@@ -622,6 +623,56 @@ class Test_grok_date_words(check_word_list_grok):
 
     def test_2021_1_1_monday(self):
         self
+
+
+class Test_TimestampGrokError(unittest.TestCase):
+    def check(self, text):
+        with self.assertRaisesRegex(rename_by_voice.TimestampGrokError,
+                                    self.regex):
+            print(rename_by_voice.words_to_timestamp(text))
+
+    def test_no_month(self):
+        self.regex = "^Failed to find a month name in "
+        self.check("")
+        self.check("foo")
+        self.check("uh the man")
+        self.check("one eight fifty nine")
+
+    def test_no_day_of_month(self):
+        self.regex = "^word_list is empty, no day of month found"
+        self.check("may")
+        self.check("5 oh clock august")
+
+    def test_no_nth(self):
+        self.regex = "^Could not find Nth-like ordinal in"
+        self.check("eighteen twenty one may twenty twenty one")
+        self.check("eighteen twenty one thirteenth of may twenty twenty one")
+
+    def test_no_day_of_month(self):
+        self.regex = "^Could not find year"
+        self.check("may first")
+        self.check("5 oh clock august fourth")
+
+    def test_bad_month_day(self):
+        self.regex = r"^Parsed month day \d+ from .* is out of range"
+        self.check("may forty first nineteen thirteen")
+        self.check("5 oh clock august thirty fourth twenty two oh five")
+
+    def test_year_parse_failure(self):
+        self.regex = "^Expected 'thousand' after \d+ parsing year from"
+        self.check("may first one")
+
+    def test_bad_year(self):
+        self.regex = "^Parsed year \d+ from '.*' is out of range"
+        self.check("may first twenty four thousand")
+        self.check("may first eighteen oh four")
+        self.check("5 oh clock august fourth thirty oh one")
+        self.check("5 oh clock august fourth five")
+
+    #def test_no_time(self):
+    #    self.regex = "^Could not find year"
+    #    self.check("may first nineteen thirteen")
+    #    self.check("5 oh clock august fourth twenty two oh five")
 
 if __name__ == '__main__':
     unittest.main()
