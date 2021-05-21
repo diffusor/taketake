@@ -282,6 +282,7 @@ class Test_grok_time_words(check_word_list_grok):
         self.check("oh oh twenty three oh oh")
         self.check("zero zero twenty three oh zero")
         self.check("zero twenty three oh zero")
+        self.check("zero twenty three")
 
     def test_0_23_23(self):
         self.expected_value = "0 23 23"
@@ -343,6 +344,157 @@ class Test_grok_time_words(check_word_list_grok):
         self.check("twenty three twenty three twenty three")
         self.check("twenty three hour and twenty three minutes twenty three seconds")
         self.check("twenty three hour and twenty three minutes twenty three")
+
+    # twenty threes and ones
+    def test_0_1_23(self):
+        self.expected_value = "0 1 23"
+        self.check("zero hundred one minute and twenty three seconds")
+        self.check("oh oh oh one twenty three")
+        self.check("zero hours one minute and twenty three seconds")
+        self.check("zero hundred hours one minute and twenty three seconds")
+        self.check("zero hours and one minute twenty three")
+
+    def test_1_0_23(self):
+        self.expected_value = "1 0 23"
+        self.check("one hundred zero minutes and twenty three seconds")
+        self.check("oh one oh oh twenty three")
+        self.check("one hour zero minutes and twenty three seconds")
+        self.check("one hundred hours zero minutes and twenty three seconds")
+        self.check("one hour and zero minutes twenty three")
+
+    def test_1_1_23(self):
+        self.expected_value = "1 1 23"
+        self.check("one hundred one minute and twenty three seconds")
+        self.check("oh one oh one twenty three")
+        self.check("one hour one minute and twenty three seconds")
+        self.check("one hundred hours one minute and twenty three seconds")
+        self.check("one hour and one minute twenty three")
+
+    def test_0_23_1(self):
+        self.expected_value = "0 23 1"
+        self.check("zero hundred twenty three oh one")
+        self.check("zero hundred hours twenty three zero one")
+        self.check("zero hundred hours and twenty three and one")
+        self.check("twenty three minutes and one second")
+        self.check("twenty three minutes oh one")
+        self.check("oh oh twenty three minutes oh one")
+        self.check("oh oh twenty three oh one")
+        self.check("zero zero twenty three oh one")
+        self.check("zero twenty three oh one")
+
+    def test_1_23_0(self):
+        self.expected_value = "1 23 0"
+        self.check("one hundred twenty three")
+        self.check("one hundred hours twenty three")
+        self.check("one hundred hours and twenty three")
+        self.check("one hour twenty three minutes")
+        self.check("one hundred twenty three minutes and")
+        self.check("one hour twenty three minutes and zero seconds")
+        self.check("one hour twenty three minutes oh oh")
+        self.check("oh one twenty three minutes oh oh")
+        self.check("oh one twenty three oh oh")
+        self.check("zero one twenty three oh zero")
+        self.check("one twenty three oh zero")
+        self.check("one twenty three")
+        self.check("one twenty three and zero seconds")
+
+    def test_1_23_1(self):
+        self.expected_value = "1 23 1"
+        self.check("one hundred twenty three oh one")
+        self.check("one hundred hours twenty three oh one")
+        self.check("one hundred hours and twenty three and one")
+        self.check("one hundred twenty three minutes and one second")
+        self.check("one hour twenty three minutes and one second")
+        self.check("one hour twenty three minutes oh one")
+        self.check("oh one twenty three minutes oh one")
+        self.check("oh one twenty three oh one")
+        self.check("zero one twenty three oh one")
+        self.check("one twenty three oh one")
+        self.check("one twenty three and one second")
+
+
+    def test_1_23_23(self):
+        self.expected_value = "1 23 23"
+        self.check("one hundred twenty three twenty three")
+        self.check("one hundred hours twenty three and twenty three seconds")
+        self.check("one hour twenty three minutes twenty three seconds")
+        self.check("one hour twenty three minutes and twenty three seconds")
+        self.check("one hour twenty three minutes twenty three")
+        self.check("oh one twenty three minutes twenty three")
+        self.check("oh one twenty three twenty three")
+        self.check("one twenty three twenty three")
+        self.check("one twenty three and twenty three seconds")
+
+    def test_23_0_1(self):
+        self.expected_value = "23 0 1"
+        self.check("twenty three hour zero minutes and one second")
+        self.check("twenty three hours zero minutes one second")
+        self.check("twenty three hundred hours zero minutes one second")
+        self.check("twenty three hours one second")
+        self.check("twenty three hours and one second")
+        self.check("twenty three hundred and one second")
+        self.check("twenty three hundred hours one second")
+        self.check("twenty three hundred hours oh oh oh one")
+        self.check("twenty three hundred oh oh oh one")
+        self.check("twenty three oh clock and one second")
+        self.check("twenty three oh oh oh one")
+        self.check("twenty three hour and zero minutes one second")
+        self.check("twenty three hour and zero minutes oh one")
+
+    def test_23_1_0(self):
+        self.expected_value = "23 1 0"
+        self.check("twenty three hours one minute")
+        self.check("twenty three hours one minute and zero seconds")
+        self.check("twenty three hours one minute zero seconds")
+        self.check("twenty three hundred oh one")
+        self.check("twenty three hundred hours and one minute")
+        self.check("twenty three oh one oh clock")
+        self.check("twenty three oh one o'clock")
+        self.check("twenty three hundred oh one")
+        self.check("twenty three oh one oh oh")
+        self.check("twenty three hours and one minute zero seconds")
+        self.check("twenty three hours and one minute oh oh")
+
+    def test_23_1_1(self):
+        self.expected_value = "23 1 1"
+        self.check("twenty three hour one minute and one second")
+        self.check("twenty three hours one minute one second")
+        self.check("twenty three hundred hours one minute one second")
+        self.check("twenty three hours one minute and one second")
+        self.check("twenty three hundred one minute and one second")
+        self.check("twenty three hundred hours oh one oh one")
+        self.check("twenty three hundred oh one oh one")
+        self.check("twenty three oh one and one second")
+        self.check("twenty three oh one oh one")
+        self.check("twenty three oh one o'clock oh one")
+        self.check("twenty three oh one oh clock oh one")
+        self.check("twenty three hours and one minute one second")
+        self.check("twenty three hours and one minute oh one")
+
+    def test_23_1_23(self):
+        self.expected_value = "23 1 23"
+        self.check("twenty three hour one minute and twenty three seconds")
+        self.check("twenty three hour one minute twenty three seconds")
+        self.check("twenty three hour one minute and twenty three seconds")
+        self.check("twenty three hundred hours one minute and twenty three seconds")
+        self.check("twenty three hour and one minute twenty three seconds")
+        self.check("twenty three hour and one minute twenty three")
+        self.check("twenty three oh one twenty three")
+        self.check("twenty three oh one twenty three seconds")
+        self.check("twenty three oh one and twenty three seconds")
+
+    def test_23_23_1(self):
+        self.expected_value = "23 23 1"
+        self.check("twenty three hundred hours twenty three oh one")
+        self.check("twenty three oh clock twenty three and one second")
+        self.check("twenty three o'clock twenty three oh one")
+        self.check("twenty three o'clock twenty three and one second")
+        self.check("twenty three hour twenty three minutes and one second")
+        self.check("twenty three hour twenty three minutes one second")
+        self.check("twenty three hundred hours and twenty three minutes oh one")
+        self.check("twenty three twenty three oh one")
+        self.check("twenty three hour and twenty three minutes one second")
+        self.check("twenty three hour and twenty three minutes oh one")
 
 
 class Test_grok_year(check_word_list_grok):
@@ -461,6 +613,15 @@ class Test_grok_year(check_word_list_grok):
         self.check("two thousand and one hundred and twenty nine")
         self.check("twenty one twenty nine")
 
+
+class Test_grok_date_words(check_word_list_grok):
+    def grok_fn(self, word_list):
+        year, month, day, day_of_week, rest = rename_by_voice.grok_date_words(word_list)
+        self.assertEqual(word_list, rest)
+        return f"{year} {month} {day} {day_of_week}"
+
+    def test_2021_1_1_monday(self):
+        self
 
 if __name__ == '__main__':
     unittest.main()
