@@ -126,8 +126,8 @@ class Config:
     # Add filename as final parameter.  Gets number of seconds
     duration_cmd = "ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1".split()
 
-    timestamp_fmt_no_seconds   = "%Y%m%d-%H%M"
-    timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S"
+    timestamp_fmt_no_seconds   = "%Y%m%d-%H%M_%a"
+    timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S_%a"
 
 # Exceptions
 class InvalidMediaFile(RuntimeError):
@@ -528,6 +528,14 @@ def grok_date_words(word_list):
     # Parse the year
     year = grok_year(word_list)
 
+    if day_of_week is not None:
+        # Sanity check that the day of week lines up with the year/month/day
+        date = datetime.date(year=year, month=month, day=day)
+        calc_weekday = date.strftime("%A").lower()
+        if calc_weekday != day_of_week:
+            print(f"*** Warning: Calculated weekday '{calc_weekday}'"
+                  f" doesn't match parsed weekday '{day_of_week}'")
+
     return year, month, day, day_of_week, list(word_list)
 
 
@@ -590,8 +598,6 @@ def get_timestamp_from_audio(f, file_duration):
     text = speech_to_text(f, start, duration)
     print(f'> {text!r}')
     return words_to_timestamp(text)
-
-    return timestamp, extra
 
 
 def fmt_duration(duration):
