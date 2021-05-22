@@ -146,6 +146,7 @@ def detect_silence(f, threshold_dbfs=-50):
 
     res = subprocess.run(args, capture_output=True, universal_newlines=True)
     detected_lines = [line for line in res.stderr.splitlines() if line.startswith('[silencedetect')]
+
     offsets = [float(line.split()[-1]) for line in detected_lines if "silence_start" in line]
     durations = [float(line.split()[-1]) for line in detected_lines if "silence_end" in line]
     return list(zip(offsets, durations))
@@ -158,6 +159,8 @@ def invert_silences(silences, file_scan_duration_s):
 
     # Add on an entry starting at the file_scan_duration_s to catch any
     # non-silent end bits.
+    # TODO this has the odd effect of adding extra time onto short files
+    # Should take full duration to fix this.
     for start, duration in itertools.chain(silences, ([file_scan_duration_s, 0.0],)):
         if start > prev_silence_end:
             non_silences.append((prev_silence_end, start - prev_silence_end))
@@ -166,13 +169,16 @@ def invert_silences(silences, file_scan_duration_s):
     return non_silences
 
 
+class NoSuitableAudioSpan(RuntimeError):
+    pass
+
 def find_likely_audio_span(f):
     """Searches the file f for regions of silence.
 
     Returns the start offset and duration in seconds of the first span of
     non-silent audio that is long enough.
 
-    Returns None if no likely candidate was found.
+    Raises NoSuitableAudioSpan if no likely candidate was found.
     """
 
     silences = detect_silence(f)
@@ -185,10 +191,15 @@ def find_likely_audio_span(f):
 
     for start, duration in non_silences:
         if duration >= Config.min_talk_duration_s:
+            # Expand the window a bit to allow for attack and decay below the
+            # silence threshold.
+            start = max(0, start - Config.talk_attack_s)
+            duration += Config.talk_attack_s + Config.talk_release_s
+            duration = min(duration, Config.max_talk_duration_s)
             return (start, duration)
     else:
-        return None
-    #raise RuntimeError(f"Could not find any span of audio greater than {Config.min_talk_duration_s}s in file '{f}'")
+        raise NoSuitableAudioSpan(f"Could not find any span of audio greater than "
+                                  f"{Config.min_talk_duration_s}s in file '{f}'")
 
 
 #============================================================================
@@ -544,15 +555,9 @@ def words_to_timestamp(text):
 
 def process_file(f):
     print(f"Scanning '{f}'")
-    span = find_likely_audio_span(f)
 
-    if span is not None:
-        start, duration = span
-        # Expand the window a bit to allow for attack and decay below the
-        # silence threshold.
-        start = max(0, start - Config.talk_attack_s)
-        duration += Config.talk_attack_s + Config.talk_release_s
-        duration = min(duration, Config.max_talk_duration_s)
+    try:
+        start, duration = find_likely_audio_span(f)
         print(f"Parsing {duration:.2f}s of audio starting at offset {start:.2f}s in '{f}'...")
         text = speech_to_text(f, start, duration)
         print(f'> {text!r}')
@@ -560,8 +565,9 @@ def process_file(f):
             timestamp, extra = words_to_timestamp(text)
             print(f" -> {timestamp}\n -> {' '.join(extra)}")
         except TimestampGrokError as e:
-            print(f"No speech found: {e}")
-    else:
+            print(f"No timestamp found: {e}")
+
+    except NoSuitableAudioSpan:
         print("No likely span of audio found")
 
     print()
