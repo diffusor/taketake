@@ -750,5 +750,56 @@ class Test_words_to_timestamp(unittest.TestCase):
         self.check("5 oh clock august fourth twenty two oh five",
                    2205, 8, 4, 5)
 
+
+class Test_fmt_duration(unittest.TestCase):
+    def check(self, duration, expect):
+        formatted = rename_by_voice.fmt_duration(duration)
+        self.assertEqual(formatted, expect)
+
+    def test_seconds(self):
+        self.check(0, "0s")
+        self.check(0.5, "0s")
+        self.check(1.49, "1s")
+        self.check(1.5, "2s")
+        self.check(59, "59s")
+
+    def test_minutes_no_seconds(self):
+        self.check(60, "1m")
+        self.check(60+60, "2m")
+        self.check(60*59, "59m")
+
+    def test_minutes_with_seconds(self):
+        self.check(61, "1m1s")
+        self.check(60+59, "1m59s")
+        self.check(60+60+1, "2m1s")
+        self.check(60*60-1, "59m59s")
+
+    def test_hours_no_minutes_no_seconds(self):
+        self.check(3600, "1h")
+        self.check(3600*2, "2h")
+        self.check(3600*60, "60h")
+
+    def test_hours_no_minutes_with_seconds(self):
+        self.check(3600+1, "1h1s")
+        self.check(3600+59, "1h59s")
+        self.check(3600*2+1, "2h1s")
+        self.check(3600*60+59, "60h59s")
+
+    def test_hours_with_minutes_no_seconds(self):
+        self.check(3600+1*60, "1h1m")
+        self.check(3600+59*60, "1h59m")
+        self.check(3600*2+1*60, "2h1m")
+        self.check(3600*60+59*60, "60h59m")
+
+    def test_hours_with_minutes_and_seconds(self):
+        self.check(3600+1*60+1, "1h1m1s")
+        self.check(3600+59*60+1, "1h59m1s")
+        self.check(3600+59*60+59, "1h59m59s")
+        self.check(3600*2+1*60+1, "2h1m1s")
+        self.check(3600*2+1*60+59, "2h1m59s")
+        self.check(3600*60+59*60+1, "60h59m1s")
+        self.check(3600*60+59*60+59, "60h59m59s")
+
+
 if __name__ == '__main__':
     unittest.main()

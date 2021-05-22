@@ -126,6 +126,9 @@ class Config:
     # Add filename as final parameter.  Gets number of seconds
     duration_cmd = "ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1".split()
 
+    timestamp_fmt_no_seconds   = "%Y%m%d-%H%M"
+    timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S"
+
 # Exceptions
 class InvalidMediaFile(RuntimeError):
     pass
@@ -590,14 +593,66 @@ def get_timestamp_from_audio(f, file_duration):
 
     return timestamp, extra
 
-def get_new_filename(f):
+
+def fmt_duration(duration):
+    """Returns a string of the form XhYmZs given a duration in seconds.
+
+    The duration s is first rounded to the nearest second.
+    If any unit is 0, omit it, except if the duration is zero return 0s.
+    """
+
+    parts = []
+    duration = round(duration)     # now an int
+
+    # The unit_map dict maps unit names to their multiple of the next unit
+    # The final unit's multiple must be None.
+    unit_map = dict(s=60, m=60, h=None)
+
+    # To include days:
+    #unit_map = dict(s=60, m=60, h=24, d=None)
+
+    # To include milliseconds, multiply duration by 1000 prior to rounding.
+    # Its probably better to just do decimal seconds instead.
+    #unit_map = dict(ms=1000, s=60, m=60, h=None)
+
+    for unit, multiple in unit_map.items():
+        if multiple is None:
+            value = duration
+        else:
+            value = duration % multiple
+            duration //= multiple  # int division
+        if value or (not parts and duration == 0):
+            parts.append(f"{value}{unit}")
+
+    parts.reverse()
+    return ''.join(parts)
+
+
+def get_new_filename(f, inst):
     """Returns a new filename with the timestamp and extra words embedded"""
 
     file_duration = get_file_duration(f)
     print(f"Listening for timestamp info in '{f}' ({file_duration:.2f}s)")
     try:
         timestamp, extra = get_timestamp_from_audio(f, file_duration)
-        print(f" -> {timestamp}\n -> {' '.join(extra)}")
+
+        # Format the timestamp
+        tstr = timestamp.strftime(
+                Config.timestamp_fmt_with_seconds if timestamp.second
+                else Config.timestamp_fmt_no_seconds)
+
+        # Format the duration
+        dstr = fmt_duration(file_duration)
+
+        # Format the notes
+        if extra:
+            notes = " ".join(extra) + "_"
+        else:
+            notes = ""
+
+        fname = f"{inst}_{tstr}_{dstr}_{notes}{f}"
+
+        print(f" -> {fname}")
 
     except (NoSuitableAudioSpan, TimestampGrokError) as e:
         print(f"No timestamp found: {e}")
@@ -608,7 +663,7 @@ def process_file(f):
 
 def main():
     for f in sys.argv[1:]:
-        get_new_filename(f)
+        get_new_filename(f, "test")
         print()
 
     return 0
