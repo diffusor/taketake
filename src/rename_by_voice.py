@@ -574,33 +574,42 @@ def words_to_timestamp(text):
 # File processing
 #============================================================================
 
-def process_file(f):
-    print(f"Scanning '{f}'")
+def get_timestamp_from_audio(f, file_duration):
+    """Returns a timestamp and extra string data from the beginning speech in f.
 
-    f_duration = get_file_duration(f)
-    scan_duration = min(f_duration, Config.file_scan_duration_s)
-    print(f"* Examining the first {scan_duration:.2f} seconds of {f_duration:.2f}")
+    Raises NoSuitableAudioSpan or TimestampGrokError if processing fails.
+    """
 
+    scan_duration = min(file_duration, Config.file_scan_duration_s)
+
+    start, duration = find_likely_audio_span(f, scan_duration)
+    print(f"* Processing {duration:.2f}s of audio starting at offset {start:.2f}s in '{f}'...")
+    text = speech_to_text(f, start, duration)
+    print(f'> {text!r}')
+    return words_to_timestamp(text)
+
+    return timestamp, extra
+
+def get_new_filename(f):
+    """Returns a new filename with the timestamp and extra words embedded"""
+
+    file_duration = get_file_duration(f)
+    print(f"Listening for timestamp info in '{f}' ({file_duration:.2f}s)")
     try:
-        start, duration = find_likely_audio_span(f, scan_duration)
-        print(f"* Processing {duration:.2f}s of audio starting at offset {start:.2f}s in '{f}'...")
-        text = speech_to_text(f, start, duration)
-        print(f'> {text!r}')
-        try:
-            timestamp, extra = words_to_timestamp(text)
-            print(f" -> {timestamp}\n -> {' '.join(extra)}")
-        except TimestampGrokError as e:
-            print(f"No timestamp found: {e}")
+        timestamp, extra = get_timestamp_from_audio(f, file_duration)
+        print(f" -> {timestamp}\n -> {' '.join(extra)}")
 
-    except NoSuitableAudioSpan:
-        print("No likely span of audio found")
+    except (NoSuitableAudioSpan, TimestampGrokError) as e:
+        print(f"No timestamp found: {e}")
 
-    print()
 
+def process_file(f):
+    pass
 
 def main():
     for f in sys.argv[1:]:
-        process_file(f)
+        get_new_filename(f)
+        print()
 
     return 0
 
