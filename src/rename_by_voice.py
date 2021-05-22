@@ -112,11 +112,12 @@ from word2number import w2n
 class Config:
     silence_threshold_dbfs = -55    # Audio above this threshold is not considered silence
     silence_min_duration_s = 0.5    # Silence shorter than this is not detected
-    file_scan_duration_s = 60       # -t (time duration).  Note -ss is startseconds
+    file_scan_duration_s = 90       # -t (time duration).  Note -ss is startseconds
     min_talk_duration_s = 2.5       # Only consider non-silence intervals longer than this for timestamps
     max_talk_duration_s = 20        # Do recognition on up to this many seconds of audio at most
     talk_attack_s = 0.2             # Added to the start offset to avoid clipping the start of talking
     talk_release_s = 0.2            # Added to the duration to avoid clipping the end of talking
+    epsilon_s = 0.01                # When comparing times, consider +/- epsilon_s the same
 
     ffmpeg_cmd = "ffmpeg"
     ffmpeg_silence_filter = "silencedetect=noise={threshold}dB:d={duration}" # precede with -af
@@ -125,12 +126,29 @@ class Config:
     # Add filename as final parameter.  Gets number of seconds
     duration_cmd = "ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1".split()
 
+# Exceptions
+class InvalidMediaFile(RuntimeError):
+    pass
 
 #============================================================================
 # Audio file processing
 #============================================================================
 
-def detect_silence(f, threshold_dbfs=-50):
+def get_file_duration(f):
+    """Use ffprobe to determine how many seconds f plays for."""
+    args = list(Config.duration_cmd)
+    args.append(f)
+    res = subprocess.run(args, capture_output=True, universal_newlines=True, check=True)
+
+    try:
+        duration = float(res.stdout)
+    except ValueError as e:
+        raise InvalidMediaFile(f"Could not parse duration stdout from '{' '.join(args)}':\n  '{res.stdout}'") from e
+
+    return duration
+
+
+def detect_silence(f):
     """Use ffmpeg silencedetect to find all silent segments.
 
     Return a list of (start, duration) pairs."""
@@ -144,7 +162,7 @@ def detect_silence(f, threshold_dbfs=-50):
     args.append("-i")
     args.append(f)
 
-    res = subprocess.run(args, capture_output=True, universal_newlines=True)
+    res = subprocess.run(args, capture_output=True, universal_newlines=True, check=True)
     detected_lines = [line for line in res.stderr.splitlines() if line.startswith('[silencedetect')]
 
     offsets = [float(line.split()[-1]) for line in detected_lines if "silence_start" in line]
@@ -153,16 +171,19 @@ def detect_silence(f, threshold_dbfs=-50):
 
 
 def invert_silences(silences, file_scan_duration_s):
-    """Return a list of (start, duration) pairs of spans that are not silence."""
+    """Return a list of (start, duration) pairs of spans that are not silence.
+
+    file_scan_duration_s should be capped at the actual duration of the file
+    to avoid spurious extra ranges being added at the end.
+    """
+
     non_silences = []
     prev_silence_end = 0.0
 
     # Add on an entry starting at the file_scan_duration_s to catch any
     # non-silent end bits.
-    # TODO this has the odd effect of adding extra time onto short files
-    # Should take full duration to fix this.
     for start, duration in itertools.chain(silences, ([file_scan_duration_s, 0.0],)):
-        if start > prev_silence_end:
+        if start > prev_silence_end + Config.epsilon_s:
             non_silences.append((prev_silence_end, start - prev_silence_end))
         prev_silence_end = start + duration
 
@@ -172,7 +193,7 @@ def invert_silences(silences, file_scan_duration_s):
 class NoSuitableAudioSpan(RuntimeError):
     pass
 
-def find_likely_audio_span(f):
+def find_likely_audio_span(f, file_scan_duration_s):
     """Searches the file f for regions of silence.
 
     Returns the start offset and duration in seconds of the first span of
@@ -185,7 +206,7 @@ def find_likely_audio_span(f):
     #print("Silences:")
     #for s in silences: print(f"{s[0]} - {s[0] + s[1]} ({s[1]}s duration)")
 
-    non_silences = invert_silences(silences, Config.file_scan_duration_s)
+    non_silences = invert_silences(silences, file_scan_duration_s)
     #print("Non silences:")
     #for s in non_silences: print(f"{s[0]} - {s[0] + s[1]} ({s[1]}s duration)")
 
@@ -556,9 +577,13 @@ def words_to_timestamp(text):
 def process_file(f):
     print(f"Scanning '{f}'")
 
+    f_duration = get_file_duration(f)
+    scan_duration = min(f_duration, Config.file_scan_duration_s)
+    print(f"* Examining the first {scan_duration:.2f} seconds of {f_duration:.2f}")
+
     try:
-        start, duration = find_likely_audio_span(f)
-        print(f"Parsing {duration:.2f}s of audio starting at offset {start:.2f}s in '{f}'...")
+        start, duration = find_likely_audio_span(f, scan_duration)
+        print(f"* Processing {duration:.2f}s of audio starting at offset {start:.2f}s in '{f}'...")
         text = speech_to_text(f, start, duration)
         print(f'> {text!r}')
         try:
