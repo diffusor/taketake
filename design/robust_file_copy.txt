@@ -18,7 +18,8 @@ A. For all wav files to copy:
 6 convert to flac as .dest_filename.in_progress (via wav symlink)
 7 rename to dest_filename
   (this also indicates the copy is complete)
-8 generate 2x 2% par2 files of flac file
+8 touch file mtime (set last modified time to timestamp)
+9 generate 2x 2% par2 files of flac file
 
 B. Once:
 * flush FS caches
@@ -127,8 +128,9 @@ audio001.wav.flac -> inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
 inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
 inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.orig -> audio001.wav
 
+A8 - timestamp update (set mtime)
 
-A8 - flac par2s
+A9 - flac par2s
 ==
 
 src/
