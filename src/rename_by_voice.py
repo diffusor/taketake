@@ -67,39 +67,6 @@ Run tests:
 # YOURUSERNAME     ALL = NOPASSWD: /sbin/sysctl vm.drop_caches=3
 # $ sudo /sbin/sysctl vm.drop_caches=3
 
-# USB drive transfer process
-# Design goals:
-# * Don't modify the USB contents until data has been copied off and verified
-# * Do post-copy verification after flushing filesystem caches
-#
-# Steps:
-# For all wav files to copy:
-# * make symlink from dest folder to wav file on USB drive
-# * generate 2% par2 file of wav file
-# * extract timestamp and duration from wave file (speech_to_text, words_to_timestamp)
-# * convert to flac, named with timestamp, notes, and duration
-# * generate 2x 5% par2 files of flac file
-#
-# Once:
-# * flush FS caches
-#
-# For all copied wav files:
-# * Verify wav par2 against wav symlink (testing copy on USB drive)
-# * Verify flac file against both of its par2 files
-# * Convert flac back to wav temporarily and verify against wav par2
-# * Delete temporary wav
-#
-# For all copied wav files:
-# * Delete wav file from USB device
-# * Delete wav par2 and symlink
-# * Copy flac and its par2 files to the USB drive (in a subdir)
-#
-# Once:
-# * flush FS caches
-#
-# For all copied wav files:
-# * On USB: Verify all copied flac files against both of their par2 files
-
 import sys
 import re
 import itertools
