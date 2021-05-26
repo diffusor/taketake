@@ -86,15 +86,85 @@ class Config:
     talk_release_s = 0.2            # Added to the duration to avoid clipping the end of talking
     epsilon_s = 0.01                # When comparing times, consider +/- epsilon_s the same
 
-    ffmpeg_cmd = "ffmpeg"
-    ffmpeg_silence_filter = "silencedetect=noise={threshold}dB:d={duration}" # precede with -af
-    ffmpeg_silence_extra_args = "-f null -".split()
-
-    # Add filename as final parameter.  Gets number of seconds
-    duration_cmd = "ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1".split()
-
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M_%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S_%a"
+
+class ExtCmdListMeta(type):
+    def __getattr__(cls, name):
+        return cls.cmds[name]
+
+class ExtCmd(metaclass=ExtCmdListMeta):
+    """Class for describing external commands."""
+    cmds = {}
+
+    def __init__(self, name, doc, template, **kwargs):
+        self.name = name
+        self.doc = doc
+        self.template = template
+        self.params = kwargs
+        ExtCmd.cmds[name] = self
+
+    def construct_args(self, **kwargs):
+        """Returns a list of parameters constructed from the kwargs injected into the command template."""
+        return [arg.format(**kwargs) for arg in self.template.split()]
+
+
+ExtCmd(
+    "ffmpeg_silence_detect",
+    "Detects spans of silence in a media file.",
+    "ffmpeg -t {length} -i {file} -af silencedetect=noise={threshold}dB:d={duration} -f null -",
+
+    file="The media files to process",
+    length="Number of seconds to process, starting at 0 or -ss",
+    threshold="dBfs decibels below which the audio is considered silent",
+    duration="The minimum duration in seconds for a span to remain below the threshold for the span to be considered silence.",
+)
+
+ExtCmd(
+    "get_media_duration",
+    "Returns duration of the given file in seconds as a float.",
+    "ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {file}",
+
+    file="The media file to query",
+)
+
+ExtCmd(
+    "flac_encode",
+    "Encodes wav file to flac.",
+    "flac {infile} -o {outfile}",
+
+    infile="The input wav file",
+    outfile="The output flac file",
+)
+
+ExtCmd(
+    "flac_decode",
+    "Decodes flac file to wav file.",
+    "flac -d {infile} -o {outfile}",
+
+    infile="The input flac file",
+    outfile="The output wav file",
+)
+
+ExtCmd(
+    "par2_create",
+    "Constructs par2 volume files for the given file.",
+    "par2 create -s{blocksize} -r{redundance} -n{numfiles} -u {infile}",
+
+    infile="The input file to generate par2 volumes for",
+    blocksize="The number of bytes for each block.  Multiples of 4K is good for disks.",
+    redundance="The percent file size to target for each par2 file.",
+    numfiles="Number of par2 volume files to generate.",
+)
+
+ExtCmd(
+    "par2_verify",
+    "Verifies the file(s) covered by the given par2 file.",
+    "par2 verify {parfile}",
+
+    parfile="The par2 file to check",
+)
+
 
 # Exceptions
 class InvalidMediaFile(RuntimeError):
@@ -104,10 +174,29 @@ class InvalidMediaFile(RuntimeError):
 # Audio file processing
 #============================================================================
 
+def flac_encode(wav_fpath, flac_fpath):
+    #flac --preserve-modtime 7d29t001.WAV -o 7d29t001.flac
+    pass
+
+def flac_decode(flac_fpath, wav_fpath):
+    pass
+
+def par2_create(f, num_par2_files, percent_redundancy):
+    pass
+
+def par2_verify(f):
+    pass
+
+def flush_fs():
+    pass
+
+def set_mtime():
+    # os.utime( dt.timestamp )
+    pass
+
 def get_file_duration(f):
     """Use ffprobe to determine how many seconds f plays for."""
-    args = list(Config.duration_cmd)
-    args.append(f)
+    args = ExtCmd.get_media_duration.construct_args(file=f)
     res = subprocess.run(args, capture_output=True, universal_newlines=True, check=True)
 
     try:
@@ -122,15 +211,12 @@ def detect_silence(f):
     """Use ffmpeg silencedetect to find all silent segments.
 
     Return a list of (start, duration) pairs."""
-    args = [Config.ffmpeg_cmd]
-    args.append("-af")
-    args.append(Config.ffmpeg_silence_filter.format(threshold = Config.silence_threshold_dbfs,
-                                                    duration = Config.silence_min_duration_s))
-    args.extend(Config.ffmpeg_silence_extra_args)
-    args.append("-t")
-    args.append(str(Config.file_scan_duration_s))
-    args.append("-i")
-    args.append(f)
+
+    args = ExtCmd.ffmpeg_silence_detect.construct_args(
+            file=f,
+            length=Config.file_scan_duration_s,
+            threshold=Config.silence_threshold_dbfs,
+            duration=Config.silence_min_duration_s)
 
     res = subprocess.run(args, capture_output=True, universal_newlines=True, check=True)
     detected_lines = [line for line in res.stderr.splitlines() if line.startswith('[silencedetect')]
