@@ -2,7 +2,7 @@
 
 import unittest
 
-# Import rename_by_voice.py from the parent dir for in-situ testing
+# Import taketake from the parent dir for in-situ testing
 # From https://codeolives.com/2020/01/10/python-reference-module-in-parent-directory/
 import sys
 import os
@@ -11,7 +11,7 @@ import datetime
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 parentdir = os.path.dirname(currentdir)
 sys.path.append(parentdir)
-import rename_by_voice
+import taketake
 
 class check_word_list_grok(unittest.TestCase):
     """Base class for classes that test specific grok functions.
@@ -37,7 +37,7 @@ class check_word_list_grok(unittest.TestCase):
 
 class Test_grok_digit_pair(check_word_list_grok):
     def grok_fn(self, word_list):
-        return rename_by_voice.grok_digit_pair(word_list)
+        return taketake.grok_digit_pair(word_list)
 
     def test_0(self):
         self.expected_value = 0
@@ -81,7 +81,7 @@ class Test_grok_digit_pair(check_word_list_grok):
 
 class Test_grok_time_words(check_word_list_grok):
     def grok_fn(self, word_list):
-        hour, minute, second, rest = rename_by_voice.grok_time_words(word_list)
+        hour, minute, second, rest = taketake.grok_time_words(word_list)
         self.assertEqual(word_list, rest)
         return f"{hour} {minute} {second}"
 
@@ -500,7 +500,7 @@ class Test_grok_time_words(check_word_list_grok):
 
 class Test_grok_year(check_word_list_grok):
     def grok_fn(self, word_list):
-        return rename_by_voice.grok_year(word_list)
+        return taketake.grok_year(word_list)
 
     def test_1900(self):
         self.expected_value = 1900
@@ -618,14 +618,14 @@ class Test_grok_year(check_word_list_grok):
 
 class Test_grok_date_words(check_word_list_grok):
     def grok_fn(self, word_list):
-        year, month, day, day_of_week, rest = rename_by_voice.grok_date_words(word_list)
+        year, month, day, day_of_week, rest = taketake.grok_date_words(word_list)
         self.assertEqual(word_list, rest)
         return f"{year} {month} {day} {day_of_week}"
 
-    def test_2021_1_1_monday(self):
-        self.expected_value = "2021 1 1 monday"
-        self.check("january first monday twenty twenty one")
-        self.check("monday january first twenty twenty one")
+    def test_2021_1_1_friday(self):
+        self.expected_value = "2021 1 1 friday"
+        self.check("january first friday twenty twenty one")
+        self.check("friday january first twenty twenty one")
 
     def test_2021_1_1_None(self):
         self.expected_value = "2021 1 1 None"
@@ -634,9 +634,9 @@ class Test_grok_date_words(check_word_list_grok):
 
 class Test_TimestampGrokError(unittest.TestCase):
     def check(self, text):
-        with self.assertRaisesRegex(rename_by_voice.TimestampGrokError,
+        with self.assertRaisesRegex(taketake.TimestampGrokError,
                                     self.regex):
-            print(rename_by_voice.words_to_timestamp(text))
+            print(taketake.words_to_timestamp(text))
 
     def test_no_month(self):
         self.regex = "^Failed to find a month name in "
@@ -704,7 +704,7 @@ class Test_words_to_timestamp(unittest.TestCase):
         """Checks that the given string text decodes to self.expected_value,
         with the given remaining words joined into a string passed in as expected_rem.
         """
-        got_value, extra = rename_by_voice.words_to_timestamp(text)
+        got_value, extra = taketake.words_to_timestamp(text)
         got_rem = " ".join(extra)
         self.assertEqual(got_value, expect)
         self.assertEqual(got_rem, expected_rem)
@@ -735,7 +735,8 @@ class Test_words_to_timestamp(unittest.TestCase):
                    2021, 5, 19, 19, 0, 0)
 
     def test_known_examples(self):
-        self.check("twenty twenty monday march eighteenth two thousand twenty why",
+        # The actual example had monday due to hand-construction of the timestamp
+        self.check("twenty twenty thursday march eighteenth two thousand twenty why",
                    2021, 3, 18, 20, 20, 0)
         self.check("eleven fifteen sunday march twenty first two thousand twenty one",
                    2021, 3, 21, 11, 15, 0)
@@ -753,7 +754,7 @@ class Test_words_to_timestamp(unittest.TestCase):
 
 class Test_fmt_duration(unittest.TestCase):
     def check(self, duration, expect):
-        formatted = rename_by_voice.fmt_duration(duration)
+        formatted = taketake.fmt_duration(duration)
         self.assertEqual(formatted, expect)
 
     def test_seconds(self):
