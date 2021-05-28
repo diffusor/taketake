@@ -8,15 +8,24 @@ A. For all wav files to copy:
 1 make symlink from dest dir to wav file on USB drive
   (the symlink's presence indicates processing is in progress and final
   verif is still needed)
-2 generate 2% par2 file of wav file next to symlink in dest dir
-3 extract timestamp and duration from wav file (speech_to_text, words_to_timestamp)
-4 determine dest_filename
+2 extract timestamp and duration from wav file (speech_to_text, words_to_timestamp)
+3 determine dest_filename
   (including instrument, timestamp, notes, duration, and original filename w/o .wav)
-5 make symlink from orig_filename.wav.flac to the final destination flac name
+
+A' For all wav files as their renames are determined:
+-> query user to fix up each file name
+
+A'' While waiting for filename confirmation, for each wav:
+4 convert to flac as .orig_filename.wav.flac.in_progress (via wav symlink)
+4' rename to .orig_filename.wav.flac.done
+5 generate 2% par2 file of wav file next to symlink in dest dir
+
+A''' As each wav file is produced from A' and A'':
+6 make symlink from orig_filename.wav.flac to the final destination flac name
   (this will start as broken; its presence means the flac file hasn't been
   verified yet)
-6 convert to flac as .dest_filename.in_progress (via wav symlink)
-7 rename to dest_filename
+6' Also symlink from final dest name flac.orig -> orig_filename.wav
+7 rename .orig_filename.wav.flac.done to dest_filename.flac
   (this also indicates the copy is complete)
 8 touch file mtime (set last modified time to timestamp)
 9 generate 2x 2% par2 files of flac file
@@ -73,7 +82,7 @@ dest/
 audio001.wav -> src/audio001.wav
 
 
-A2 - wav par2
+A4 - copy+convert to flac
 ==
 
 src/
@@ -81,11 +90,36 @@ audio001.wav
 audio002.wav
 
 dest/
+.audio001.wav.flac.in_progress
+audio001.wav -> src/audio001.wav
+
+
+A4' - Rename to .orig.wav.flac.done
+==
+
+src/
+audio001.wav
+audio002.wav
+
+dest/
+.audio001.wav.flac.done
+audio001.wav -> src/audio001.wav
+
+
+A5 - generate par2 files for original .wav
+==
+
+src/
+audio001.wav
+audio002.wav
+
+dest/
+.audio001.wav.flac.done
 audio001.wav -> src/audio001.wav
 audio001.wav.vol000+64.par2
 
 
-A5 - symlink dest_filename (both ways)
+A6 - After user prompt, symlink dest_filename (both ways)
 ==
 
 src/
@@ -93,28 +127,14 @@ audio001.wav
 audio002.wav
 
 dest/
+.audio001.wav.flac.done
 audio001.wav -> src/audio001.wav
 audio001.wav.vol000+64.par2
 audio001.wav.flac -> inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
 inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.orig -> audio001.wav
 
 
-A6 - flac encode
-==
-
-src/
-audio001.wav
-audio002.wav
-
-dest/
-audio001.wav -> src/audio001.wav
-audio001.wav.vol000+64.par2
-audio001.wav.flac -> inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-.inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.in_progress
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.orig -> audio001.wav
-
-
-A7 - rename flac
+A7 - rename flac to dest filename
 ==
 
 src/
@@ -127,6 +147,7 @@ audio001.wav.vol000+64.par2
 audio001.wav.flac -> inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
 inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
 inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.orig -> audio001.wav
+
 
 A8 - timestamp update (set mtime)
 
