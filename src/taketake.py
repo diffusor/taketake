@@ -131,7 +131,7 @@ ExtCmd(
 ExtCmd(
     "flac_encode",
     "Encodes wav file to flac.",
-    "flac {infile} -o {outfile}",
+    "flac --replay-gain {infile} -o {outfile}",
 
     infile="The input wav file",
     outfile="The output flac file",
