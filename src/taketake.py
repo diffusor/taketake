@@ -67,6 +67,8 @@ Run tests:
 # YOURUSERNAME     ALL = NOPASSWD: /sbin/sysctl vm.drop_caches=3
 # $ sudo /sbin/sysctl vm.drop_caches=3
 
+import asyncio
+import time
 import sys
 import re
 import itertools
@@ -717,12 +719,113 @@ def get_new_filename(f, inst):
         print(f"No timestamp found: {e}")
 
 
-def process_file(f):
-    pass
+import random # TODO remove, only for testing
+
+
+async def waiter(name, f):
+    delay = random.uniform(0.1, 1.0)
+    print(f"{name}: '{f}' - {delay}s")
+    await asyncio.sleep(delay)
+    print(f"{name}: '{f}' - done")
+
+
+async def speech_recognizer(files, recognizer2prompter_speech_guesses):
+    for f in files:
+        await waiter("Recognizer", f)
+        recognizer2prompter_speech_guesses.put_nowait(f)
+
+async def filename_prompter(recognizer2prompter_speech_guesses, prompter2par_dest_names):
+    while guess := await recognizer2prompter_speech_guesses.get():
+        await waiter("FilePrompter", guess)
+        recognizer2prompter_speech_guesses.task_done()
+        prompter2par_dest_names.put_nowait(guess)
+
+async def flac_encoder(files, flac2par_completions):
+    for f in files:
+        await waiter("FlacEncoder", f)
+        flac2par_completions.put_nowait(f)
+
+async def renamer_and_par_generator(prompter2par_dest_names,
+                                    flac2par_completions,
+                                    par2processor_completions):
+    while destname := await prompter2par_dest_names.get():
+        await waiter("Renamer", destname)
+        prompter2par_dest_names.task_done()
+        flac = await flac2par_completions.get()
+        await waiter("ParGenerator", flac)
+        par2processor_completions.put_nowait(flac)
+
+
+async def process_wavs_from_usb(files, dest):
+    """Process wav files, encoding them to renamed files in the dest path.
+    """
+    # Set up asyncio queues of files between the various worker processes
+
+    # The speech recognizer finds the first span of non-silent audio, passes
+    # it through PocketSphinx, and attempts to parse a timestamp and comments
+    # from the results.
+    recognizer2prompter_speech_guesses = asyncio.Queue()
+
+    # The Prompter asks the user for corrections on those guesses and passes
+    # the results to the renamer/par2-generator
+    prompter2par_dest_names = asyncio.Queue()
+
+    # Meanwhile, the flac encoder copies the wav data while encoding it to the
+    # destination as a temporary file
+    flac2par_completions = asyncio.Queue()
+
+    # Finally, the par processor queues the files back to the coordinator for
+    # completion tracking.
+    par2processor_completions = asyncio.Queue()
+
+    recognizer_task = asyncio.create_task(speech_recognizer(
+        files,
+        recognizer2prompter_speech_guesses))
+
+    prompter_task = asyncio.create_task(filename_prompter(
+        recognizer2prompter_speech_guesses,
+        prompter2par_dest_names))
+
+    flac_task = asyncio.create_task(flac_encoder(
+        files,
+        flac2par_completions))
+
+    rename_and_par_task = asyncio.create_task(renamer_and_par_generator(
+        prompter2par_dest_names,
+        flac2par_completions,
+        par2processor_completions))
+
+    # Wait for all files to be completely processed
+    time_start = time.monotonic()
+    completions = 0
+    while completions < len(files):
+        done_file = await par2processor_completions.get()
+        print(f"Processor: '{done_file}' completed processing.")
+        par2processor_completions.task_done()
+        completions += 1
+    time_end = time.monotonic()
+
+    # Cancel tasks
+    recognizer_task.cancel()
+    prompter_task.cancel()
+    flac_task.cancel()
+    rename_and_par_task.cancel()
+
+    # Await the cancelations to complete
+    await asyncio.gather(
+        recognizer_task,
+        prompter_task,
+        flac_task,
+        rename_and_par_task,
+        return_exceptions=True)
+
 
 def main():
-    for f in sys.argv[1:]:
-        get_new_filename(f, "test")
+    files = sys.argv[1:]
+    asyncio.run(process_wavs_from_usb(files, dest=None))
+
+    for f in files:
+        #get_new_filename(f, "test")
         print()
 
     return 0
