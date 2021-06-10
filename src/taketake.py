@@ -77,6 +77,12 @@ import datetime
 
 import speech_recognition
 from word2number import w2n
+from prompt_toolkit import PromptSession
+from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.application import run_in_terminal
+from prompt_toolkit.key_binding import KeyBindings
 
 class Config:
     silence_threshold_dbfs = -55    # Audio above this threshold is not considered silence
@@ -719,11 +725,15 @@ def get_new_filename(f, inst):
         print(f"No timestamp found: {e}")
 
 
+#============================================================================
+# async processing of files and prompting for rename
+#============================================================================
+
 import random # TODO remove, only for testing
 
 
 async def waiter(name, f):
-    delay = random.uniform(0.1, 1.0)
+    delay = random.uniform(0.2, 1.0)
     print(f"{name}: '{f}' - {delay}s")
     await asyncio.sleep(delay)
     print(f"{name}: '{f}' - done")
@@ -735,10 +745,26 @@ async def speech_recognizer(files, recognizer2prompter_speech_guesses):
         recognizer2prompter_speech_guesses.put_nowait(f)
 
 async def filename_prompter(recognizer2prompter_speech_guesses, prompter2par_dest_names):
+
+    def toolbar():
+        return HTML(f"Time! <style bg='ansired'>{time.monotonic()}</style>")
+
+    bindings = KeyBindings()
+    @bindings.add('escape', 'h')
+    def _(event):
+        def print_hello():
+            print('hello')
+        run_in_terminal(print_hello)
+
+    session = PromptSession(key_bindings=bindings)
     while guess := await recognizer2prompter_speech_guesses.get():
-        await waiter("FilePrompter", guess)
+        with patch_stdout():
+            result = await session.prompt_async(f"Enter replacement text for\n> '{guess}': ",
+                    default=guess,
+                    mouse_support=True,
+                    bottom_toolbar=toolbar, auto_suggest=AutoSuggestFromHistory())
+        prompter2par_dest_names.put_nowait(result)
         recognizer2prompter_speech_guesses.task_done()
-        prompter2par_dest_names.put_nowait(guess)
 
 async def flac_encoder(files, flac2par_completions):
     for f in files:
@@ -804,12 +830,14 @@ async def process_wavs_from_usb(files, dest):
         par2processor_completions.task_done()
         completions += 1
     time_end = time.monotonic()
+    print(f"Processor: done, {time_end-time_start}s.")
 
     # Cancel tasks
     recognizer_task.cancel()
     prompter_task.cancel()
     flac_task.cancel()
     rename_and_par_task.cancel()
+    print(f"Processor: canceled tasks.")
 
     # Await the cancelations to complete
     await asyncio.gather(
@@ -819,14 +847,17 @@ async def process_wavs_from_usb(files, dest):
         rename_and_par_task,
         return_exceptions=True)
 
+    print(f"Processor: gathered tasks.")
+
 
 def main():
     files = sys.argv[1:]
     asyncio.run(process_wavs_from_usb(files, dest=None))
 
     for f in files:
+        pass
         #get_new_filename(f, "test")
-        print()
+        #print()
 
     return 0
 
