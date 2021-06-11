@@ -77,10 +77,11 @@ from typing import List
 
 import speech_recognition
 from word2number import w2n
-from prompt_toolkit import PromptSession
+from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.styles import Style
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.key_binding import KeyBindings
 
@@ -772,7 +773,7 @@ async def process_file_speech(finfo):
         else:
             notes = ""
 
-        finfo.suggested_filename = f"{finfo.instrument}.{tstr}.{dstr}.{notes}{finfo.orig_filename}"
+        finfo.suggested_filename = f"{finfo.instrument}.{tstr}.{notes}{dstr}.{finfo.orig_filename}"
         print(f"Speechinizer: {finfo.orig_filename!r} - {finfo.orig_speech!r} -> {finfo.suggested_filename!r}")
 
     except (NoSuitableAudioSpan, TimestampGrokError) as e:
@@ -850,11 +851,21 @@ async def filename_prompter(recognizer2prompter_speech_guesses, prompter2par_des
     def _(event):
         play_media_file(finfo)
 
+    style = Style.from_dict(dict(
+        prompt="#eeeeee bold",
+        fname="#bb9900",
+        comment="#9999ff",
+        guess="#dddd11 bold",
+        final="#33ff33 bold",
+        ))
+
     session = PromptSession(key_bindings=bindings)
     while finfo := await recognizer2prompter_speech_guesses.get():
         with patch_stdout():
-            finfo.final_filename = await session.prompt_async(
-                    f"* Confirm file rename for {finfo.fpath}\n ({finfo.suggested_filename}) {len(finfo.suggested_filename)} characters\n> ",
+            finfo.final_filename = await session.prompt_async(HTML(
+                    f"<prompt>* Confirm file rename for</prompt> <fname>{finfo.fpath}</fname>\n <guess>Guess</guess>: <fname>{finfo.suggested_filename}</fname> "
+                    f"<comment>({len(finfo.suggested_filename)} characters)</comment>\n <final>Final&gt;</final> "),
+                    style=style,
                     default=finfo.suggested_filename,
                     mouse_support=True,
                     bottom_toolbar=None, auto_suggest=AutoSuggestFromHistory())
