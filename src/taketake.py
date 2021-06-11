@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.9
 
 # TODO - duration, renaming, touch, flac conversion, par2, copy, verify
 
@@ -10,9 +10,7 @@ recorded files.
 Supports .wav and .flac.
 
 Setup:
-    $ pip3 install --user SpeechRecognition
-    $ pip3 install --user PocketSphinx
-    $ pip3 install --user word2number
+    $ python3.9 -m pip install --user SpeechRecognition PocketSphinx word2number prompt_toolkit
 
 Silence detection:
     $ ffmpeg -i in.flac -af silencedetect=noise=-50dB:d=1 -f null -
@@ -70,10 +68,12 @@ Run tests:
 import asyncio
 import time
 import sys
-import re
+import os
 import itertools
 import subprocess
 import datetime
+from dataclasses import dataclass, field
+from typing import List
 
 import speech_recognition
 from word2number import w2n
@@ -89,13 +89,13 @@ class Config:
     silence_min_duration_s = 0.5    # Silence shorter than this is not detected
     file_scan_duration_s = 90       # -t (time duration).  Note -ss is startseconds
     min_talk_duration_s = 2.5       # Only consider non-silence intervals longer than this for timestamps
-    max_talk_duration_s = 20        # Do recognition on up to this many seconds of audio at most
+    max_talk_duration_s = 15        # Do recognition on up to this many seconds of audio at most
     talk_attack_s = 0.2             # Added to the start offset to avoid clipping the start of talking
     talk_release_s = 0.2            # Added to the duration to avoid clipping the end of talking
     epsilon_s = 0.01                # When comparing times, consider +/- epsilon_s the same
 
-    timestamp_fmt_no_seconds   = "%Y%m%d-%H%M_%a"
-    timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S_%a"
+    timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
+    timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
 
 class ExtCmdListMeta(type):
     def __getattr__(cls, name):
@@ -137,6 +137,16 @@ ExtCmd(
 )
 
 ExtCmd(
+    "play_media_file",
+    "Launch an interactive GUI app to play the media file starting at the first non-silence.",
+    "mpv --osd-level=3 --osd-duration=3600000 --osd-playing-msg='{file}\\n->{suggestion}' --player-operation-mode=pseudo-gui --loop=inf {file} --start={start}",
+
+    file="The media file to play",
+    suggestion="The suggested filename for renaming",
+    start="Starting time in seconds (float) for the first non-silence",
+)
+
+ExtCmd(
     "flac_encode",
     "Encodes wav file to flac.",
     "flac --replay-gain {infile} -o {outfile}",
@@ -174,6 +184,12 @@ ExtCmd(
 )
 
 
+@dataclass
+class TimeRange:
+    start: float
+    duration: float
+
+
 # Exceptions
 class InvalidMediaFile(RuntimeError):
     pass
@@ -202,40 +218,68 @@ def set_mtime():
     # os.utime( dt.timestamp )
     pass
 
-def get_file_duration(f):
-    """Use ffprobe to determine how many seconds f plays for."""
-    args = ExtCmd.get_media_duration.construct_args(file=f)
-    res = subprocess.run(args, capture_output=True, universal_newlines=True, check=True)
+async def get_file_duration(fpath):
+    """Use ffprobe to determine how many seconds the file identified by fpath plays for."""
+    args = ExtCmd.get_media_duration.construct_args(file=fpath)
+
+    proc = await asyncio.create_subprocess_exec(*args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE)
+
+    (stdout, stderr) = await proc.communicate()
+
+    def exmsg():
+        return f" from '{' '.join(args)}':\n  stdout: '{stdout}'\n  stderr: '{stderr}'"
+
+    if proc.returncode:
+        raise InvalidMediaFile(f"Got exit {proc.returncode} {exmsg()}")
+
+    if stderr:
+        raise InvalidMediaFile(f"Got extra stderr from '{' '.join(args)}':"
+                f"\n  stdout: '{stdout}'"
+                f"\n  stderr: '{stderr}'")
 
     try:
-        duration = float(res.stdout)
+        duration = float(stdout)
     except ValueError as e:
-        raise InvalidMediaFile(f"Could not parse duration stdout from '{' '.join(args)}':\n  '{res.stdout}'") from e
+        raise InvalidMediaFile(f"Could not parse duration stdout from '{' '.join(args)}':\n  '{stdout}'") from e
 
     return duration
 
 
-def detect_silence(f):
+async def detect_silence(fpath):
     """Use ffmpeg silencedetect to find all silent segments.
 
-    Return a list of (start, duration) pairs."""
+    Return a list of TimeRange objects identifying the spans of silence."""
 
     args = ExtCmd.ffmpeg_silence_detect.construct_args(
-            file=f,
+            file=fpath,
             length=Config.file_scan_duration_s,
             threshold=Config.silence_threshold_dbfs,
             duration=Config.silence_min_duration_s)
 
-    res = subprocess.run(args, capture_output=True, universal_newlines=True, check=True)
-    detected_lines = [line for line in res.stderr.splitlines() if line.startswith('[silencedetect')]
+    proc = await asyncio.create_subprocess_exec(*args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE)
 
-    offsets = [float(line.split()[-1]) for line in detected_lines if "silence_start" in line]
-    durations = [float(line.split()[-1]) for line in detected_lines if "silence_end" in line]
-    return list(zip(offsets, durations))
+    (stdout, stderr) = await proc.communicate()
+
+    def exmsg():
+        return f" from '{' '.join(args)}':\n  stderr: '{stderr}'"
+
+    if proc.returncode:
+        raise InvalidMediaFile(f"Got exit {proc.returncode} {exmsg()}")
+
+    detected_lines = [line for line in stderr.splitlines() if line.startswith(b'[silencedetect')]
+
+    offsets = [float(line.split()[-1]) for line in detected_lines if b"silence_start" in line]
+    durations = [float(line.split()[-1]) for line in detected_lines if b"silence_end" in line]
+
+    return list(TimeRange(start, duration) for start, duration in zip(offsets, durations))
 
 
 def invert_silences(silences, file_scan_duration_s):
-    """Return a list of (start, duration) pairs of spans that are not silence.
+    """Return a list of TimeRange objects that represent non-silence.
 
     file_scan_duration_s should be capped at the actual duration of the file
     to avoid spurious extra ranges being added at the end.
@@ -246,10 +290,10 @@ def invert_silences(silences, file_scan_duration_s):
 
     # Add on an entry starting at the file_scan_duration_s to catch any
     # non-silent end bits.
-    for start, duration in itertools.chain(silences, ([file_scan_duration_s, 0.0],)):
-        if start > prev_silence_end + Config.epsilon_s:
-            non_silences.append((prev_silence_end, start - prev_silence_end))
-        prev_silence_end = start + duration
+    for r in itertools.chain(silences, (TimeRange(file_scan_duration_s, 0.0),)):
+        if r.start > prev_silence_end + Config.epsilon_s:
+            non_silences.append(TimeRange(prev_silence_end, r.start - prev_silence_end))
+        prev_silence_end = r.start + r.duration
 
     return non_silences
 
@@ -257,53 +301,58 @@ def invert_silences(silences, file_scan_duration_s):
 class NoSuitableAudioSpan(RuntimeError):
     pass
 
-def find_likely_audio_span(f, file_scan_duration_s):
-    """Searches the file f for regions of silence.
+async def find_likely_audio_span(finfo, file_scan_duration_s):
+    """Searches the first file_scan_duration_s seconds of the file represented
+    by finfo for regions of silence.
 
-    Returns the start offset and duration in seconds of the first span of
-    non-silent audio that is long enough.
+    Fills in the silences, non_silences, and speech_range fields of finfo.
+
+    The speech_range field is set to the TimeRange of the first non-silent
+    span of audio that is considered long enough, expanded a bit to cover any
+    attack or decay in the speech.
 
     Raises NoSuitableAudioSpan if no likely candidate was found.
     """
 
-    silences = detect_silence(f)
-    #print("Silences:")
-    #for s in silences: print(f"{s[0]} - {s[0] + s[1]} ({s[1]}s duration)")
+    finfo.silences = await detect_silence(finfo.fpath)
 
-    non_silences = invert_silences(silences, file_scan_duration_s)
-    #print("Non silences:")
-    #for s in non_silences: print(f"{s[0]} - {s[0] + s[1]} ({s[1]}s duration)")
+    finfo.non_silences = invert_silences(finfo.silences, file_scan_duration_s)
 
-    for start, duration in non_silences:
+    for r in finfo.non_silences:
+        duration = r.duration
         if duration >= Config.min_talk_duration_s:
             # Expand the window a bit to allow for attack and decay below the
             # silence threshold.
-            start = max(0, start - Config.talk_attack_s)
+            r.start = max(0, r.start - Config.talk_attack_s)
             duration += Config.talk_attack_s + Config.talk_release_s
             duration = min(duration, Config.max_talk_duration_s)
-            return (start, duration)
-    else:
-        raise NoSuitableAudioSpan(f"Could not find any span of audio greater than "
-                                  f"{Config.min_talk_duration_s}s in file '{f}'")
+            finfo.speech_range = TimeRange(r.start, duration)
+            return
+
+    raise NoSuitableAudioSpan(f"Could not find any span of audio greater than "
+                              f"{Config.min_talk_duration_s}s in file '{f}'")
 
 
 #============================================================================
 # Speech recognition and parsing
 #============================================================================
 
-def speech_to_text(f, offset, duration):
+def process_speech(finfo):
     """Uses the PocketSphinx speech recognizer to decode the spoken timestamp
     and any notes.
 
     Returns the resulting text, or None if no transcription could be determined.
     """
     recognizer = speech_recognition.Recognizer()
-    with speech_recognition.AudioFile(f) as audio_file:
-        speech_recording = recognizer.record(audio_file, offset=offset, duration=duration)
+
+    with speech_recognition.AudioFile(finfo.fpath) as audio_file:
+        speech_recording = recognizer.record(audio_file,
+                                             offset=finfo.speech_range.start,
+                                             duration=finfo.speech_range.duration)
     try:
-        return recognizer.recognize_sphinx(speech_recording)
+        finfo.orig_speech = recognizer.recognize_sphinx(speech_recording)
     except speech_recognition.UnknownValueError as e:
-        return None
+        pass
 
 
 def reverse_hashify(s):
@@ -646,19 +695,21 @@ def words_to_timestamp(text):
 # File processing
 #============================================================================
 
-def get_timestamp_from_audio(f, file_duration):
+async def process_timestamp_from_audio(finfo):
     """Returns a timestamp and extra string data from the beginning speech in f.
 
     Raises NoSuitableAudioSpan or TimestampGrokError if processing fails.
     """
 
-    scan_duration = min(file_duration, Config.file_scan_duration_s)
+    # Only scan the first bit of the file to avoid transfering a lot of data.
+    # This means we can prompt the user for any corrections sooner.
+    scan_duration = min(finfo.duration_s, Config.file_scan_duration_s)
 
-    start, duration = find_likely_audio_span(f, scan_duration)
-    print(f"* Processing {duration:.2f}s of audio starting at offset {start:.2f}s in '{f}'...")
-    text = speech_to_text(f, start, duration)
-    print(f'> {text!r}')
-    return words_to_timestamp(text)
+    await find_likely_audio_span(finfo, scan_duration)
+    print(f"Speechinizer: {finfo.orig_filename!r} - processing {finfo.speech_range.duration:.2f}s "
+          f"of audio starting at offset {finfo.speech_range.start:.2f}s")
+    await asyncio.to_thread(process_speech, finfo)
+    finfo.parsed_timestamp, finfo.extra_speech = words_to_timestamp(finfo.orig_speech)
 
 
 def fmt_duration(duration):
@@ -695,75 +746,119 @@ def fmt_duration(duration):
     return ''.join(parts)
 
 
-def get_new_filename(f, inst):
-    """Returns a new filename with the timestamp and extra words embedded"""
-
-    file_duration = get_file_duration(f)
-    print(f"Listening for timestamp info in '{f}' ({file_duration:.2f}s)")
+async def process_file_speech(finfo):
+    """Process the file from the given FileInfo parameter, filling in the
+    fields duration_s, silences, non_silences, speech_range, orig_speech,
+    parsed_timestamp, extra_speech, and suggested_filename.
+    """
+    finfo.duration_s = await get_file_duration(finfo.fpath)
+    #print(f"Listening for timestamp info in '{f}' ({file_duration:.2f}s)")
     try:
-        timestamp, extra = get_timestamp_from_audio(f, file_duration)
+        await process_timestamp_from_audio(finfo)
 
         # Format the timestamp
-        tstr = timestamp.strftime(
-                Config.timestamp_fmt_with_seconds if timestamp.second
-                else Config.timestamp_fmt_no_seconds)
+        if finfo.parsed_timestamp.second:
+            time_fmt = Config.timestamp_fmt_with_seconds
+        else:
+            time_fmt = Config.timestamp_fmt_no_seconds
+        tstr = finfo.parsed_timestamp.strftime(time_fmt)
 
         # Format the duration
-        dstr = fmt_duration(file_duration)
+        dstr = fmt_duration(finfo.duration_s)
 
         # Format the notes
-        if extra:
-            notes = " ".join(extra) + "_"
+        if finfo.extra_speech:
+            notes = "-".join(finfo.extra_speech) + "."
         else:
             notes = ""
 
-        fname = f"{inst}_{tstr}_{dstr}_{notes}{f}"
-
-        print(f" -> {fname}")
+        finfo.suggested_filename = f"{finfo.instrument}.{tstr}.{dstr}.{notes}{finfo.orig_filename}"
+        print(f"Speechinizer: {finfo.orig_filename!r} - {finfo.orig_speech!r} -> {finfo.suggested_filename!r}")
 
     except (NoSuitableAudioSpan, TimestampGrokError) as e:
-        print(f"No timestamp found: {e}")
+        # Couldn't find any timestamp info
+        finfo.suggested_filename = finfo.orig_filename
 
 
 #============================================================================
 # async processing of files and prompting for rename
 #============================================================================
 
+def play_media_file(finfo):
+    """Use ffmpeg silencedetect to find all silent segments.
+
+    Return a list of (start, duration) pairs."""
+
+    start = 0
+    if finfo.speech_range is not None:
+        start = finfo.speech_range.start
+
+    args = ExtCmd.play_media_file.construct_args(file=finfo.fpath,
+                                                 start=start,
+                                                 suggestion=finfo.suggested_filename)
+
+    null = subprocess.DEVNULL
+    res = subprocess.Popen(args, stdin=null, stdout=null, stderr=null)
+
+
+@dataclass
+class FileInfo:
+    """Class tracking speech recognition and file renaming"""
+    instrument: str
+
+    fpath: str
+    orig_filename: str
+    src_path: str
+    dest_path: str
+
+    duration_s: float = None
+    silences: List[TimeRange] = field(default_factory=list)
+    non_silences: List[TimeRange] = field(default_factory=list)
+    speech_range: TimeRange = None
+
+    orig_speech: str = None
+    parsed_timestamp: str = None
+    extra_speech: str = None
+
+    suggested_filename: str = None
+    final_filename: str = None
+
+
 import random # TODO remove, only for testing
 
 
 async def waiter(name, f):
     delay = random.uniform(0.2, 1.0)
-    print(f"{name}: '{f}' - {delay}s")
+    print(f"{name}: '{f.orig_filename}' - {delay}s")
     await asyncio.sleep(delay)
-    print(f"{name}: '{f}' - done")
+    print(f"{name}: '{f.orig_filename}' - done")
 
 
 async def speech_recognizer(files, recognizer2prompter_speech_guesses):
-    for f in files:
-        await waiter("Recognizer", f)
-        recognizer2prompter_speech_guesses.put_nowait(f)
+    for finfo in files:
+        await process_file_speech(finfo)
+        recognizer2prompter_speech_guesses.put_nowait(finfo)
+
 
 async def filename_prompter(recognizer2prompter_speech_guesses, prompter2par_dest_names):
 
     def toolbar():
-        return HTML(f"Time! <style bg='ansired'>{time.monotonic()}</style>")
+        return HTML(f"  <style bg='ansired'>{time.monotonic()}</style>")
 
     bindings = KeyBindings()
     @bindings.add('escape', 'h')
     def _(event):
-        def print_hello():
-            print('hello')
-        run_in_terminal(print_hello)
+        play_media_file(finfo)
 
     session = PromptSession(key_bindings=bindings)
-    while guess := await recognizer2prompter_speech_guesses.get():
+    while finfo := await recognizer2prompter_speech_guesses.get():
         with patch_stdout():
-            result = await session.prompt_async(f"Enter replacement text for\n> '{guess}': ",
-                    default=guess,
+            finfo.final_filename = await session.prompt_async(
+                    f"* Confirm file rename for {finfo.fpath}\n ({finfo.suggested_filename}) {len(finfo.suggested_filename)} characters\n> ",
+                    default=finfo.suggested_filename,
                     mouse_support=True,
-                    bottom_toolbar=toolbar, auto_suggest=AutoSuggestFromHistory())
-        prompter2par_dest_names.put_nowait(result)
+                    bottom_toolbar=None, auto_suggest=AutoSuggestFromHistory())
+        prompter2par_dest_names.put_nowait(finfo)
         recognizer2prompter_speech_guesses.task_done()
 
 async def flac_encoder(files, flac2par_completions):
@@ -782,9 +877,17 @@ async def renamer_and_par_generator(prompter2par_dest_names,
         par2processor_completions.put_nowait(flac)
 
 
-async def process_wavs_from_usb(files, dest):
+async def process_wavs_from_usb(filepaths, dest):
     """Process wav files, encoding them to renamed files in the dest path.
     """
+    # Construct the FileInfo objects
+    files = [FileInfo(instrument="test",
+                      fpath=f,
+                      orig_filename=os.path.basename(f),
+                      src_path=os.path.dirname(f),
+                      dest_path=dest)
+             for f in filepaths]
+
     # Set up asyncio queues of files between the various worker processes
 
     # The speech recognizer finds the first span of non-silent audio, passes
@@ -845,7 +948,7 @@ async def process_wavs_from_usb(files, dest):
         prompter_task,
         flac_task,
         rename_and_par_task,
-        return_exceptions=True)
+        return_exceptions=False)
 
     print(f"Processor: gathered tasks.")
 
@@ -853,11 +956,6 @@ async def process_wavs_from_usb(files, dest):
 def main():
     files = sys.argv[1:]
     asyncio.run(process_wavs_from_usb(files, dest=None))
-
-    for f in files:
-        pass
-        #get_new_filename(f, "test")
-        #print()
 
     return 0
 
