@@ -1,6 +1,7 @@
 #!/usr/bin/env python3.9
 
 # TODO - duration, renaming, touch, flac conversion, par2, copy, verify
+# TODO - https://quantlane.com/blog/ensure-asyncio-task-exceptions-get-logged/
 
 """Rename file[s] based on the spoken information at the front of the file.
 
@@ -840,6 +841,9 @@ async def speech_recognizer(files, recognizer2prompter_speech_guesses):
         await process_file_speech(finfo)
         recognizer2prompter_speech_guesses.put_nowait(finfo)
 
+    # Signal completion - no more files to process
+    recognizer2prompter_speech_guesses.put_nowait(None)
+
 
 async def filename_prompter(recognizer2prompter_speech_guesses, prompter2par_dest_names):
 
@@ -860,7 +864,7 @@ async def filename_prompter(recognizer2prompter_speech_guesses, prompter2par_des
         ))
 
     session = PromptSession(key_bindings=bindings)
-    while finfo := await recognizer2prompter_speech_guesses.get():
+    while (finfo := await recognizer2prompter_speech_guesses.get()) is not None:
         with patch_stdout():
             finfo.final_filename = await session.prompt_async(HTML(
                     f"<prompt>* Confirm file rename for</prompt> <fname>{finfo.fpath}</fname>\n <guess>Guess</guess>: <fname>{finfo.suggested_filename}</fname> "
@@ -872,20 +876,37 @@ async def filename_prompter(recognizer2prompter_speech_guesses, prompter2par_des
         prompter2par_dest_names.put_nowait(finfo)
         recognizer2prompter_speech_guesses.task_done()
 
+    # Signal completion - no more files to process
+    prompter2par_dest_names.put_nowait(None)
+
+
 async def flac_encoder(files, flac2par_completions):
-    for f in files:
-        await waiter("FlacEncoder", f)
-        flac2par_completions.put_nowait(f)
+    for finfo in files:
+        await waiter("FlacEncoder", finfo)
+        flac2par_completions.put_nowait(finfo)
+
+    # Signal completion - no more files to process
+    flac2par_completions.put_nowait(None)
+
 
 async def renamer_and_par_generator(prompter2par_dest_names,
                                     flac2par_completions,
                                     par2processor_completions):
-    while destname := await prompter2par_dest_names.get():
-        await waiter("Renamer", destname)
+    while (finfo := await prompter2par_dest_names.get()) is not None:
+        await waiter("Renamer", finfo)
         prompter2par_dest_names.task_done()
+
+        # Wait for flac encoding to complete as well
         flac = await flac2par_completions.get()
+        if finfo is not flac:
+            raise RuntimeError("Got mismatching files from the prompter and flac task queues!"
+                    f"\n  Prompter: {finfo.orig_filename}"
+                    f"\n  Encoder : {flac.orig_filename}")
         await waiter("ParGenerator", flac)
         par2processor_completions.put_nowait(flac)
+
+    # Signal completion - no more files to process
+    flac2par_completions.put_nowait(None)
 
 
 async def process_wavs_from_usb(filepaths, dest):
@@ -937,31 +958,14 @@ async def process_wavs_from_usb(filepaths, dest):
 
     # Wait for all files to be completely processed
     time_start = time.monotonic()
-    completions = 0
-    while completions < len(files):
-        done_file = await par2processor_completions.get()
-        print(f"Processor: '{done_file}' completed processing.")
-        par2processor_completions.task_done()
-        completions += 1
-    time_end = time.monotonic()
-    print(f"Processor: done, {time_end-time_start}s.")
-
-    # Cancel tasks
-    recognizer_task.cancel()
-    prompter_task.cancel()
-    flac_task.cancel()
-    rename_and_par_task.cancel()
-    print(f"Processor: canceled tasks.")
-
     # Await the cancelations to complete
     await asyncio.gather(
         recognizer_task,
         prompter_task,
         flac_task,
-        rename_and_par_task,
-        return_exceptions=False)
-
-    print(f"Processor: gathered tasks.")
+        rename_and_par_task)
+    time_end = time.monotonic()
+    print(f"Processor: done, {time_end-time_start:.1f}s total.")
 
 
 def main():
