@@ -1,3 +1,4 @@
+==========================
 USB drive transfer process
 ==========================
 
@@ -13,89 +14,89 @@ Step A - encode flacs, generate pars
 ::::::::::::::::::::::::::::::::::::
 
 A. For all wav files to copy:
-1 make symlink from dest dir to wav file on USB drive
-  (the symlink's presence indicates processing is in progress and final
-  verif is still needed)
+   1. make symlink from dest dir to wav file on USB drive::
 
-    link audio001.wav -> src/audio001.wav
+        link audio001.wav -> src/audio001.wav
 
-2 extract timestamp and duration from wav file (speech_to_text, words_to_timestamp)
-3 determine dest_filename
-  (including instrument, timestamp, notes, duration, and original filename w/o .wav)
+      (the symlink's presence indicates processing is in progress and final
+      verif is still needed)
 
-A' For all wav files as their renames are determined:
--> query user to fix up each file name
+   2. extract timestamp and duration from wav file (speech_to_text, words_to_timestamp)
+   3. determine dest_filename (including instrument, timestamp, notes,
+      duration, and original filename w/o .wav)
 
-A'' While waiting for filename confirmation, for each wav:
-4 convert to flac as .orig_filename.wav.flac.in_progress (via wav symlink)
+      -> query user to fix up each file name as they are generated
 
-    encode audio001.wav -> .audio001.wav.flac.in_progress
+   While waiting for filename confirmation, for each wav:
 
-4' rename to .orig_filename.wav.flac.done
+   4. convert to flac as .orig_filename.wav.flac.in_progress (via wav symlink)::
 
-    rename .audio001.wav.flac.in_progress -> .audio001.wav.flac.done
+        encode audio001.wav -> .audio001.wav.flac.in_progress
 
-5 generate 2% par2 file of wav file next to symlink in dest dir
+   5. rename to .orig_filename.wav.flac.done::
 
-    par2 audio001.wav -> audio001.wav.par2, audio001.wav.vol000+64.par2
-    rm audio001.wav.par2
+        rename .audio001.wav.flac.in_progress -> .audio001.wav.flac.done
 
-A''' As each wav file is produced from A' and A'':
-6 make symlink from orig_filename.wav.flac to the final destination flac name
-  (this will start as broken; its presence means the flac file hasn't been
-  verified yet)
-6' Also symlink from final dest name flac.orig -> orig_filename.wav
-7 rename .orig_filename.wav.flac.done to dest_filename.flac
-  (this also indicates the copy is complete)
-8 touch file mtime (set last modified time to timestamp)
-9 generate 2x 2% par2 files of flac file
+   6. generate 2% par2 file of wav file next to symlink in dest dir::
+
+        par2 audio001.wav -> audio001.wav.par2, audio001.wav.vol000+64.par2
+        rm audio001.wav.par2
+
+   As each wav file is produced from the above:
+
+   7. make symlink from orig_filename.wav.flac to the final destination flac name
+      (this will start as broken; its presence means the flac file hasn't been
+      verified yet)
+   8. Also symlink from final dest name flac.orig -> orig_filename.wav
+   9. rename .orig_filename.wav.flac.done to dest_filename.flac
+      (this also indicates the copy is complete)
+   10. touch file mtime (set last modified time to timestamp)
+   11. generate 2x 2% par2 files of flac file
 
 
 Step B - flush filesystem, sync
 :::::::::::::::::::::::::::::::
 
-B. Once:
-* flush FS caches
+B. Once: flush FS caches
 
 
 Step C - Verify par files
 :::::::::::::::::::::::::
 
 C. For all copied wav files:
-1 Verify flac file against both of its par2 files
-2 Verify wav par2 against wav symlink (testing copy on USB drive)
-3 Rename wav symlink to wav.orig
-4 unpack flac based on flac.orig symlink
-5 verify unpacked flac wav vs wav.par2
-6 retarget flac.orig to point to wav.orig symlink
-7 add (broken) symlink to flac.copy
-8 remove temp wav
+   1. Verify flac file against both of its par2 files
+   2. Verify wav par2 against wav symlink (testing copy on USB drive)
+   3. Rename wav symlink to wav.orig
+   4. unpack flac based on flac.orig symlink
+   5. verify unpacked flac wav vs wav.par2
+   6. retarget flac.orig to point to wav.orig symlink
+   7. add (broken) symlink to flac.copy
+   8. remove temp wav
 
 
 Step D - Clean src, copy flac back to USB
 :::::::::::::::::::::::::::::::::::::::::
 
 D. For all copied wav files:
-1 Remove src wav, wav.par2, and symlinks wav.orig, wav.par2, wav.flac, and flac.orig 
-2 Copy flac and its par2 files to the USB drive (in a subdir)
+   1. Remove src wav, wav.par2, and symlinks wav.orig, wav.par2, wav.flac, and flac.orig 
+   2. Copy flac and its par2 files to the USB drive (in a subdir)
 
 
 Step E - flush filesystem, sync
 :::::::::::::::::::::::::::::::
 
-E. Once:
-* flush FS caches
+E. Once: flush FS caches
 
 
 Step F - Verify USB copy of FLAC files, clean up
 ::::::::::::::::::::::::::::::::::::::::::::::::
 
 F. For all copied wav files:
-1 On USB: Verify all copied flac files against both of their par2 files
-2 delete flac.copy symlink from dest
+   1. On USB: Verify all copied flac files against both of their par2 files
+   2. delete flac.copy symlink from dest
 
 
-
+================================
 USB drive file transfer example:
 ================================
 
@@ -132,7 +133,7 @@ A4 - copy+convert to flac::
     .audio001.wav.flac.in_progress
     audio001.wav -> src/audio001.wav
 
-A4' - Rename to .orig.wav.flac.done::
+A5 - Rename to .orig.wav.flac.done::
 
     src/
     audio001.wav
@@ -142,7 +143,7 @@ A4' - Rename to .orig.wav.flac.done::
     .audio001.wav.flac.done
     audio001.wav -> src/audio001.wav
 
-A5 - generate par2 files for original .wav::
+A6 - generate par2 files for original .wav::
 
     src/
     audio001.wav
@@ -153,7 +154,7 @@ A5 - generate par2 files for original .wav::
     audio001.wav -> src/audio001.wav
     audio001.wav.vol000+64.par2
 
-A6 - After user prompt, symlink dest_filename (both ways)::
+A7,8 - After user prompt, symlink dest_filename (both ways)::
 
     src/
     audio001.wav
@@ -166,7 +167,7 @@ A6 - After user prompt, symlink dest_filename (both ways)::
     audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
     inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.orig -> audio001.wav
 
-A7 - rename flac to dest filename::
+A9 - rename flac to dest filename::
 
     src/
     audio001.wav
@@ -179,9 +180,9 @@ A7 - rename flac to dest filename::
     inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
     inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.orig -> audio001.wav
 
-A8 - timestamp update (set mtime)
+A10 - timestamp update (set mtime)
 
-A9 - flac par2s::
+A11 - flac par2s::
 
     src/
     audio001.wav
