@@ -8,6 +8,9 @@ A. For all wav files to copy:
 1 make symlink from dest dir to wav file on USB drive
   (the symlink's presence indicates processing is in progress and final
   verif is still needed)
+
+    link audio001.wav -> src/audio001.wav
+
 2 extract timestamp and duration from wav file (speech_to_text, words_to_timestamp)
 3 determine dest_filename
   (including instrument, timestamp, notes, duration, and original filename w/o .wav)
@@ -17,8 +20,17 @@ A' For all wav files as their renames are determined:
 
 A'' While waiting for filename confirmation, for each wav:
 4 convert to flac as .orig_filename.wav.flac.in_progress (via wav symlink)
+
+    encode audio001.wav -> .audio001.wav.flac.in_progress
+
 4' rename to .orig_filename.wav.flac.done
+
+    rename .audio001.wav.flac.in_progress -> .audio001.wav.flac.done
+
 5 generate 2% par2 file of wav file next to symlink in dest dir
+
+    par2 audio001.wav -> audio001.wav.par2, audio001.wav.vol000+64.par2
+    rm audio001.wav.par2
 
 A''' As each wav file is produced from A' and A'':
 6 make symlink from orig_filename.wav.flac to the final destination flac name
@@ -130,8 +142,8 @@ dest/
 .audio001.wav.flac.done
 audio001.wav -> src/audio001.wav
 audio001.wav.vol000+64.par2
-audio001.wav.flac -> inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.orig -> audio001.wav
+audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.orig -> audio001.wav
 
 
 A7 - rename flac to dest filename
@@ -144,9 +156,9 @@ audio002.wav
 dest/
 audio001.wav -> src/audio001.wav
 audio001.wav.vol000+64.par2
-audio001.wav.flac -> inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.orig -> audio001.wav
+audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.orig -> audio001.wav
 
 
 A8 - timestamp update (set mtime)
@@ -161,11 +173,11 @@ audio002.wav
 dest/
 audio001.wav -> src/audio001.wav
 audio001.wav.vol000+64.par2
-audio001.wav.flac -> inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.orig -> audio001.wav
+audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.orig -> audio001.wav
 
 
 A all files:
@@ -178,18 +190,18 @@ audio002.wav
 dest/
 audio001.wav -> src/audio001.wav
 audio001.wav.vol000+64.par2
-audio001.wav.flac -> inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
+audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
 audio002.wav -> src/audio002.wav
 audio002.wav.vol000+93.par2
-audio002.wav.flac -> inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.orig -> audio001.wav
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol000+28.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol028+27.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.orig -> audio002.wav
+audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.orig -> audio001.wav
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.orig -> audio002.wav
 
 
 C first file:
@@ -208,18 +220,18 @@ audio002.wav
 dest/
 audio001.wav.orig -> src/audio001.wav
 audio001.wav.vol000+64.par2
-audio001.wav.flac -> inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
+audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
 audio002.wav -> src/audio002.wav
 audio002.wav.vol000+93.par2
-audio002.wav.flac -> inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.orig -> audio001.wav
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol000+28.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol028+27.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.orig -> audio002.wav
+audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.orig -> audio001.wav
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.orig -> audio002.wav
 
 
 C4 - unpack flac
@@ -230,21 +242,21 @@ audio001.wav
 audio002.wav
 
 dest/
-audio001.wav  # decompressed from inst_20210101-1234_Mon_1h2s_Twitch_audio001.wav
+audio001.wav  # decompressed from inst.20210101-1234-Mon.1h2s.Twitch.audio001.wav
 audio001.wav.orig -> src/audio001.wav
 audio001.wav.vol000+64.par2
-audio001.wav.flac -> inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
+audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
 audio002.wav -> src/audio002.wav
 audio002.wav.vol000+93.par2
-audio002.wav.flac -> inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.orig -> audio001.wav
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol000+28.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol028+27.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.orig -> audio002.wav
+audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.orig -> audio001.wav
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.orig -> audio002.wav
 
 C5 - verify unpacked flac wav vs wav.par2
 
@@ -258,22 +270,22 @@ audio001.wav
 audio002.wav
 
 dest/
-audio001.wav  # decompressed from inst_20210101-1234_Mon_1h2s_Twitch_audio001.wav
+audio001.wav  # decompressed from inst.20210101-1234-Mon.1h2s.Twitch.audio001.wav
 audio001.wav.orig -> src/audio001.wav
 audio001.wav.vol000+64.par2
-audio001.wav.flac -> inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
+audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
 audio002.wav -> src/audio002.wav
 audio002.wav.vol000+93.par2
-audio002.wav.flac -> inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.orig -> audio001.wav.orig
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.copy -> src/flacs/inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol000+28.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol028+27.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.orig -> audio002.wav
+audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.orig -> audio001.wav.orig
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.copy -> src/flacs/inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.orig -> audio002.wav
 
 
 C8 - remove temp wav
@@ -286,19 +298,19 @@ audio002.wav
 dest/
 audio001.wav.orig -> src/audio001.wav
 audio001.wav.vol000+64.par2
-audio001.wav.flac -> inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
+audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
 audio002.wav -> src/audio002.wav
 audio002.wav.vol000+93.par2
-audio002.wav.flac -> inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.orig -> audio001.wav.orig
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.copy -> src/flacs/inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol000+28.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol028+27.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.orig -> audio002.wav
+audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.orig -> audio001.wav.orig
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.copy -> src/flacs/inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.orig -> audio002.wav
 
 
 C - all files:
@@ -311,20 +323,20 @@ audio002.wav
 dest/
 audio001.wav.orig -> src/audio001.wav
 audio001.wav.vol000+64.par2
-audio001.wav.flac -> inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
+audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
 audio002.wav.orig -> src/audio002.wav
 audio002.wav.vol000+93.par2
-audio002.wav.flac -> inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.orig -> audio001.wav.orig
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.copy -> src/flacs/inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol000+28.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol028+27.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.orig -> audio002.wav.orig
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.copy -> inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
+audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.orig -> audio001.wav.orig
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.copy -> src/flacs/inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.orig -> audio002.wav.orig
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
 
 D - first file:
@@ -339,16 +351,16 @@ audio002.wav
 dest/
 audio002.wav.orig -> src/audio002.wav
 audio002.wav.vol000+93.par2
-audio002.wav.flac -> inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.copy -> src/flacs/inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol000+28.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol028+27.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.orig -> audio002.wav.orig
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.copy -> inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
+audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.copy -> src/flacs/inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.orig -> audio002.wav.orig
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
 
 D2 - copy flac and par2s
@@ -358,23 +370,23 @@ src/
 audio002.wav
 
 src/flacs
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
 
 dest/
 audio002.wav.orig -> src/audio002.wav
 audio002.wav.vol000+93.par2
-audio002.wav.flac -> inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.copy -> src/flacs/inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol000+28.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol028+27.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.orig -> audio002.wav.orig
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.copy -> inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
+audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.copy -> src/flacs/inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.orig -> audio002.wav.orig
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
 
 D - all files:
@@ -383,22 +395,22 @@ D - all files:
 src/
 
 src/flacs
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol000+28.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol028+27.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
 
 dest/
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.copy -> src/flacs/inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol000+28.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol028+27.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.copy -> inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.copy -> src/flacs/inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
 
 F - one file:
@@ -412,21 +424,21 @@ F2 - delete symlinks
 src/
 
 src/flacs
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol000+28.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol028+27.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
 
 dest/
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol000+28.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol028+27.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.copy -> inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
 
 F - all files:
@@ -435,17 +447,17 @@ F - all files:
 src/
 
 src/flacs
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol000+28.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol028+27.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
 
 dest/
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0000+500.par2
-inst_20210101-1234_Mon_1h2s_Twitch_audio001.flac.vol0500+499.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol000+28.par2
-inst_20210102-1234_Mon_5m8s_Jupiter-60bpm_audio002.flac.vol028+27.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
+inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
