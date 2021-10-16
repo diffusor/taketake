@@ -7,8 +7,8 @@ Design goals:
 * Don't modify the USB contents until data has been copied off and verified
 * Do post-copy verification after flushing filesystem caches
 
-Steps:
-------
+Procedure:
+----------
 
 Step A - encode flacs, generate pars
 ::::::::::::::::::::::::::::::::::::
@@ -181,10 +181,10 @@ Start state:
     dest/
 
 
-Step A - first file:
-::::::::::::::::::::
+Step A - encode flacs, generate pars
+::::::::::::::::::::::::::::::::::::
 
-A1 - wav symlink::
+* A1 - wav symlink::
 
     src/
     audio001.wav
@@ -193,7 +193,7 @@ A1 - wav symlink::
     dest/
     audio001.wav -> src/audio001.wav
 
-A4 - copy+convert to flac::
+* A4 - copy+convert to flac::
 
     src/
     audio001.wav
@@ -203,7 +203,7 @@ A4 - copy+convert to flac::
     .audio001.wav.flac.in_progress
     audio001.wav -> src/audio001.wav
 
-A5 - Rename to .orig.wav.flac.done::
+* A5 - Rename to .orig.wav.flac.done::
 
     src/
     audio001.wav
@@ -213,7 +213,7 @@ A5 - Rename to .orig.wav.flac.done::
     .audio001.wav.flac.done
     audio001.wav -> src/audio001.wav
 
-A6 - generate par2 files for original .wav::
+* A6 - generate par2 files for original .wav::
 
     src/
     audio001.wav
@@ -224,7 +224,7 @@ A6 - generate par2 files for original .wav::
     audio001.wav -> src/audio001.wav
     audio001.wav.vol000+64.par2
 
-A7,8 - After user prompt, symlink dest_filename (both ways)::
+* A7,8 - After user prompt, symlink dest_filename (both ways)::
 
     src/
     audio001.wav
@@ -237,7 +237,7 @@ A7,8 - After user prompt, symlink dest_filename (both ways)::
     audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
     inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav -> audio001.wav
 
-A9 - rename flac to dest filename::
+* A9 - rename flac to dest filename::
 
     src/
     audio001.wav
@@ -250,9 +250,8 @@ A9 - rename flac to dest filename::
     inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
     inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav -> audio001.wav
 
-A10 - timestamp update (set mtime)
-
-A11 - generate flac par2s::
+* A10 - timestamp update (set mtime)
+* A11 - generate flac par2s::
 
     src/
     audio001.wav
@@ -267,9 +266,7 @@ A11 - generate flac par2s::
     inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
     inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav -> audio001.wav
 
-Step A - All files:
-:::::::::::::::::::
-::
+* State after step A completes for all files::
 
     src/
     audio001.wav
@@ -292,12 +289,12 @@ Step A - All files:
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
 
 
-Step C - first file:
-::::::::::::::::::::
+Step C - Verify par files
+:::::::::::::::::::::::::
 
-C1 - verify flac against both its par2s
-C2 - verify orig wav vs par2
-C3 - then rename wav symlink to .orig::
+* C1 - verify flac against both its par2s
+* C2 - verify orig wav vs par2
+* C3 - then rename wav symlink to .orig::
 
     src/
     audio001.wav
@@ -319,7 +316,7 @@ C3 - then rename wav symlink to .orig::
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
 
-C4 - unpack flac::
+* C4 - unpack flac::
 
     src/
     audio001.wav
@@ -342,9 +339,9 @@ C4 - unpack flac::
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
 
-C5 - verify unpacked flac wav vs wav.par2
-C6 - retarget .flac.wav to point to wav.orig symlink
-C7 - add (broken) symlink to USB .flac copy::
+* C5 - verify unpacked flac wav vs wav.par2
+* C6 - retarget .flac.wav to point to wav.orig symlink
+* C7 - add (broken) symlink to USB .flac copy::
 
     src/
     audio001.wav
@@ -368,7 +365,7 @@ C7 - add (broken) symlink to USB .flac copy::
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
 
-C8 - remove verified decoded audio001.wav::
+* C8 - remove verified decoded audio001.wav::
 
     src/
     audio001.wav
@@ -391,9 +388,7 @@ C8 - remove verified decoded audio001.wav::
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
 
-Step C - all files:
-:::::::::::::::::::
-::
+* State after step C completes for all files::
 
     src/
     audio001.wav
@@ -418,10 +413,10 @@ Step C - all files:
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
 
-Step D - first file:
-::::::::::::::::::::
+Step D - Clean src, copy flac back to USB
+:::::::::::::::::::::::::::::::::::::::::
 
-D1 - Remove src wav, wav.par2, and symlinks wav.orig, wav.flac, and .flac.wav::
+* D1 - Remove src wav, wav.par2, and symlinks wav.orig, wav.flac, and .flac.wav::
 
     src/
     audio002.wav
@@ -440,7 +435,7 @@ D1 - Remove src wav, wav.par2, and symlinks wav.orig, wav.flac, and .flac.wav::
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav.orig
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
-D2 - copy flac and par2s::
+* D2 - copy flac and par2s::
 
     src/
     audio002.wav
@@ -464,9 +459,7 @@ D2 - copy flac and par2s::
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav.orig
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
-Step D - all files:
-:::::::::::::::::::
-::
+* State after step D completes for all files::
 
     src/
 
@@ -489,11 +482,11 @@ Step D - all files:
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
 
-Step F - one file:
-::::::::::::::::::
+Step F - Verify USB copy of FLAC files, clean up
+::::::::::::::::::::::::::::::::::::::::::::::::
 
-F1 - verify flacs on USB
-F2 - delete symlinks::
+* F1 - verify flacs on USB
+* F2 - delete symlinks::
 
     src/
 
@@ -514,9 +507,7 @@ F2 - delete symlinks::
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
-Step F - all files:
-:::::::::::::::::::
-::
+* State after step F completes for all files::
 
     src/
 
