@@ -14,6 +14,7 @@ Step A - encode flacs, generate pars
 ::::::::::::::::::::::::::::::::::::
 
 A. For all wav files to copy:
+
    1. make symlink from dest dir to wav file on USB drive
       (the symlink's presence indicates processing is in progress and final
       verif is still needed)::
@@ -80,6 +81,7 @@ Step C - Verify par files
 :::::::::::::::::::::::::
 
 C. For all copied wav files:
+
    1. Verify flac file against both of its par2 files::
 
         par2 verify inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
@@ -119,6 +121,7 @@ Step D - Clean src, copy flac back to USB
 :::::::::::::::::::::::::::::::::::::::::
 
 D. For all copied wav files:
+
    1. Remove src wav, wav.par2, and symlinks wav.orig, wav.flac, and .flac.wav::
 
         rm src/audio001.wav
@@ -147,6 +150,7 @@ Step F - Verify USB copy of FLAC files, clean up
 ::::::::::::::::::::::::::::::::::::::::::::::::
 
 F. For all copied wav files:
+
    1. On USB: Verify all copied flac files against both of their par2 files::
 
         in src/flacs
