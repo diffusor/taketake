@@ -13,6 +13,11 @@ parentdir = os.path.dirname(currentdir)
 sys.path.append(parentdir)
 import taketake
 
+
+#===========================================================================
+# Speech recognition and parsing tests
+#===========================================================================
+
 class check_word_list_grok(unittest.TestCase):
     """Base class for classes that test specific grok functions.
 
@@ -35,7 +40,7 @@ class check_word_list_grok(unittest.TestCase):
         self.check_impl(word_str + " with stuff", "with stuff")
 
 
-class Test_grok_digit_pair(check_word_list_grok):
+class Test0_grok_digit_pair(check_word_list_grok):
     def grok_fn(self, word_list):
         return taketake.grok_digit_pair(word_list)
 
@@ -79,7 +84,7 @@ class Test_grok_digit_pair(check_word_list_grok):
         self.check("fifty nine")
 
 
-class Test_grok_time_words(check_word_list_grok):
+class Test0_grok_time_words(check_word_list_grok):
     def grok_fn(self, word_list):
         hour, minute, second, rest = taketake.grok_time_words(word_list)
         self.assertEqual(word_list, rest)
@@ -498,7 +503,7 @@ class Test_grok_time_words(check_word_list_grok):
         self.check("twenty three hour and twenty three minutes oh one")
 
 
-class Test_grok_year(check_word_list_grok):
+class Test0_grok_year(check_word_list_grok):
     def grok_fn(self, word_list):
         return taketake.grok_year(word_list)
 
@@ -616,7 +621,7 @@ class Test_grok_year(check_word_list_grok):
         self.check("twenty one twenty nine")
 
 
-class Test_grok_date_words(check_word_list_grok):
+class Test0_grok_date_words(check_word_list_grok):
     def grok_fn(self, word_list):
         year, month, day, day_of_week, rest = taketake.grok_date_words(word_list)
         self.assertEqual(word_list, rest)
@@ -632,7 +637,7 @@ class Test_grok_date_words(check_word_list_grok):
         self.check("january first twenty twenty one")
 
 
-class Test_TimestampGrokError(unittest.TestCase):
+class Test0_TimestampGrokError(unittest.TestCase):
     def check(self, text):
         with self.assertRaisesRegex(taketake.TimestampGrokError,
                                     self.regex):
@@ -699,7 +704,7 @@ class Test_TimestampGrokError(unittest.TestCase):
         self.check(None)
 
 
-class Test_words_to_timestamp(unittest.TestCase):
+class Test0_words_to_timestamp(unittest.TestCase):
     def check_impl(self, text, expect, expected_rem=""):
         """Checks that the given string text decodes to self.expected_value,
         with the given remaining words joined into a string passed in as expected_rem.
@@ -752,7 +757,7 @@ class Test_words_to_timestamp(unittest.TestCase):
                    2205, 8, 4, 5)
 
 
-class Test_fmt_duration(unittest.TestCase):
+class Test0_fmt_duration(unittest.TestCase):
     def check(self, duration, expect):
         formatted = taketake.fmt_duration(duration)
         self.assertEqual(formatted, expect)
@@ -801,6 +806,10 @@ class Test_fmt_duration(unittest.TestCase):
         self.check(3600*60+59*60+1, "60h59m1s")
         self.check(3600*60+59*60+59, "60h59m59s")
 
+
+#===========================================================================
+# File processing integration tests
+#===========================================================================
 
 if __name__ == '__main__':
     unittest.main()
