@@ -217,7 +217,7 @@ def par2_create(f, num_par2_files, percent_redundancy):
 def par2_verify(f):
     pass
 
-def flush_fs():
+def flush_fs_caches():
     pass
 
 def set_mtime():
@@ -787,7 +787,7 @@ async def process_file_speech(finfo):
 
 
 #============================================================================
-# async processing of files and prompting for rename
+# Phase A: Encode - encode flacs, rename, generate pars
 #============================================================================
 
 def play_media_file(finfo):
@@ -913,7 +913,7 @@ async def renamer_and_par_generator(prompter2par_dest_names,
     flac2par_completions.put_nowait(None)
 
 
-async def process_wavs_from_usb(filepaths, dest):
+async def phaseA_encode(filepaths, dest):
     """Process wav files, encoding them to renamed files in the dest path.
     """
     # Construct the FileInfo objects
@@ -971,12 +971,45 @@ async def process_wavs_from_usb(filepaths, dest):
     print(f"Processor: done, {time_end-time_start:.1f}s total.")
 
 
+#============================================================================
+# Phase B: Verify and copyback - Verify par2s, clean up, copy flacs back to src
+#============================================================================
+
+async def phaseB_verify_and_copyback(dest):
+    pass
+
+
+#============================================================================
+# Phase C: Verify backcopy - Verify USB copy of FLAC files, clean up
+#============================================================================
+
+async def phaseC_verify_backcopy(dest):
+    pass
+
+
+#============================================================================
+# Main sequence
+#============================================================================
+
+def taketake_files(filepaths, dest):
+    if dest is None:
+        dest = "."
+
+    asyncio.run(phaseA_encode(filepaths, dest))
+    flush_fs_caches()
+    asyncio.run(phaseB_verify_and_copyback(dest))
+    flush_fs_caches()
+    asyncio.run(phaseC_verify_backcopy(dest))
+
+
 def main():
     files = sys.argv[1:]
     if not files or files[0] in '-h --help -?'.split():
-        print(f"Usage: {sys.argv[0]} files...")
+        print(f"""Usage: {sys.argv[0]} files...
+
+During Rename, press alt-h to hear the file via the configured media player""")
     else:
-        asyncio.run(process_wavs_from_usb(files, dest=None))
+        taketake_files(files, dest=None)
 
     return 0
 
