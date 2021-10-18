@@ -119,6 +119,10 @@ class ExtCmd(metaclass=ExtCmdListMeta):
         return [arg.format(**kwargs) for arg in self.template.split()]
 
 
+#============================================================================
+# External command configuration
+#============================================================================
+
 ExtCmd(
     "ffmpeg_silence_detect",
     "Detects spans of silence in a media file.",
@@ -956,9 +960,8 @@ async def process_wavs_from_usb(filepaths, dest):
         flac2par_completions,
         par2processor_completions))
 
-    # Wait for all files to be completely processed
     time_start = time.monotonic()
-    # Await the cancelations to complete
+    # Wait for all files to be completely processed
     await asyncio.gather(
         recognizer_task,
         prompter_task,
@@ -970,7 +973,10 @@ async def process_wavs_from_usb(filepaths, dest):
 
 def main():
     files = sys.argv[1:]
-    asyncio.run(process_wavs_from_usb(files, dest=None))
+    if not files or files[0] in '-h --help -?'.split():
+        print(f"Usage: {sys.argv[0]} files...")
+    else:
+        asyncio.run(process_wavs_from_usb(files, dest=None))
 
     return 0
 
