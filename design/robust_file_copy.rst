@@ -10,10 +10,10 @@ Design goals:
 Procedure:
 ----------
 
-Step A - encode flacs, generate pars
-::::::::::::::::::::::::::::::::::::
+Phase A - encode flacs, rename, generate pars
+:::::::::::::::::::::::::::::::::::::::::::::
 
-For all wav files to copy:
+*For all wav files to copy:*
 
 1. make symlink from dest dir to wav file on USB drive
    (the symlink's presence indicates processing is in progress and final
@@ -27,7 +27,7 @@ For all wav files to copy:
 
    -> query user to fix up each file name as they are generated
 
-While waiting for filename confirmation, for each wav:
+*While waiting for filename confirmation, for each wav:*
 
 4. convert to flac as .orig_filename.wav.flac.in_progress (via wav symlink)::
 
@@ -44,7 +44,7 @@ While waiting for filename confirmation, for each wav:
      -> audio001.wav.vol000+64.par2
     rm audio001.wav.par2
 
-As each wav file is produced from the above:
+*As each wav file is produced from the above:*
 
 7. make symlink from orig_filename.wav.flac to the final destination flac name
    (this will start as broken; its presence means the flac file hasn't been
@@ -70,19 +70,15 @@ As each wav file is produced from the above:
       -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
      rm inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.par2
 
+*Wait for all files to complete processing*
 
-Step B - flush filesystem, sync
-:::::::::::::::::::::::::::::::
-
-Once:
-
-1. flush FS caches
+12. flush filesystem caches
 
 
-Step C - Verify par files
-:::::::::::::::::::::::::
+Phase B - Verify par files and clean up, copy flacs back to src
+:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
-For all copied wav files:
+*For all copied wav files:*
 
 1. Verify flac file against both of its par2 files::
 
@@ -118,13 +114,9 @@ For all copied wav files:
 
     rm audio001.wav
 
+*For all copied wav files:*
 
-Step D - Clean src, copy flac back to USB
-:::::::::::::::::::::::::::::::::::::::::
-
-For all copied wav files:
-
-1. Remove src wav, wav.par2, and symlinks wav.orig, wav.flac, and .flac.wav::
+9. Remove src wav, wav.par2, and symlinks wav.orig, wav.flac, and .flac.wav::
 
     rm src/audio001.wav
     rm audio001.wav.vol000+64.par2
@@ -132,28 +124,24 @@ For all copied wav files:
     rm audio001.wav.flac
     rm inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav (symlink to audio001.wav.orig)
 
-2. Copy flac and its par2 files to the USB drive (in a subdir)::
+10. Copy flac and its par2 files to the USB drive (in a subdir)::
 
-    mkdir src/flacs
-    copy
-        inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-        inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-        inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-     -> src/flacs
+     mkdir src/flacs
+     copy
+         inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+         inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+         inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+      -> src/flacs
 
+*Wait for all files to complete processing*
 
-Step E - flush filesystem, sync
-:::::::::::::::::::::::::::::::
-
-Once:
-
-1. flush FS caches
+11. flush filesystem caches
 
 
-Step F - Verify USB copy of FLAC files, clean up
-::::::::::::::::::::::::::::::::::::::::::::::::
+Phase C - Verify USB copy of FLAC files, clean up
+::::::::::::::::::::::::::::::::::::::::::::::::::
 
-For all copied wav files:
+*For all copied wav files:*
 
 1. On USB: Verify all copied flac files against both of their par2 files::
 
@@ -170,9 +158,13 @@ For all copied wav files:
 USB drive file transfer example:
 ================================
 
+Process wav files from *src/* to *dest/*
+----------------------------------------
+
 Start state:
-------------
-::
+::::::::::::
+
+* Two wav files to process::
 
     src/
     audio001.wav
@@ -181,8 +173,8 @@ Start state:
     dest/
 
 
-Step A - encode flacs, generate pars
-::::::::::::::::::::::::::::::::::::
+Phase A - encode flacs, rename, generate pars
+:::::::::::::::::::::::::::::::::::::::::::::
 
 * A1 - wav symlink::
 
@@ -289,12 +281,12 @@ Step A - encode flacs, generate pars
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
 
 
-Step C - Verify par files
-:::::::::::::::::::::::::
+Phase B - Verify par files and clean up, copy flacs back to src
+:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
-* C1 - verify flac against both its par2s
-* C2 - verify orig wav vs par2
-* C3 - then rename wav symlink to .orig::
+* B1 - verify flac against both its par2s
+* B2 - verify orig wav vs par2
+* B3 - then rename wav symlink to .orig::
 
     src/
     audio001.wav
@@ -316,7 +308,7 @@ Step C - Verify par files
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
 
-* C4 - unpack flac::
+* B4 - unpack flac::
 
     src/
     audio001.wav
@@ -339,9 +331,9 @@ Step C - Verify par files
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
 
-* C5 - verify unpacked flac wav vs wav.par2
-* C6 - retarget .flac.wav to point to wav.orig symlink
-* C7 - add (broken) symlink to USB .flac copy::
+* B5 - verify unpacked flac wav vs wav.par2
+* B6 - retarget .flac.wav to point to wav.orig symlink
+* B7 - add (broken) symlink to USB .flac copy::
 
     src/
     audio001.wav
@@ -365,7 +357,7 @@ Step C - Verify par files
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
 
-* C8 - remove verified decoded audio001.wav::
+* B8 - remove verified decoded audio001.wav::
 
     src/
     audio001.wav
@@ -388,7 +380,7 @@ Step C - Verify par files
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
 
-* State after step C completes for all files::
+* State after step B8 completes for all files::
 
     src/
     audio001.wav
@@ -412,11 +404,7 @@ Step C - Verify par files
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav.orig
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
-
-Step D - Clean src, copy flac back to USB
-:::::::::::::::::::::::::::::::::::::::::
-
-* D1 - Remove src wav, wav.par2, and symlinks wav.orig, wav.flac, and .flac.wav::
+* B9 - Remove src wav, wav.par2, and symlinks wav.orig, wav.flac, and .flac.wav::
 
     src/
     audio002.wav
@@ -435,7 +423,7 @@ Step D - Clean src, copy flac back to USB
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav.orig
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
-* D2 - copy flac and par2s::
+* B10 - copy flac and par2s::
 
     src/
     audio002.wav
@@ -459,7 +447,7 @@ Step D - Clean src, copy flac back to USB
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav.orig
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
-* State after step D completes for all files::
+* State after phase B completes for all files::
 
     src/
 
@@ -482,11 +470,11 @@ Step D - Clean src, copy flac back to USB
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
 
-Step F - Verify USB copy of FLAC files, clean up
-::::::::::::::::::::::::::::::::::::::::::::::::
+Phase C - Verify USB copy of FLAC files, clean up
+::::::::::::::::::::::::::::::::::::::::::::::::::
 
-* F1 - verify flacs on USB
-* F2 - delete symlinks::
+* C1 - verify flacs on USB
+* C2 - delete symlinks::
 
     src/
 
@@ -507,7 +495,7 @@ Step F - Verify USB copy of FLAC files, clean up
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
-* State after step F completes for all files::
+* State after phase C completes for all files::
 
     src/
 
