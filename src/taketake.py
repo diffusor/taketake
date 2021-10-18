@@ -118,6 +118,25 @@ class ExtCmd(metaclass=ExtCmdListMeta):
         """Returns a list of parameters constructed from the kwargs injected into the command template."""
         return [arg.format(**kwargs) for arg in self.template.split()]
 
+    async def run_fg(self, **kwargs):
+        args = self.construct_args(**kwargs)
+
+        proc = await asyncio.create_subprocess_exec(*args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE)
+
+        proc.args = args
+        (proc.stdout_str, proc.stderr_str) = await proc.communicate()
+
+        def exmsg():
+            return f" from '{' '.join(args)}':\n  stdout: {proc.stdout_str}\n  stderr: {proc.stderr_str}"
+        proc.exmsg = exmsg
+
+        if proc.returncode:
+            raise SubprocessError(f"Got exit {proc.returncode} {exmsg()}")
+
+        return proc
+
 
 #============================================================================
 # External command configuration
@@ -197,6 +216,9 @@ class TimeRange:
 
 
 # Exceptions
+class SubprocessError(RuntimeError):
+    pass
+
 class InvalidMediaFile(RuntimeError):
     pass
 
@@ -224,31 +246,18 @@ def set_mtime():
     # os.utime( dt.timestamp )
     pass
 
+
 async def get_file_duration(fpath):
     """Use ffprobe to determine how many seconds the file identified by fpath plays for."""
-    args = ExtCmd.get_media_duration.construct_args(file=fpath)
+    proc = await ExtCmd.get_media_duration.run_fg(file=fpath)
 
-    proc = await asyncio.create_subprocess_exec(*args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE)
-
-    (stdout, stderr) = await proc.communicate()
-
-    def exmsg():
-        return f" from '{' '.join(args)}':\n  stdout: '{stdout}'\n  stderr: '{stderr}'"
-
-    if proc.returncode:
-        raise InvalidMediaFile(f"Got exit {proc.returncode} {exmsg()}")
-
-    if stderr:
-        raise InvalidMediaFile(f"Got extra stderr from '{' '.join(args)}':"
-                f"\n  stdout: '{stdout}'"
-                f"\n  stderr: '{stderr}'")
+    if proc.stderr_str:
+        raise InvalidMediaFile(f"Got extra stderr {proc.exmsg()}")
 
     try:
-        duration = float(stdout)
+        duration = float(proc.stdout_str)
     except ValueError as e:
-        raise InvalidMediaFile(f"Could not parse duration stdout from '{' '.join(args)}':\n  '{stdout}'") from e
+        raise InvalidMediaFile(f"Could not parse duration stdout {proc.exmsg()}") from e
 
     return duration
 
@@ -258,25 +267,14 @@ async def detect_silence(fpath):
 
     Return a list of TimeRange objects identifying the spans of silence."""
 
-    args = ExtCmd.ffmpeg_silence_detect.construct_args(
+    proc = await ExtCmd.ffmpeg_silence_detect.run_fg(
             file=fpath,
             length=Config.file_scan_duration_s,
             threshold=Config.silence_threshold_dbfs,
             duration=Config.silence_min_duration_s)
 
-    proc = await asyncio.create_subprocess_exec(*args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE)
-
-    (stdout, stderr) = await proc.communicate()
-
-    def exmsg():
-        return f" from '{' '.join(args)}':\n  stderr: '{stderr}'"
-
-    if proc.returncode:
-        raise InvalidMediaFile(f"Got exit {proc.returncode} {exmsg()}")
-
-    detected_lines = [line for line in stderr.splitlines() if line.startswith(b'[silencedetect')]
+    detected_lines = [line for line in proc.stderr_str.splitlines()
+                        if line.startswith(b'[silencedetect')]
 
     offsets = [float(line.split()[-1]) for line in detected_lines if b"silence_start" in line]
     durations = [float(line.split()[-1]) for line in detected_lines if b"silence_end" in line]
