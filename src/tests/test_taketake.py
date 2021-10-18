@@ -811,5 +811,8 @@ class Test0_fmt_duration(unittest.TestCase):
 # File processing integration tests
 #===========================================================================
 
+class Test8_one_wav(unittest.TestCase):
+    pass
+
 if __name__ == '__main__':
     unittest.main()
