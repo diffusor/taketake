@@ -10,8 +10,8 @@ Design goals:
 Procedure:
 ----------
 
-Phase A - encode flacs, rename, generate pars
-:::::::::::::::::::::::::::::::::::::::::::::
+Phase A: Encode - encode flacs, rename, generate pars
+:::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 *For all wav files to copy:*
 
@@ -75,8 +75,8 @@ Phase A - encode flacs, rename, generate pars
 12. flush filesystem caches
 
 
-Phase B - Verify par files and clean up, copy flacs back to src
-:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+Phase B: Verify - Verify par files and clean up, copy flacs back to src
+:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 *For all copied wav files:*
 
@@ -138,8 +138,8 @@ Phase B - Verify par files and clean up, copy flacs back to src
 11. flush filesystem caches
 
 
-Phase C - Verify USB copy of FLAC files, clean up
-::::::::::::::::::::::::::::::::::::::::::::::::::
+Phase C: Copy-back - Verify USB copy of FLAC files, clean up
+::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 *For all copied wav files:*
 
@@ -173,8 +173,8 @@ Start state:
     dest/
 
 
-Phase A - encode flacs, rename, generate pars
-:::::::::::::::::::::::::::::::::::::::::::::
+Phase A: Encode - encode flacs, rename, generate pars
+:::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 * A1 - wav symlink::
 
@@ -281,8 +281,8 @@ Phase A - encode flacs, rename, generate pars
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
 
 
-Phase B - Verify par files and clean up, copy flacs back to src
-:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+Phase B: Verify - Verify par files and clean up, copy flacs back to src
+:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 * B1 - verify flac against both its par2s
 * B2 - verify orig wav vs par2
@@ -470,8 +470,8 @@ Phase B - Verify par files and clean up, copy flacs back to src
     inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
 
 
-Phase C - Verify USB copy of FLAC files, clean up
-::::::::::::::::::::::::::::::::::::::::::::::::::
+Phase C: Copy-back - Verify USB copy of FLAC files, clean up
+::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 * C1 - verify flacs on USB
 * C2 - delete symlinks::
