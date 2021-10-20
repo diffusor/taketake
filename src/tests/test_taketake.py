@@ -15,6 +15,8 @@ sys.path.append(parentdir)
 import taketake
 import asyncio
 import tempfile
+import shutil
+import time
 
 testflac = "testdata/audio.20210318-2020-Thu.timestamp-wrong-weekday-Monday.flac"
 testpath = os.path.dirname(os.path.abspath(__file__))
@@ -830,6 +832,33 @@ class Test5_ext_commands_read_only(unittest.TestCase):
         with self.assertRaisesRegex(taketake.SubprocessError,
                 f'(?s)Got bad exit code 1 from.*{fpath}: No such file or directory'):
             asyncio.run(taketake.get_file_duration(fpath))
+
+    def test_detect_silence(self):
+        """This one is a bit fragile, as ffmpeg silencedetect float output is janky"""
+        silences = asyncio.run(taketake.detect_silence(testflacpath))
+        self.assertEqual(silences, [taketake.TimeRange(start=0.0, duration=1.84045),
+            taketake.TimeRange(start=5.94787, duration=1.91383),
+            taketake.TimeRange(start=10.117, duration=0.593175)])
+
+
+class Test6_ext_commands_tempdir(unittest.TestCase):
+    def setUp(self):
+        timestamp = time.strftime("%Y%m%d-%H%M%S-%a")
+        self.tempdir = tempfile.mkdtemp(
+                prefix=f'{self.__class__.__name__}.{timestamp}.', dir=testpath)
+        #print("Tempdir:", self.tempdir)
+
+    def tearDown(self):
+        shutil.rmtree(self.tempdir)
+
+    def test_wut(self):
+        self.assertEqual(0,1)
+
+# File corruption automation:
+# dd if=/dev/zero of=filepath bs=1 count=1024 seek=2048 conv=notrunc
+# see https://unix.stackexchange.com/q/222359
+# Can also punch 4k holes with fallocate --punch-hole,
+# or cut out pages with fallocate --collapse-range
 
 #===========================================================================
 # File processing integration tests
