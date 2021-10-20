@@ -99,12 +99,27 @@ class Config:
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
 
+
 class ExtCmdListMeta(type):
+    """Allow access to instances of derived classes by lookup through the
+    derived class's cmds dict.
+
+        E.g.: DerivedClass.foo translates to DerivedClass.cmds["foo"]
+
+    The derived class should inject its instances into the cmds dict itself:
+
+        DerivedClass.cmds[name] = self
+    """
+
     def __getattr__(cls, name):
         return cls.cmds[name]
 
 class ExtCmd(metaclass=ExtCmdListMeta):
-    """Class for describing external commands."""
+    """Collect external commands for simple documentation and execution.
+
+    Example:
+        proc = await ExtCmd.get_media_duration.run_fg(file=fpath)
+    """
     cmds = {}
 
     def __init__(self, name, doc, template, **kwargs):

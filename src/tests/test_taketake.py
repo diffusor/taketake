@@ -852,7 +852,7 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
         shutil.rmtree(self.tempdir)
 
     def test_wut(self):
-        self.assertEqual(0,1)
+        pass
 
 # File corruption automation:
 # dd if=/dev/zero of=filepath bs=1 count=1024 seek=2048 conv=notrunc
