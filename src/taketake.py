@@ -789,9 +789,7 @@ async def process_file_speech(finfo):
 #============================================================================
 
 def play_media_file(finfo):
-    """Use ffmpeg silencedetect to find all silent segments.
-
-    Return a list of (start, duration) pairs."""
+    """Play the given file in a background process."""
 
     start = 0
     if finfo.speech_range is not None:
