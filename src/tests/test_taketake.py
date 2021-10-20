@@ -11,7 +11,14 @@ import datetime
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 parentdir = os.path.dirname(currentdir)
 sys.path.append(parentdir)
+
 import taketake
+import asyncio
+import tempfile
+
+testflac = "testdata/audio.20210318-2020-Thu.timestamp-wrong-weekday-Monday.flac"
+testpath = os.path.dirname(os.path.abspath(__file__))
+testflacpath = os.path.join(testpath, testflac)
 
 
 #===========================================================================
@@ -806,6 +813,23 @@ class Test0_fmt_duration(unittest.TestCase):
         self.check(3600*60+59*60+1, "60h59m1s")
         self.check(3600*60+59*60+59, "60h59m59s")
 
+
+#===========================================================================
+# ExtCmd external command component tests
+#===========================================================================
+
+class Test5_ext_commands_read_only(unittest.TestCase):
+    """Test ExtCmd commands that don't modify the filesystem"""
+
+    def test_duration_flac(self):
+        duration = asyncio.run(taketake.get_file_duration(testflacpath))
+        self.assertAlmostEqual(duration, 10.710204, places=3)
+
+    def test_duration_no_file(self):
+        fpath = tempfile.mktemp(dir=testpath)
+        with self.assertRaisesRegex(taketake.SubprocessError,
+                f'(?s)Got bad exit code 1 from.*{fpath}: No such file or directory'):
+            asyncio.run(taketake.get_file_duration(fpath))
 
 #===========================================================================
 # File processing integration tests

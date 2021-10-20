@@ -129,11 +129,11 @@ class ExtCmd(metaclass=ExtCmdListMeta):
         (proc.stdout_str, proc.stderr_str) = await proc.communicate()
 
         def exmsg():
-            return f" from '{' '.join(args)}':\n  stdout: {proc.stdout_str}\n  stderr: {proc.stderr_str}"
+            return f"from '{' '.join(args)}':\n  stdout: {proc.stdout_str}\n  stderr: {proc.stderr_str}"
         proc.exmsg = exmsg
 
         if proc.returncode:
-            raise SubprocessError(f"Got exit {proc.returncode} {exmsg()}")
+            raise SubprocessError(f"Got bad exit code {proc.returncode} {exmsg()}")
 
         return proc
 
