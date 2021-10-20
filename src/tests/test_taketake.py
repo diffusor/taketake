@@ -857,8 +857,14 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
 # File corruption automation:
 # dd if=/dev/zero of=filepath bs=1 count=1024 seek=2048 conv=notrunc
 # see https://unix.stackexchange.com/q/222359
-# Can also punch 4k holes with fallocate --punch-hole,
-# or cut out pages with fallocate --collapse-range
+#
+# Or use fallocate:
+#   --punch-hole to deallocate blocks (effectively replacing them with zeros),
+#       making the file more sparse
+#   --collapse-range to cut out blocks or any range of bytes
+#   --insert-range to inject blocks of zeros, shifting everything after
+#   --posix to force the operation even if it would be inefficient due
+#       to lack of underlying filesystem support.
 
 #===========================================================================
 # File processing integration tests
