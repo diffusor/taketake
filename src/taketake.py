@@ -194,10 +194,14 @@ ExtCmd(
     "Constructs par2 volume files for the given file.",
     "par2 create -s{blocksize} -r{redundance} -n{numfiles} -u {infile}",
 
-    infile="The input file to generate par2 volumes for",
+    infile="""The input file to generate par2 volumes for.
+        Note the par2 files will be created in the same directory as the given file.""",
     blocksize="The number of bytes for each block.  Multiples of 4K is good for disks.",
-    redundance="The percent file size to target for each par2 file.",
-    numfiles="Number of par2 volume files to generate.",
+    redundance="The percent of the original file size to target for each par2 file.",
+    numfiles="""Number of par2 volume files to generate.
+        This doesn't include the basic .par2 file, which can be deleted to
+        reduce clutter since the vol*.par2 files contain the same information.
+        Note we use the -u argument so each vol*.par2 file will be the same size.""",
 )
 
 ExtCmd(
