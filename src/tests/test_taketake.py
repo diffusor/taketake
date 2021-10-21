@@ -899,6 +899,8 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
         asyncio.run(taketake.par2_create(wavpath, 2, 5))
 
         #subprocess.run(("ls", "-al", os.path.dirname(wavpath)))
+        asyncio.run(taketake.par2_verify(wavpath))
+
 
 # File corruption automation:
 # dd if=/dev/zero of=filepath bs=1 count=1024 seek=2048 conv=notrunc
