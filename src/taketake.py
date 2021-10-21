@@ -237,6 +237,15 @@ ExtCmd(
         or a file for which {file}.par2 exists.""",
 )
 
+ExtCmd(
+    "par2_repair",
+    "Repairs the file(s) covered by the given par2 file.",
+    "par2 repair -q {file}",
+
+    file="""The file to check; can be a .par2 file, a .vol*.par2 file,
+        or a file for which {file}.par2 exists.""",
+)
+
 
 @dataclass
 class TimeRange:
@@ -289,19 +298,25 @@ async def par2_create(f, num_par2_files, percent_redundancy):
             redundance=percent_redundancy, numfiles=num_par2_files)
     os.remove(f + ".par2")
 
-async def par2_verify(f):
-    """Verify the given file f.
-
-    f may be a par2 file, or a file with any associated .vol*.par2 or .par2 file
-    """
+def get_related_par2file(f):
     if not f.endswith(".par2"):
         par2files = glob.glob(f"{f}.*par2")
         if not par2files:
             raise MissingPar2File(f"Couldn't find par2 file for {f}\n"
                     "  Candidates:\n   " + "\n   ".join(glob.glob(f"{f}*")))
         f = par2files[0]
+    return f
 
-    proc = await ExtCmd.par2_verify.run_fg(file=f)
+async def par2_verify(f):
+    """Verify the given file f.
+
+    f may be a par2 file, or a file with any associated .vol*.par2 or .par2 file
+    """
+    proc = await ExtCmd.par2_verify.run_fg(file=get_related_par2file(f))
+
+async def par2_repair(f):
+    proc = await ExtCmd.par2_repair.run_fg(file=get_related_par2file(f))
+    #print("Repaired", proc.exmsg())
 
 def flush_fs_caches():
     pass

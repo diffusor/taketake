@@ -893,7 +893,7 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
         self.assertFileType(flacpath,
                 "FLAC audio bitstream data, 16 bit, stereo, 44.1 kHz, 472320 samples")
 
-    def test_par2_create(self):
+    def test_par2(self):
         wavpath = os.path.join(self.tempdir, "test.wav")
         asyncio.run(taketake.flac_decode(testflacpath, wavpath))
         asyncio.run(taketake.par2_create(wavpath, 2, 5))
@@ -906,6 +906,10 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
         with self.assertRaisesRegex(taketake.SubprocessError,
                 f'(?s)Got bad exit code 1 from par2.*{wavpath}.* - damaged.*Repair is possible'):
             asyncio.run(taketake.par2_verify(wavpath))
+
+        # Make sure par2 can also repair the file
+        asyncio.run(taketake.par2_repair(wavpath))
+        asyncio.run(taketake.par2_verify(wavpath))
 
 
 # File corruption automation:
