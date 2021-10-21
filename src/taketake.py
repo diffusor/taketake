@@ -245,12 +245,14 @@ class InvalidMediaFile(RuntimeError):
 # Audio file processing
 #============================================================================
 
-def flac_encode(wav_fpath, flac_fpath):
+async def flac_encode(wav_fpath, flac_fpath):
     #flac --preserve-modtime 7d29t001.WAV -o 7d29t001.flac
-    pass
+    proc = await ExtCmd.flac_encode.run_fg(infile=wav_fpath, outfile=flac_fpath)
+    #print(f"Encoded to {flac_fpath}:", proc.stderr_str.decode())
 
-def flac_decode(flac_fpath, wav_fpath):
-    pass
+async def flac_decode(flac_fpath, wav_fpath):
+    proc = await ExtCmd.flac_decode.run_fg(infile=flac_fpath, outfile=wav_fpath)
+    #print(f"Decoded to {wav_fpath}:", proc.stderr_str.decode())
 
 def par2_create(f, num_par2_files, percent_redundancy):
     pass

@@ -17,6 +17,7 @@ import asyncio
 import tempfile
 import shutil
 import time
+import subprocess
 
 testflac = "testdata/audio.20210318-2020-Thu.timestamp-wrong-weekday-Monday.flac"
 testpath = os.path.dirname(os.path.abspath(__file__))
@@ -845,14 +846,49 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
     def setUp(self):
         timestamp = time.strftime("%Y%m%d-%H%M%S-%a")
         self.tempdir = tempfile.mkdtemp(
-                prefix=f'{self.__class__.__name__}.{timestamp}.', dir=testpath)
+                prefix=f'{self.__class__.__name__}.{timestamp}.')
         #print("Tempdir:", self.tempdir)
 
     def tearDown(self):
+        # Comment out the rmtree and rerun failing test with -k to see the
+        # state of the temp files at the point of failure
         shutil.rmtree(self.tempdir)
-
-    def test_wut(self):
         pass
+
+    def assertEqualFiles(self, f1, f2):
+        p = subprocess.run(("cmp", f1, f2))
+        self.assertEqual(p.returncode, 0)
+
+    def assertNotEqualFiles(self, f1, f2):
+        p = subprocess.run(("cmp", f1, f2), capture_output=True)
+        self.assertEqual(p.returncode, 1)
+
+    def assertFileType(self, f, typestring):
+        """Run the file(1) command on f and check its string against typestring,
+        which should not include the 'file: ' portion of the output"""
+        p = subprocess.run(("file", f), capture_output=True, text=True)
+        self.assertEqual(p.stdout.strip(), f"{f}: {typestring}")
+
+    def test_flac_decode_encode(self):
+        wavpath = os.path.join(self.tempdir, "test.wav")
+        flacpath = f"{wavpath}.flac"
+        wavpath2 = f"{flacpath}.wav"
+        asyncio.run(taketake.flac_decode(testflacpath, wavpath))
+        asyncio.run(taketake.flac_encode(wavpath, flacpath))
+        asyncio.run(taketake.flac_decode(flacpath, wavpath2))
+
+        self.assertEqualFiles(wavpath, wavpath2)
+        self.assertNotEqualFiles(wavpath, flacpath)
+
+        wavsize = os.path.getsize(wavpath)
+        self.assertEqual(wavsize, 1889324)
+        self.assertGreater(wavsize/5, os.path.getsize(flacpath))
+
+        wavtypestr = "RIFF (little-endian) data, WAVE audio, Microsoft PCM, 16 bit, stereo 44100 Hz"
+        self.assertFileType(wavpath, wavtypestr)
+        self.assertFileType(wavpath2, wavtypestr)
+        self.assertFileType(flacpath,
+                "FLAC audio bitstream data, 16 bit, stereo, 44.1 kHz, 472320 samples")
 
 # File corruption automation:
 # dd if=/dev/zero of=filepath bs=1 count=1024 seek=2048 conv=notrunc
