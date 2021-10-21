@@ -146,8 +146,14 @@ class ExtCmd(metaclass=ExtCmdListMeta):
         proc.args = args
         (proc.stdout_str, proc.stderr_str) = await proc.communicate()
 
+        def mlfmt(b):
+            lines = b.decode().splitlines()
+            return "\n    ".join(lines)
+
         def exmsg():
-            return f"from '{' '.join(args)}':\n  stdout: {proc.stdout_str}\n  stderr: {proc.stderr_str}"
+            return f"from {args[0]}\n  cmd: '{' '.join(args)}'\n" \
+                    f"  stdout:\n    {mlfmt(proc.stdout_str)}\n" \
+                    f"  stderr:\n    {mlfmt(proc.stderr_str)}"
         proc.exmsg = exmsg
 
         if proc.returncode:
@@ -225,7 +231,7 @@ ExtCmd(
 ExtCmd(
     "par2_verify",
     "Verifies the file(s) covered by the given par2 file.",
-    "par2 verify {file}",
+    "par2 verify -q {file}",
 
     file="""The file to check; can be a .par2 file, a .vol*.par2 file,
         or a file for which {file}.par2 exists.""",

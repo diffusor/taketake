@@ -901,6 +901,12 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
         #subprocess.run(("ls", "-al", os.path.dirname(wavpath)))
         asyncio.run(taketake.par2_verify(wavpath))
 
+        # Punch a hole in the wav file to ensure the par2 verify now fails
+        p = subprocess.run(("fallocate", "--punch-hole", "--offset", "4096", "--length", "4096", wavpath))
+        with self.assertRaisesRegex(taketake.SubprocessError,
+                f'(?s)Got bad exit code 1 from par2.*{wavpath}.* - damaged.*Repair is possible'):
+            asyncio.run(taketake.par2_verify(wavpath))
+
 
 # File corruption automation:
 # dd if=/dev/zero of=filepath bs=1 count=1024 seek=2048 conv=notrunc
