@@ -893,6 +893,13 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
         self.assertFileType(flacpath,
                 "FLAC audio bitstream data, 16 bit, stereo, 44.1 kHz, 472320 samples")
 
+    def test_par2_create(self):
+        wavpath = os.path.join(self.tempdir, "test.wav")
+        asyncio.run(taketake.flac_decode(testflacpath, wavpath))
+        asyncio.run(taketake.par2_create(wavpath, 2, 5))
+
+        #subprocess.run(("ls", "-al", os.path.dirname(wavpath)))
+
 # File corruption automation:
 # dd if=/dev/zero of=filepath bs=1 count=1024 seek=2048 conv=notrunc
 # see https://unix.stackexchange.com/q/222359

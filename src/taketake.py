@@ -95,6 +95,8 @@ class Config:
     talk_attack_s = 0.2             # Added to the start offset to avoid clipping the start of talking
     talk_release_s = 0.2            # Added to the duration to avoid clipping the end of talking
     epsilon_s = 0.01                # When comparing times, consider +/- epsilon_s the same
+    par2_base_blocksize = 4096      # A multiple of this is used to avoid the 32K limit
+    par2_max_num_blocks = 10000     # par2 doesn't support more than 32K num blocks, but gets unweildy with a lot of blocks anyway, so limit things a bit
 
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
@@ -254,8 +256,27 @@ async def flac_decode(flac_fpath, wav_fpath):
     proc = await ExtCmd.flac_decode.run_fg(infile=flac_fpath, outfile=wav_fpath)
     #print(f"Decoded to {wav_fpath}:", proc.stderr_str.decode())
 
-def par2_create(f, num_par2_files, percent_redundancy):
-    pass
+def get_nearest_n(x, n):
+    """Round up to the nearest non-zero n"""
+    rounded = -(-x // n) * n
+    return rounded if rounded else n
+
+async def par2_create(f, num_par2_files, percent_redundancy):
+    """Create a par2 set with the given constraints, delete the base .par2
+
+    Use the default Config.par2_base_blocksize unless the resulting number
+    of blocks across num_par2_files at the given redundancy would exceed
+    Config.par2_max_num_blocks; in that case, ramp up the block size multiple.
+    """
+    filesize = os.path.getsize(f)
+    num_par2_bytes = filesize * num_par2_files * percent_redundancy // 100
+    min_blocksize = num_par2_bytes // Config.par2_max_num_blocks
+    blocksize = get_nearest_n(min_blocksize, Config.par2_base_blocksize)
+    #print(f"{filesize=}\n{num_par2_bytes=}\n{min_blocksize=}\n{blocksize=}")
+
+    proc = await ExtCmd.par2_create.run_fg(infile=f, blocksize=blocksize,
+            redundance=percent_redundancy, numfiles=num_par2_files)
+    os.remove(f + ".par2")
 
 def par2_verify(f):
     pass
