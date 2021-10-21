@@ -873,11 +873,14 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
         wavpath = os.path.join(self.tempdir, "test.wav")
         flacpath = f"{wavpath}.flac"
         wavpath2 = f"{flacpath}.wav"
+        flacpath2 = f"{wavpath2}.flac"
         asyncio.run(taketake.flac_decode(testflacpath, wavpath))
         asyncio.run(taketake.flac_encode(wavpath, flacpath))
         asyncio.run(taketake.flac_decode(flacpath, wavpath2))
+        asyncio.run(taketake.flac_encode(wavpath2, flacpath2))
 
         self.assertEqualFiles(wavpath, wavpath2)
+        self.assertEqualFiles(flacpath, flacpath2)
         self.assertNotEqualFiles(wavpath, flacpath)
 
         wavsize = os.path.getsize(wavpath)
