@@ -322,7 +322,9 @@ def flush_fs_caches():
     pass
 
 def set_mtime():
-    # os.utime( dt.timestamp )
+    # datetime.datetime.now().timestamp() gives float seconds since the UNIX epoch
+    # os.utime(f, (atime, mtime)) # each is a float expressing seconds
+    # use os.stat(f).st_mtime to verify the time, note it may be a bit off
     pass
 
 
