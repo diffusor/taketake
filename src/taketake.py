@@ -171,7 +171,17 @@ class ExtCmd(metaclass=ExtCmdListMeta):
                 stderr=asyncio.subprocess.PIPE)
 
         proc.args = args
-        (proc.stdout_str, proc.stderr_str) = await proc.communicate()
+
+        # Python 3.9.7 has an issue where asyncio.subprocess internally loses the
+        # deprecated loop keyword in some async calls.  This squelches the warning.
+        # DeprecationWarning: The loop argument is deprecated since Python 3.8, and scheduled for removal in Python 3.10.
+        # https://bugs.python.org/issue45097
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore",
+                    message="The loop argument is deprecated since Python 3.8",
+                    category=DeprecationWarning)
+            (proc.stdout_str, proc.stderr_str) = await proc.communicate()
 
         def mlfmt(b):
             lines = b.decode().splitlines()
