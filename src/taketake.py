@@ -62,7 +62,7 @@ Run tests:
 # sudo sh -c "/bin/echo 3 > /proc/sys/vm/drop_caches"
 #
 # -> To get around needing the admin password for this:
-# $ visudo /etc/sudoers.d/drop_caches
+# $ sudo visudo /etc/sudoers.d/drop_caches
 # YOURUSERNAME     ALL = NOPASSWD: /sbin/sysctl vm.drop_caches=3
 # $ sudo /sbin/sysctl vm.drop_caches=3
 
@@ -385,8 +385,15 @@ async def detect_silence(fpath):
 # File and OS utilities
 #============================================================================
 
-def flush_fs_caches():
-    pass
+def flush_fs_caches(*files):
+    """Call the sync(1) command on the filesystems containing the given files,
+    then flush all filesystem caches in the virtual memory subsystem.
+    """
+
+    subprocess.run(("sync", "-f", *files),
+            capture_output=True, text=True, check=True)
+    subprocess.run(("sudo", "/sbin/sysctl", "vm.drop_caches=3"),
+            stdout=subprocess.PIPE, text=True, check=True)
 
 
 def set_mtime(f, dt):

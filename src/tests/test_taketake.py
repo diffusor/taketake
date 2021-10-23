@@ -866,7 +866,7 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
     def assertFileType(self, f, typestring):
         """Run the file(1) command on f and check its string against typestring,
         which should not include the 'file: ' portion of the output"""
-        p = subprocess.run(("file", f), capture_output=True, text=True)
+        p = subprocess.run(("file", f), capture_output=True, text=True, check=True)
         self.assertEqual(p.stdout.strip(), f"{f}: {typestring}")
 
 
@@ -901,7 +901,7 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
 
         # Check that ls agrees on the timestamp as well
         p = subprocess.run(("ls", "-l", "--time-style", "+" + tfmt, fpath),
-                capture_output=True, text=True)
+                capture_output=True, text=True, check=True)
         self.assertRegex(p.stdout.strip(),
                 fr" {tstr} {fpath}")
 
@@ -930,6 +930,7 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
         self.assertFileType(flacpath,
                 "FLAC audio bitstream data, 16 bit, stereo, 44.1 kHz, 472320 samples")
 
+
     def test_par2(self):
         wavpath = os.path.join(self.tempdir, "test.wav")
         asyncio.run(taketake.flac_decode(testflacpath, wavpath))
@@ -939,7 +940,7 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
         asyncio.run(taketake.par2_verify(wavpath))
 
         # Punch a hole in the wav file to ensure the par2 verify now fails
-        p = subprocess.run(("fallocate", "--punch-hole", "--offset", "4096", "--length", "4096", wavpath))
+        p = subprocess.run(("fallocate", "--punch-hole", "--offset", "4096", "--length", "4096", wavpath), check=True)
         with self.assertRaisesRegex(taketake.SubprocessError,
                 f'(?s)Got bad exit code 1 from par2.*{wavpath}.* - damaged.*Repair is possible'):
             asyncio.run(taketake.par2_verify(wavpath))
@@ -947,6 +948,28 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
         # Make sure par2 can also repair the file
         asyncio.run(taketake.par2_repair(wavpath))
         asyncio.run(taketake.par2_verify(wavpath))
+
+
+    @unittest.skipUnless(os.environ.get("TAKETAKE_RUN_SKIPPED_TESTS", None),
+            "Drops FS caches, impacting system perf. Also uses sudo.")
+    def test_flush(self):
+        def get_cached_pages_for_flacfile():
+            p = subprocess.run(("fincore", "-nb", testflacpath),
+                    capture_output=True, text=True, check=True)
+            bytes, pages, fsize, fname = p.stdout.split()
+            return int(pages)
+
+        with open(testflacpath, "rb") as f:
+            data = f.read()
+
+        self.assertGreater(len(data), 100000)
+
+        num_pages_cached_pre = get_cached_pages_for_flacfile()
+        self.assertGreater(num_pages_cached_pre, 1) # 67 4K pages
+        taketake.flush_fs_caches()
+
+        num_pages_cached_post = get_cached_pages_for_flacfile()
+        self.assertEqual(num_pages_cached_post, 0)
 
 
 # File corruption automation:
