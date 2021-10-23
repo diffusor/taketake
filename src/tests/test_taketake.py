@@ -869,6 +869,43 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
         p = subprocess.run(("file", f), capture_output=True, text=True)
         self.assertEqual(p.stdout.strip(), f"{f}: {typestring}")
 
+
+    def test_timestamp_update(self):
+        """Check our timestamp handling assumptions.
+
+        Note that the read back from stat and ls may not have as much
+        resolution as the original timestamp on some filesystems.  In that
+        case, we may need to round the original timestamp a bit to get the
+        test to pass, which is okay.
+        """
+
+        tfmt = taketake.Config.timestamp_fmt_with_seconds
+        tstr = "20210526-131148-Wed"
+        dt = datetime.datetime.strptime(tstr, tfmt)
+        pstr = dt.strftime(tstr + " %z")
+
+        fpath = os.path.join(self.tempdir, "foo")
+        with open(fpath, 'w') as f:
+            print(f"{tfmt=}\n{tstr=}\n{dt=}\n{pstr=}", file=f)
+
+        taketake.set_mtime(fpath, dt)
+
+        # Check that stating the file from Python matches the timestamp
+        mtime_after = os.stat(fpath).st_mtime
+        dt_after = datetime.datetime.fromtimestamp(mtime_after)
+        self.assertEqual(dt, dt_after)
+
+        # Checking our assumptions that strftime round-trips the strptime
+        tstr_after = dt_after.strftime(tfmt)
+        self.assertEqual(tstr, tstr_after)
+
+        # Check that ls agrees on the timestamp as well
+        p = subprocess.run(("ls", "-l", "--time-style", "+" + tfmt, fpath),
+                capture_output=True, text=True)
+        self.assertRegex(p.stdout.strip(),
+                fr" {tstr} {fpath}")
+
+
     def test_flac_decode_encode(self):
         wavpath = os.path.join(self.tempdir, "test.wav")
         flacpath = f"{wavpath}.flac"

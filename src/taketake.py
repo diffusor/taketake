@@ -321,11 +321,10 @@ async def par2_repair(f):
 def flush_fs_caches():
     pass
 
-def set_mtime():
-    # datetime.datetime.now().timestamp() gives float seconds since the UNIX epoch
-    # os.utime(f, (atime, mtime)) # each is a float expressing seconds
-    # use os.stat(f).st_mtime to verify the time, note it may be a bit off
-    pass
+def set_mtime(f, dt):
+    """Update the timestamp of the given file f to the given datetime dt"""
+    seconds = dt.timestamp()
+    os.utime(f, (seconds,)*2)
 
 
 async def get_file_duration(fpath):
