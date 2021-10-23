@@ -103,6 +103,32 @@ class Config:
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
 
 
+@dataclass
+class TimeRange:
+    start: float
+    duration: float
+
+
+# Exceptions
+class SubprocessError(RuntimeError):
+    pass
+
+class InvalidMediaFile(RuntimeError):
+    pass
+
+class MissingPar2File(RuntimeError):
+    pass
+
+class TimestampGrokError(RuntimeError):
+    pass
+
+class NoSuitableAudioSpan(RuntimeError):
+    pass
+
+#============================================================================
+# External command infrastructure
+#============================================================================
+
 class ExtCmdListMeta(type):
     """Allow access to instances of derived classes by lookup through the
     derived class's cmds dict.
@@ -116,6 +142,7 @@ class ExtCmdListMeta(type):
 
     def __getattr__(cls, name):
         return cls.cmds[name]
+
 
 class ExtCmd(metaclass=ExtCmdListMeta):
     """Collect external commands for simple documentation and execution.
@@ -247,24 +274,8 @@ ExtCmd(
 )
 
 
-@dataclass
-class TimeRange:
-    start: float
-    duration: float
-
-
-# Exceptions
-class SubprocessError(RuntimeError):
-    pass
-
-class InvalidMediaFile(RuntimeError):
-    pass
-
-class MissingPar2File(RuntimeError):
-    pass
-
 #============================================================================
-# Audio file processing
+# External command implementation
 #============================================================================
 
 async def flac_encode(wav_fpath, flac_fpath):
@@ -272,14 +283,17 @@ async def flac_encode(wav_fpath, flac_fpath):
     proc = await ExtCmd.flac_encode.run_fg(infile=wav_fpath, outfile=flac_fpath)
     #print(f"Encoded to {flac_fpath}:", proc.stderr_str.decode())
 
+
 async def flac_decode(flac_fpath, wav_fpath):
     proc = await ExtCmd.flac_decode.run_fg(infile=flac_fpath, outfile=wav_fpath)
     #print(f"Decoded to {wav_fpath}:", proc.stderr_str.decode())
+
 
 def get_nearest_n(x, n):
     """Round up to the nearest non-zero n"""
     rounded = -(-x // n) * n
     return rounded if rounded else n
+
 
 async def par2_create(f, num_par2_files, percent_redundancy):
     """Create a par2 set with the given constraints, delete the base .par2
@@ -298,6 +312,7 @@ async def par2_create(f, num_par2_files, percent_redundancy):
             redundance=percent_redundancy, numfiles=num_par2_files)
     os.remove(f + ".par2")
 
+
 def get_related_par2file(f):
     if not f.endswith(".par2"):
         par2files = glob.glob(f"{f}.*par2")
@@ -307,6 +322,7 @@ def get_related_par2file(f):
         f = par2files[0]
     return f
 
+
 async def par2_verify(f):
     """Verify the given file f.
 
@@ -314,17 +330,10 @@ async def par2_verify(f):
     """
     proc = await ExtCmd.par2_verify.run_fg(file=get_related_par2file(f))
 
+
 async def par2_repair(f):
     proc = await ExtCmd.par2_repair.run_fg(file=get_related_par2file(f))
     #print("Repaired", proc.exmsg())
-
-def flush_fs_caches():
-    pass
-
-def set_mtime(f, dt):
-    """Update the timestamp of the given file f to the given datetime dt"""
-    seconds = dt.timestamp()
-    os.utime(f, (seconds,)*2)
 
 
 async def get_file_duration(fpath):
@@ -362,6 +371,24 @@ async def detect_silence(fpath):
     return list(TimeRange(start, duration) for start, duration in zip(offsets, durations))
 
 
+#============================================================================
+# File and OS utilities
+#============================================================================
+
+def flush_fs_caches():
+    pass
+
+
+def set_mtime(f, dt):
+    """Update the timestamp of the given file f to the given datetime dt"""
+    seconds = dt.timestamp()
+    os.utime(f, (seconds,)*2)
+
+
+#============================================================================
+# Audio file processing
+#============================================================================
+
 def invert_silences(silences, file_scan_duration_s):
     """Return a list of TimeRange objects that represent non-silence.
 
@@ -381,9 +408,6 @@ def invert_silences(silences, file_scan_duration_s):
 
     return non_silences
 
-
-class NoSuitableAudioSpan(RuntimeError):
-    pass
 
 async def find_likely_audio_span(finfo, file_scan_duration_s):
     """Searches the first file_scan_duration_s seconds of the file represented
@@ -460,9 +484,6 @@ class TimestampWords:
         "thirtieth")
     ordinal_suffixes = reverse_hashify("th st nd rd")
 
-
-class TimestampGrokError(RuntimeError):
-    pass
 
 
 def to_num(word):
