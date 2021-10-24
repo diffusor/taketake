@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.9
+#!/usr/bin/env python3
 
 # TODO - duration, renaming, touch, flac conversion, par2, copy, verify
 # TODO - https://quantlane.com/blog/ensure-asyncio-task-exceptions-get-logged/
@@ -11,7 +11,7 @@ recorded files.
 Supports .wav and .flac.
 
 Setup:
-    $ python3.9 -m pip install --user SpeechRecognition PocketSphinx word2number prompt_toolkit
+    $ python3 -m pip install --user SpeechRecognition PocketSphinx word2number prompt_toolkit
 
 Silence detection:
     $ ffmpeg -i in.flac -af silencedetect=noise=-50dB:d=1 -f null -
@@ -54,18 +54,6 @@ Run tests:
 #   -> But there is a limit of how many blocks: probably 32K of them for the full file
 #   -> par2 exits with non-zero code if it has an error
 
-# flush FS caches for copy verification:
-# $ sync
-# $ echo 3 > /proc/sys/vm/drop_caches
-# https://linuxhint.com/clear_cache_linux/
-# But we need root...
-# sudo sh -c "/bin/echo 3 > /proc/sys/vm/drop_caches"
-#
-# -> To get around needing the admin password for this:
-# $ sudo visudo /etc/sudoers.d/drop_caches
-# YOURUSERNAME     ALL = NOPASSWD: /sbin/sysctl vm.drop_caches=3
-# $ sudo /sbin/sysctl vm.drop_caches=3
-
 import asyncio
 import time
 import sys
@@ -74,6 +62,7 @@ import glob
 import itertools
 import subprocess
 import datetime
+import ctypes
 from dataclasses import dataclass, field
 from typing import List
 
@@ -390,10 +379,20 @@ def flush_fs_caches(*files):
     then flush all filesystem caches in the virtual memory subsystem.
     """
 
-    subprocess.run(("sync", "-f", *files),
-            capture_output=True, text=True, check=True)
-    subprocess.run(("sudo", "/sbin/sysctl", "vm.drop_caches=3"),
-            stdout=subprocess.PIPE, text=True, check=True)
+    libc = ctypes.cdll.LoadLibrary("libc.so.6")
+    libc.posix_fadvise.argtypes = (ctypes.c_int,
+            ctypes.c_size_t, ctypes.c_size_t, ctypes.c_int)
+    POSIX_FADV_DONTNEED = 4 # (from /usr/include/linux/fadvise.h)
+
+    for f in files:
+        with open(f, "rb") as fd:
+            fno = fd.fileno()
+            offset = 0
+            len = 0
+            os.fsync(fno)
+            ret = libc.posix_fadvise(fno, offset, len, POSIX_FADV_DONTNEED)
+        if ret != 0:
+            raise RuntimeError("fadvise failed, could not flush file from cache: " + f)
 
 
 def set_mtime(f, dt):

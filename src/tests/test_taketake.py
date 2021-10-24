@@ -966,7 +966,7 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
 
         num_pages_cached_pre = get_cached_pages_for_flacfile()
         self.assertGreater(num_pages_cached_pre, 1) # 67 4K pages
-        taketake.flush_fs_caches()
+        taketake.flush_fs_caches(testflacpath)
 
         num_pages_cached_post = get_cached_pages_for_flacfile()
         self.assertEqual(num_pages_cached_post, 0)
