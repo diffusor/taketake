@@ -950,8 +950,6 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
         asyncio.run(taketake.par2_verify(wavpath))
 
 
-    @unittest.skipUnless(os.environ.get("TAKETAKE_RUN_SKIPPED_TESTS", None),
-            "Drops FS caches, impacting system perf. Also uses sudo.")
     def test_flush(self):
         def get_cached_pages_for_flacfile():
             p = subprocess.run(("fincore", "-nb", testflacpath),
