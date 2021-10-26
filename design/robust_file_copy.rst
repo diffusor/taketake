@@ -118,7 +118,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    b. Verify ``fincore src/.wav`` is 0 and diff the src and decoded wav files::
 
-       flac decode .encoded.flac | xdelta3 -s src/.wav .xdelta
+       flac -c -d .encoded.flac | xdelta3 -s src/.wav > .xdelta
 
    c. Check ``.xdelta`` for actual diffs
 

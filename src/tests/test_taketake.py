@@ -970,6 +970,104 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
         self.assertEqual(num_pages_cached_post, 0)
 
 
+def make_md5sum_file(fname, md5file):
+    with open(md5file, "w") as f:
+        subprocess.run(("md5sum", "-b", fname), stdout=f, check=True, text=True)
+
+def check_md5sum_file(md5file):
+    """Return True if the md5 check passes, False otherwise"""
+    p = subprocess.run(("md5sum", "-c", md5file),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+    return p.returncode == 0
+
+
+class Test7_xdelta(unittest.TestCase):
+    """Test taketake's wrapping of xdelta3.
+
+    Each test corrupts a wav file in some way, then the tearDown checks it can
+    be repaired.  Failures will be reported from tearDown() - this design
+    keeps the code clean, though it doesn't strictly adhere to the philosophy
+    of unit testing.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Create a long-lived tempdir and decode the flac into it."""
+        timestamp = time.strftime("%Y%m%d-%H%M%S-%a")
+        cls.main_tempdir = tempfile.mkdtemp(
+                prefix=f'{cls.__name__}.{timestamp}.')
+        cls.wavpath_src = os.path.join(cls.main_tempdir, "src.wav")
+        asyncio.run(taketake.flac_decode(testflacpath, cls.wavpath_src))
+
+        cls.wavpath_md5 = cls.wavpath_src + ".md5"
+        make_md5sum_file(cls.wavpath_src, cls.wavpath_md5)
+
+    @classmethod
+    def tearDownClass(cls):
+        """Verify the original decoded wav was not corrupted, rm -r main_tempdir"""
+        # Comment out the rmtree and rerun failing test with -k to see the
+        # state of the temp files at the point of failure
+        shutil.rmtree(cls.main_tempdir)
+        pass
+
+
+    def assertEqualFiles(self, f1, f2):
+        #self.assertEqual(subprocess.run(("cmp", f1, f2)).returncode, 0)
+        if subprocess.run(("cmp", f1, f2)).returncode != 0:
+            raise AssertionError(f"Files mismatch:\n  {f1}\n  {f2}")
+
+    def setUp(self):
+        """Copy the class fixture's wav into a test specific test dir"""
+        self.test_tempdir = os.path.join(self.main_tempdir, self._testMethodName)
+        os.mkdir(self.test_tempdir)
+
+        self.wavpath_test = os.path.join(self.test_tempdir, "test.wav")
+        self.wavpath_test_md5 = self.wavpath_test + ".md5"
+
+        shutil.copyfile(self.wavpath_src, self.wavpath_test)
+        make_md5sum_file(self.wavpath_test, self.wavpath_test_md5)
+
+    def tearDown(self):
+        """Verify the test corrupted the copied wav, then verify it can be repaired"""
+        # Verify the original decoded wav was not corrupted
+        self.assertTrue(check_md5sum_file(self.wavpath_md5))
+
+        # Verify the test's copy of the wav was indeed corrupted
+        self.assertFalse(check_md5sum_file(self.wavpath_test_md5))
+
+        # Generate an xdelta patch to the stdout of the decoded flac,
+        # using the corrupted wav file as the source
+        self.wavpath_test_xdelta = self.wavpath_test + ".xdelta"
+        #flac decode .encoded.flac | xdelta3 -s test.wav test.wav.xdelta
+        with open(self.wavpath_test_xdelta, "wb") as f:
+            subprocess.run((f"flac -c -d '{testflacpath}' | xdelta3 -s '{self.wavpath_test}'"),
+                shell=True, check=True, stdout=f, stderr=subprocess.DEVNULL)
+
+        # Apply the xdelta patch to the corrupted wav file to generate a
+        # repaired wav file
+        self.wavpath_repaired = os.path.join(self.test_tempdir, "repaired.wav")
+        #xdelta3 -d test.wav.xdelta repaired.wav
+        subprocess.run(("xdelta3", "-d",
+            "-s", self.wavpath_test,
+            self.wavpath_test_xdelta, self.wavpath_repaired),
+            check=True)
+
+        # Check that the repaired wav equals the src wav
+        self.assertEqualFiles(self.wavpath_src, self.wavpath_repaired)
+
+        # Clean up the test-specific directory
+        shutil.rmtree(self.test_tempdir)
+
+
+    def fallocate(self, cmd):
+        """Call fallocate with the given command on the test wavfile"""
+        subprocess.run(("fallocate", *cmd.split(), self.wavpath_test),
+                check=True)
+
+    def test_silly(self):
+        self.fallocate("--punch-hole --offset 4096 --length 4096")
+
 # File corruption automation:
 # dd if=/dev/zero of=filepath bs=1 count=1024 seek=2048 conv=notrunc
 # see https://unix.stackexchange.com/q/222359
