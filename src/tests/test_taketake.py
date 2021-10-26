@@ -1008,21 +1008,36 @@ def check_md5sum_file(md5file):
             stderr=subprocess.DEVNULL)
     return p.returncode == 0
 
-def flacdec_xdelta_encode(fpath_flac, fpath_wav, fpath_xdelta):
+async def flacdec_xdelta_encode(fpath_flac, fpath_wav, fpath_xdelta):
     """Run flac -c -d fpath_flac | xdelta3 -s fpath_wav > fpath_xdelta
 
     Return (flac, xdelta) Process functions"""
     with open(fpath_xdelta, "wb") as f:
-        p_flacdec = subprocess.Popen(("flac", "-c", "-d", fpath_flac),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL)
-        p_xdelta = subprocess.Popen(("xdelta3", "-s", fpath_wav),
-                stdin=p_flacdec.stdout,
+        # asyncio subprocess uses StreamReader for asyncio.subprocess.PIPE,
+        # so we need to create a pipe manually instead to link up the
+        # subprocesses.
+        # See https://stackoverflow.com/a/36666420
+        read_into_xdelta, write_from_flac = os.pipe()
+
+        flac_args = ("flac", "-c", "-d", fpath_flac)
+        p_flacdec = await asyncio.create_subprocess_exec(
+                *flac_args,
+                stdout=write_from_flac,
+                stderr=asyncio.subprocess.DEVNULL)
+        os.close(write_from_flac)  # Allow flac to get a SIGPIPE if xdelta exits
+        p_flacdec.args = flac_args
+
+        xdelta_args = ("xdelta3", "-s", fpath_wav)
+        p_xdelta = await asyncio.create_subprocess_exec(
+                *xdelta_args,
+                stdin=read_into_xdelta,
                 stdout=f,
-                stderr=subprocess.DEVNULL)
-        p_flacdec.stdout.close()  # Allow flac to get a SIGPIPE if xdelta exits
-        p_xdelta.wait()
-        p_flacdec.wait()
+                stderr=asyncio.subprocess.DEVNULL)
+        os.close(read_into_xdelta)
+        p_xdelta.args = xdelta_args
+
+        await p_xdelta.wait()
+        await p_flacdec.wait()
         return p_flacdec, p_xdelta
 
 class Test7_xdelta(unittest.TestCase, FileAssertions):
@@ -1077,8 +1092,8 @@ class Test7_xdelta(unittest.TestCase, FileAssertions):
         # Generate an xdelta patch to the stdout of the decoded flac,
         # using the corrupted wav file as the source
         self.wavpath_test_xdelta = self.wavpath_test + ".xdelta"
-        flac_p, xdelta_p = flacdec_xdelta_encode(
-                testflacpath, self.wavpath_test, self.wavpath_test_xdelta)
+        flac_p, xdelta_p = asyncio.run(flacdec_xdelta_encode(
+                testflacpath, self.wavpath_test, self.wavpath_test_xdelta))
         self.assertExitCode(flac_p, 0)
         self.assertExitCode(xdelta_p, 0)
 
