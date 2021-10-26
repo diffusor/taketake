@@ -7,516 +7,202 @@ Design goals:
 * Don't modify the USB contents until data has been copied off and verified
 * Do post-copy verification after flushing filesystem caches
 
-Procedure:
-----------
+Flow:
+-----
 
-Phase A: Encode - encode flacs, rename, generate pars
-:::::::::::::::::::::::::::::::::::::::::::::::::::::
+1. *[global]* Determine wavs to process => 2, 4
 
-*For all wav files to copy:*
+   a. Check for progress directory and resume
 
-1. Make symlink from dest dir to wav file on USB drive
-   (the symlink's presence indicates processing is in progress and final
-   verif is still needed)::
+   b. Otherwise, create src wav progress directories::
 
-    link audio001.wav -> src/audio001.wav
+       mkdir .taketake.20211025-1802-Mon
+       echo srcdir > .taketake.20211025-1802-Mon/.src
+       mkdir .taketake.20211025-1802-Mon/audio001.wav ...
 
-2. Extract timestamp and duration from wav file (speech_to_text, words_to_timestamp)
-3. Determine dest_filename (including instrument, timestamp, notes,
-   duration, and original filename w/o .wav)
+   c. Fill input queues 1->2 and 1->4 with src wav progress dirs
 
-   -> query user to fix up each file name as they are generated
+*Perform the following steps for each wav, assuming each non-src filename is
+relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory*
 
-*While waiting for filename confirmation, for each wav:*
+2. Speech to text <= 1 => 3
 
-4. Convert to flac as .orig_filename.wav.flac.in_progress (via wav symlink)::
+   a. Skip if ``.filename_guess`` exists, pushing its
+      contents into the outbound queue to step 3
 
-    encode audio001.wav -> .audio001.wav.flac.in_progress
+   b. Run speech to text, parse timestamp, construct filename guess
 
-5. Rename orig_filename.wav.flac.in_progress to .orig_filename.wav.flac.done::
+   c. Create filename guess progress file::
 
-    rename .audio001.wav.flac.in_progress -> .audio001.wav.flac.done
+       echo $filename_guess > .filename_guess
 
-6. Generate 2% par2 file of wav file next to symlink in dest dir::
+   d. Push progress dir and filename_guess into queue 2->3
 
-    par2 create audio001.wav
-     -> audio001.wav.par2
-     -> audio001.wav.vol000+64.par2
-    rm audio001.wav.par2
+3. Prompt for name <= 2 => 5
 
-*As each wav file is produced from the above:*
+   a. suggest contents of ``.filename_provided`` if it exists,
+      otherwise use the given filename_guess
 
-7. Make symlink from orig_filename.wav.flac to the final destination flac name
-   (this will start as broken; its presence means the flac file hasn't been
-   verified yet)::
+   b. Create provided filename file::
 
-    link audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+       echo $filename_provided > .filename_provided
 
-8. Also symlink from final dest name .flac.wav -> orig_filename.wav::
+   c. Push progress dir and filename_provided into queue 3->5
 
-    link inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav -> audio001.wav
+4. Flac encode <= 1 => 5, 6
 
-9. Rename .orig_filename.wav.flac.done to dest_filename.flac
-   (this also indicates the copy is complete)::
+   a. If ``.in_progress.flac`` exists, remove it
 
-    rename .audio001.wav.flac.done -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+   b. If ``.encoded.flac`` exists, skip steps c and d
 
-10. Parse the possibly-edited timestamp from the final filename and use it to
-    update the dest file mtime::
+   c. Flac encode src wav into dest flac::
 
-     creation_time = datetime.datetime.strptime("%Y%m%d-%H%M%S", timestr)
-     seconds = creation_time.timestamp()
-     os.utime('inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac', (seconds,)*2)
+       encode src/audio001.wav => .in_progress.flac
 
-11. Generate 2x 2% par2 files of flac file::
+   d. Rename encoded flac::
 
-     par2 create inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-      -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.par2
-      -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-      -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-     rm inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.par2
+       rename .in_progress.flac -> .encoded.flac
 
-*Wait for all files to complete processing*
+   e. Decache the src wav, even if the flac already exists::
 
-12. Flush filesystem caches
+       fadvise DONTNEED src/audio001.wav
 
+   f. Push progress dir into queue 4->5
 
-Phase B: Verify and copyback - Verify par2s, clean up, copy flacs back to src
-:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+5. Rename and par2 dest flac file <= 3, 4 => 7
 
-*For all copied wav files:*
+   a. If ``$filename_provided.flac`` exists, skip step b
 
-1. Verify flac file against both of its par2 files::
+   b. Rename flac and symlink back **(what if this is interrupted?)**::
 
-    par2 verify inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    par2 verify inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+       rename .encoded.flac -> $filename_provided.flac
+       symlink .encoded.flac -> $filename_provided.flac
 
-2. Verify wav par2 against wav symlink (testing copy on USB drive)::
+   c. If ``$filename_provided.flac.vol*.par2`` exists:
 
-    par2 verify audio001.wav.vol000+64.par2
+       * if any of their sizes are 0, delete them::
 
-3. Rename wav symlink to wav.orig::
+           delete $filename_provided.flac.*par2
 
-    rename audio001.wav -> audio001.wav.orig
-    (symlink is now: audio001.wav.orig -> src/audio001.wav)
+       * otherwise, skip step d
 
-4. Unpack flac based on .flac.wav symlink::
+   d. Create dest flac pars **(if interrupted, 0-sized files will be left)**::
 
-    flac decode inst.20210101-1234-Mon.1h2s.Twitch.audio001.wav -> audio001.wav
+       par2 create $filename_provided.flac
 
-5. Verify unpacked flac wav vs wav.par2::
+   e. Decache the dest flac and par2s::
 
-    par2 verify audio001.wav.vol000+64.par2
+       fadvise DONTNEED $filename_provided.flac*
 
-6. Retarget .flac.wav to point to .wav.orig symlink, instead of just .wav::
+   f. Verify dest flac par2s::
 
-    link -f inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav -> audio001.wav.orig
+       par2 verify $filename_provided.flac
 
-7. Add (broken) symlink to USB .flac copy::
+   g. Push progress dir into queue 5->7
 
-    link inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.copy -> src/flacs/inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+6. Xdelta wavs <= All(4) => 7
 
-8. Remove temporary .wav file (that was decoded from the .flac file for verification)::
+   a. If src wav no longer exists or if ``.xdelta`` exists, skip step b
 
-    rm audio001.wav
+   b. Diff the src and decoded wav files::
 
-*For all copied wav files:*
+       flac decode .encoded.flac | xdelta3 -s src/.wav .xdelta
 
-9. Remove src wav, wav.par2, and symlinks wav.orig, wav.flac, and .flac.wav::
+   c. Check ``.xdelta`` for actual diffs
 
-    rm src/audio001.wav
-    rm audio001.wav.vol000+64.par2
-    rm audio001.wav.orig (symlink to src/audio001.wav)
-    rm audio001.wav.flac
-    rm inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav (symlink to audio001.wav.orig)
+   d. Push progress dir into queue 6->7
 
-10. Copy flac and its par2 files to the USB drive (in a subdir)::
+7. Delete src wav and copy back flac <= 5, All(6) => 8
 
-     mkdir src/flacs
-     copy
-         inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-         inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-         inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-      -> src/flacs
+   **Status of ``.taketake.$datestamp/$wavfilename``**::
 
-*Wait for all files to complete processing*
+        .filename_guess
+        .filename_provided
+        .encoded.flac [symlink, was non-symlink .in_progress.flac]
+        $filename_provided.flac
+        $filename_provided.flac.vol00+23.par2
+        $filename_provided.flac.vol23+22.par2
+        .xdelta
 
-11. Flush filesystem caches
+   a. Remove the source wav file::
 
+       delete src/audio001.wav
 
-Phase C: Verify backcopy - Verify USB copy of FLAC files, clean up
-::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+   b. Copy flac file and par2s back to src if they each don't already exist
+      (use .in_progress copies)::
 
-*For all copied wav files:*
+       mkdir src/flacs
+       copy
+           inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
+           inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
+           inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+        -> src/flacs
 
-1. On USB: Verify all copied flac files against both of their par2 files::
+   c. Decache the copied dest files
 
-    in src/flacs
-    par2 verify inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    par2 verify inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+   d. par2 verified the copied dest files
 
-2. Delete flac.copy symlink from dest::
+   e. Move the final flac and par2 files into the dest directory::
 
-    rm inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.copy
+       move $filename_provided.flac.*par2 dest/
 
+   f. Remove the temporary dest directory::
 
-================================
-USB drive file transfer example:
-================================
+       rm -r .taketake.$datestamp/$wavfilename
 
-Process wav files from *src/* to *dest/*
-----------------------------------------
+   g. Push progress dir into queue 7->8
 
-Start state:
-::::::::::::
+8. *[global]* Finish <= All(8)
 
-* Two wav files to process::
+    a. Remove top-level progress dir ``.taketake.$datestamp``
 
-    src/
-    audio001.wav
-    audio002.wav
 
-    dest/
+Xdelta3 usage
+-------------
 
+Running xdelta with the stdout from flac decode
+:::::::::::::::::::::::::::::::::::::::::::::::
 
-Phase A: Encode - encode flacs, rename, generate pars
-:::::::::::::::::::::::::::::::::::::::::::::::::::::
+From
+https://docs.python.org/3.10/library/subprocess.html#replacing-shell-pipeline ::
 
-* A1 - wav symlink::
+    p1 = Popen(["dmesg"], stdout=PIPE)
+    p2 = Popen(["grep", "hda"], stdin=p1.stdout, stdout=PIPE)
+    p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
+    output = p2.communicate()[0]
 
-    src/
-    audio001.wav
-    audio002.wav
+Verifying two files are identical
+:::::::::::::::::::::::::::::::::
 
-    dest/
-    audio001.wav -> src/audio001.wav
+When the files are identical, the VCDIFF data section length is 0,
+and the only instruction is a copy of the entire file::
 
-* A4 - copy+convert to flac::
+    $ xdelta3 printdelta robust_file_copy.rst.xdelta2    
+    VCDIFF version:               0
+    VCDIFF header size:           50
+    VCDIFF header indicator:      VCD_APPHEADER 
+    VCDIFF secondary compressor:  none
+    VCDIFF application header:    robust_file_copy.rst//robust_file_copy.rst~/
+    XDELTA filename (output):     robust_file_copy.rst
+    XDELTA filename (source):     robust_file_copy.rst~
+    VCDIFF window number:         0
+    VCDIFF window indicator:      VCD_SOURCE VCD_ADLER32 
+    VCDIFF adler32 checksum:      7BE74121
+    VCDIFF copy window length:    22670
+    VCDIFF copy window offset:    0
+    VCDIFF delta encoding length: 16
+    VCDIFF target window length:  22670
+    VCDIFF data section length:   0
+    VCDIFF inst section length:   4
+    VCDIFF addr section length:   1
+      Offset Code Type1 Size1 @Addr1 + Type2 Size2 @Addr2
+      000000 019  CPY_0 22670 @0     
 
-    src/
-    audio001.wav
-    audio002.wav
+**Note** - The relevant lengths and copy sizes match the filesize.  All the
+following properties should be verified:
 
-    dest/
-    .audio001.wav.flac.in_progress
-    audio001.wav -> src/audio001.wav
-
-* A5 - rename to .orig.wav.flac.done::
-
-    src/
-    audio001.wav
-    audio002.wav
-
-    dest/
-    .audio001.wav.flac.done
-    audio001.wav -> src/audio001.wav
-
-* A6 - generate par2 files for original .wav::
-
-    src/
-    audio001.wav
-    audio002.wav
-
-    dest/
-    .audio001.wav.flac.done
-    audio001.wav -> src/audio001.wav
-    audio001.wav.vol000+64.par2
-
-* A7,8 - after user prompt, symlink dest_filename (both ways)::
-
-    src/
-    audio001.wav
-    audio002.wav
-
-    dest/
-    .audio001.wav.flac.done
-    audio001.wav -> src/audio001.wav
-    audio001.wav.vol000+64.par2
-    audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav -> audio001.wav
-
-* A9 - rename flac to dest filename::
-
-    src/
-    audio001.wav
-    audio002.wav
-
-    dest/
-    audio001.wav -> src/audio001.wav
-    audio001.wav.vol000+64.par2
-    audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav -> audio001.wav
-
-* A10 - timestamp update (set mtime)
-* A11 - generate flac par2s::
-
-    src/
-    audio001.wav
-    audio002.wav
-
-    dest/
-    audio001.wav -> src/audio001.wav
-    audio001.wav.vol000+64.par2
-    audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav -> audio001.wav
-
-* State after step A completes for all files::
-
-    src/
-    audio001.wav
-    audio002.wav
-
-    dest/
-    audio001.wav -> src/audio001.wav
-    audio001.wav.vol000+64.par2
-    audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    audio002.wav -> src/audio002.wav
-    audio002.wav.vol000+93.par2
-    audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav -> audio001.wav
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
-
-
-Phase B: Verify and copyback - Verify par2s, clean up, copy flacs back to src
-:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
-
-* B1 - verify flac against both its par2s
-* B2 - verify orig wav vs par2
-* B3 - then rename wav symlink to .orig::
-
-    src/
-    audio001.wav
-    audio002.wav
-
-    dest/
-    audio001.wav.orig -> src/audio001.wav
-    audio001.wav.vol000+64.par2
-    audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    audio002.wav -> src/audio002.wav
-    audio002.wav.vol000+93.par2
-    audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav -> audio001.wav
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
-
-* B4 - unpack flac::
-
-    src/
-    audio001.wav
-    audio002.wav
-
-    dest/
-    audio001.wav  # decompressed from inst.20210101-1234-Mon.1h2s.Twitch.audio001.wav
-    audio001.wav.orig -> src/audio001.wav
-    audio001.wav.vol000+64.par2
-    audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    audio002.wav -> src/audio002.wav
-    audio002.wav.vol000+93.par2
-    audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav -> audio001.wav
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
-
-* B5 - verify unpacked flac wav vs wav.par2
-* B6 - retarget .flac.wav to point to wav.orig symlink
-* B7 - add (broken) symlink to USB .flac copy::
-
-    src/
-    audio001.wav
-    audio002.wav
-
-    dest/
-    audio001.wav  # decompressed from inst.20210101-1234-Mon.1h2s.Twitch.audio001.wav
-    audio001.wav.orig -> src/audio001.wav
-    audio001.wav.vol000+64.par2
-    audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    audio002.wav -> src/audio002.wav
-    audio002.wav.vol000+93.par2
-    audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav -> audio001.wav.orig
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.copy -> src/flacs/inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
-
-* B8 - remove verified decoded audio001.wav::
-
-    src/
-    audio001.wav
-    audio002.wav
-
-    dest/
-    audio001.wav.orig -> src/audio001.wav
-    audio001.wav.vol000+64.par2
-    audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    audio002.wav -> src/audio002.wav
-    audio002.wav.vol000+93.par2
-    audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav -> audio001.wav.orig
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.copy -> src/flacs/inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav
-
-* State after step B8 completes for all files::
-
-    src/
-    audio001.wav
-    audio002.wav
-
-    dest/
-    audio001.wav.orig -> src/audio001.wav
-    audio001.wav.vol000+64.par2
-    audio001.wav.flac -> inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    audio002.wav.orig -> src/audio002.wav
-    audio002.wav.vol000+93.par2
-    audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.wav -> audio001.wav.orig
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.copy -> src/flacs/inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav.orig
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-
-* B9 - remove src wav, wav.par2, and symlinks wav.orig, wav.flac, and .flac.wav::
-
-    src/
-    audio002.wav
-
-    dest/
-    audio002.wav.orig -> src/audio002.wav
-    audio002.wav.vol000+93.par2
-    audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.copy -> src/flacs/inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav.orig
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-
-* B10 - copy flac and par2s::
-
-    src/
-    audio002.wav
-
-    src/flacs
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-
-    dest/
-    audio002.wav.orig -> src/audio002.wav
-    audio002.wav.vol000+93.par2
-    audio002.wav.flac -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.copy -> src/flacs/inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.wav -> audio002.wav.orig
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-
-* State after phase B completes for all files::
-
-    src/
-
-    src/flacs
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
-
-    dest/
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.copy -> src/flacs/inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-
-
-Phase C: Verify backcopy - Verify USB copy of FLAC files, clean up
-::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
-
-* C1 - verify flacs on USB
-* C2 - delete symlinks::
-
-    src/
-
-    src/flacs
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
-
-    dest/
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.copy -> inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-
-* State after phase C completes for all files::
-
-    src/
-
-    src/flacs
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
-
-    dest/
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-    inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol000+28.par2
-    inst.20210102-1234-Mon.5m8s.Jupiter-60bpm.audio002.flac.vol028+27.par2
+* ``VCDIFF data section length:   0``
+* ``VCDIFF copy window offset:    0``
+* ``VCDIFF copy window length:    22670``
+* ``VCDIFF target window length:  22670``
+* ``000000 019  CPY_0 22670 @0``
