@@ -152,7 +152,7 @@ class ExtCmd(metaclass=ExtCmdListMeta):
         """Returns a list of parameters constructed from the kwargs injected into the command template."""
         return [arg.format(**kwargs) for arg in self.template.split()]
 
-    async def run_fg(self, **kwargs):
+    async def exec_async(self, _stdout=None, _stderr=None, **kwargs):
         args = self.construct_args(**kwargs)
 
         proc = await asyncio.create_subprocess_exec(*args,
@@ -161,6 +161,21 @@ class ExtCmd(metaclass=ExtCmdListMeta):
 
         proc.args = args
 
+        def mlfmt(b):
+            lines = b.decode().splitlines()
+            return "\n    ".join(lines)
+
+        def exmsg():
+            return f"from {args[0]}\n  cmd: '{' '.join(args)}'\n" \
+                    f"  stdout:\n    {mlfmt(proc.stdout_str)}\n" \
+                    f"  stderr:\n    {mlfmt(proc.stderr_str)}"
+        proc.exmsg = exmsg
+        (proc.stdout_str, proc.stderr_str) = ("",)*2
+
+        return proc
+
+    async def run_fg(self, **kwargs):
+        proc = await self.exec_async(self, **kwargs)
         # Python 3.9.7 has an issue where asyncio.subprocess internally loses the
         # deprecated loop keyword in some async calls.  This squelches the warning.
         # DeprecationWarning: The loop argument is deprecated since Python 3.8, and scheduled for removal in Python 3.10.
@@ -172,18 +187,8 @@ class ExtCmd(metaclass=ExtCmdListMeta):
                     category=DeprecationWarning)
             (proc.stdout_str, proc.stderr_str) = await proc.communicate()
 
-        def mlfmt(b):
-            lines = b.decode().splitlines()
-            return "\n    ".join(lines)
-
-        def exmsg():
-            return f"from {args[0]}\n  cmd: '{' '.join(args)}'\n" \
-                    f"  stdout:\n    {mlfmt(proc.stdout_str)}\n" \
-                    f"  stderr:\n    {mlfmt(proc.stderr_str)}"
-        proc.exmsg = exmsg
-
         if proc.returncode:
-            raise SubprocessError(f"Got bad exit code {proc.returncode} {exmsg()}")
+            raise SubprocessError(f"Got bad exit code {proc.returncode} {proc.exmsg()}")
 
         return proc
 
