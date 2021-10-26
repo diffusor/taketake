@@ -270,6 +270,14 @@ ExtCmd(
 )
 
 ExtCmd(
+    "xdelta_printdelta",
+    "Print the delta represented by the given xdelta file",
+    "xdelta3 printdelta {xdelta}",
+
+    xdelta="xdelta file to print the delta for",
+)
+
+ExtCmd(
     "par2_create",
     "Constructs par2 volume files for the given file.",
     "par2 create -s{blocksize} -r{redundance} -n{numfiles} -u {infile}",
@@ -357,6 +365,42 @@ async def encode_xdelta_from_flac_to_wav(flac_file, wav_file, xdelta_file):
         await p_xdelta.wait()
         await p_flacdec.wait()
         return p_flacdec, p_xdelta
+
+
+async def check_xdelta_match(xdelta_file):
+    """Return True if the given xdelta file represents no difference.
+
+    When the source and dest files match during an xdelta encode, the
+    resulting xdelta files will contain a single CPY_0 command instructing
+    xdelta to reconstruct the target file by simply copying the entirety of
+    the source file.
+
+    When they do not match, additional instructions are required to patch the
+    source file into the state of the target file.
+
+    Thus, this function reads only the header and first few instructions,
+    checking for the following parameters:
+
+        VCDIFF copy window length:    22670
+        VCDIFF copy window offset:    0
+        VCDIFF target window length:  22670
+        VCDIFF data section length:   0
+          Offset Code Type1 Size1 @Addr1 + Type2 Size2 @Addr2
+          000000 019  CPY_0 22670 @0     
+    """
+
+    p = await ExtCmd.xdelta_printdelta(
+            xdelta=xdelta_file,
+            _stdout=asyncio.subprocess.PIPE)
+
+    # Read line-by-line ensuring the file contains the expected headers
+    line_num = 0
+    while True:
+        line_num += 1
+        line = await p.stdout.readline()
+        if not line:
+            # TODO check for errors
+            break
 
 
 def get_nearest_n(x, n):
