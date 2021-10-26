@@ -821,6 +821,37 @@ class Test0_fmt_duration(unittest.TestCase):
 # ExtCmd external command component tests
 #===========================================================================
 
+class FileAssertions():
+
+    def mlfmt(self, b):
+        lines = b.decode().splitlines()
+        return "\n    ".join(lines)
+
+    def poutfmt(self, p):
+        return f"\n  cmd: '{' '.join(p.args)}'" \
+                f"\n  stdout:  {self.mlfmt(p.stdout)}" \
+                f"\n  stderr:  {self.mlfmt(p.stderr)}"
+
+    def assertEqualFiles(self, f1, f2):
+        p = subprocess.run(("cmp", f1, f2), capture_output=True)
+        if p.returncode != 0:
+            raise AssertionError(f"Files mismatch:\n  {f1}\n  {f2}{self.poutfmt(p)}")
+
+    def assertNotEqualFiles(self, f1, f2):
+        p = subprocess.run(("cmp", f1, f2), capture_output=True)
+        if p.returncode == 0:
+            raise AssertionError(f"Files match:\n  {f1}\n  {f2}{self.poutfmt(p)}")
+
+    def assertFileType(self, f, typestring):
+        """Run the file(1) command on f and check its string against typestring,
+        which should not include the 'file: ' portion of the output"""
+        p = subprocess.run(("file", f), capture_output=True, text=True, check=True)
+        try:
+            self.assertEqual(p.stdout.strip(), f"{f}: {typestring}")
+        except:
+            raise
+
+
 class Test5_ext_commands_read_only(unittest.TestCase):
     """Test ExtCmd commands that don't modify the filesystem"""
 
@@ -842,7 +873,7 @@ class Test5_ext_commands_read_only(unittest.TestCase):
             taketake.TimeRange(start=10.117, duration=0.593175)])
 
 
-class Test6_ext_commands_tempdir(unittest.TestCase):
+class Test6_ext_commands_tempdir(unittest.TestCase, FileAssertions):
     def setUp(self):
         timestamp = time.strftime("%Y%m%d-%H%M%S-%a")
         self.tempdir = tempfile.mkdtemp(
@@ -854,20 +885,6 @@ class Test6_ext_commands_tempdir(unittest.TestCase):
         # state of the temp files at the point of failure
         shutil.rmtree(self.tempdir)
         pass
-
-    def assertEqualFiles(self, f1, f2):
-        p = subprocess.run(("cmp", f1, f2))
-        self.assertEqual(p.returncode, 0)
-
-    def assertNotEqualFiles(self, f1, f2):
-        p = subprocess.run(("cmp", f1, f2), capture_output=True)
-        self.assertEqual(p.returncode, 1)
-
-    def assertFileType(self, f, typestring):
-        """Run the file(1) command on f and check its string against typestring,
-        which should not include the 'file: ' portion of the output"""
-        p = subprocess.run(("file", f), capture_output=True, text=True, check=True)
-        self.assertEqual(p.stdout.strip(), f"{f}: {typestring}")
 
 
     def test_timestamp_update(self):
@@ -982,7 +999,7 @@ def check_md5sum_file(md5file):
     return p.returncode == 0
 
 
-class Test7_xdelta(unittest.TestCase):
+class Test7_xdelta(unittest.TestCase, FileAssertions):
     """Test taketake's wrapping of xdelta3.
 
     Each test corrupts a wav file in some way, then the tearDown checks it can
@@ -1011,11 +1028,6 @@ class Test7_xdelta(unittest.TestCase):
         shutil.rmtree(cls.main_tempdir)
         pass
 
-
-    def assertEqualFiles(self, f1, f2):
-        #self.assertEqual(subprocess.run(("cmp", f1, f2)).returncode, 0)
-        if subprocess.run(("cmp", f1, f2)).returncode != 0:
-            raise AssertionError(f"Files mismatch:\n  {f1}\n  {f2}")
 
     def setUp(self):
         """Copy the class fixture's wav into a test specific test dir"""
