@@ -12,15 +12,17 @@ Flow:
 
 1. *[global]* Determine wavs to process => 2, 4
 
-   a. Check for progress directory and resume
+   a. Verify unit tests pass
 
-   b. Otherwise, create src wav progress directories::
+   b. Check for progress directory and resume
+
+   c. Otherwise, create src wav progress directories::
 
        mkdir .taketake.20211025-1802-Mon
        echo srcdir > .taketake.20211025-1802-Mon/.src
        mkdir .taketake.20211025-1802-Mon/audio001.wav ...
 
-   c. Fill input queues 1->2 and 1->4 with src wav progress dirs
+   d. Fill input queues 1->2 and 1->4 with src wav progress dirs
 
 *Perform the following steps for each wav, assuming each non-src filename is
 relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory*
@@ -133,6 +135,8 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
         $filename_provided.flac.vol0000+500.par2
         $filename_provided.flac.vol0500+499.par2
         .xdelta
+
+   **Skip to step g if src modification is disabled**
 
    a. Remove the source wav file::
 
