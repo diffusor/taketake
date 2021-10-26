@@ -150,14 +150,19 @@ class ExtCmd(metaclass=ExtCmdListMeta):
 
     def construct_args(self, **kwargs):
         """Returns a list of parameters constructed from the kwargs injected into the command template."""
+        kwarg_set = set(kwargs.keys())
+        cmd_arg_set = set(self.params.keys())
+        if kwarg_set != cmd_arg_set:
+            raise RuntimeError(f"Got invalid parameters to {self.name}"
+                    f"\n  Given: {kwargs}"
+                    f"\n  Expected: {self.params.keys()}")
         return [arg.format(**kwargs) for arg in self.template.split()]
 
     async def exec_async(self, _stdout=None, _stderr=None, **kwargs):
         args = self.construct_args(**kwargs)
 
         proc = await asyncio.create_subprocess_exec(*args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE)
+                stdout=_stdout, stderr=_stderr)
 
         proc.args = args
 
@@ -170,12 +175,16 @@ class ExtCmd(metaclass=ExtCmdListMeta):
                     f"  stdout:\n    {mlfmt(proc.stdout_str)}\n" \
                     f"  stderr:\n    {mlfmt(proc.stderr_str)}"
         proc.exmsg = exmsg
-        (proc.stdout_str, proc.stderr_str) = ("",)*2
+        proc.stdout_str = repr(proc.stdout)
+        proc.stderr_str = repr(proc.stderr)
 
         return proc
 
     async def run_fg(self, **kwargs):
-        proc = await self.exec_async(self, **kwargs)
+        proc = await self.exec_async(
+                _stdout=asyncio.subprocess.PIPE,
+                _stderr=asyncio.subprocess.PIPE,
+                **kwargs)
         # Python 3.9.7 has an issue where asyncio.subprocess internally loses the
         # deprecated loop keyword in some async calls.  This squelches the warning.
         # DeprecationWarning: The loop argument is deprecated since Python 3.8, and scheduled for removal in Python 3.10.
