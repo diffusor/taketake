@@ -1008,6 +1008,22 @@ def check_md5sum_file(md5file):
             stderr=subprocess.DEVNULL)
     return p.returncode == 0
 
+def flacdec_xdelta_encode(fpath_flac, fpath_wav, fpath_xdelta):
+    """Run flac -c -d fpath_flac | xdelta3 -s fpath_wav > fpath_xdelta
+
+    Return (flac, xdelta) Process functions"""
+    with open(fpath_xdelta, "wb") as f:
+        p_flacdec = subprocess.Popen(("flac", "-c", "-d", fpath_flac),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL)
+        p_xdelta = subprocess.Popen(("xdelta3", "-s", fpath_wav),
+                stdin=p_flacdec.stdout,
+                stdout=f,
+                stderr=subprocess.DEVNULL)
+        p_flacdec.stdout.close()  # Allow flac to get a SIGPIPE if xdelta exits
+        p_xdelta.wait()
+        p_flacdec.wait()
+        return p_flacdec, p_xdelta
 
 class Test7_xdelta(unittest.TestCase, FileAssertions):
     """Test taketake's wrapping of xdelta3.
@@ -1061,20 +1077,10 @@ class Test7_xdelta(unittest.TestCase, FileAssertions):
         # Generate an xdelta patch to the stdout of the decoded flac,
         # using the corrupted wav file as the source
         self.wavpath_test_xdelta = self.wavpath_test + ".xdelta"
-        #flac decode .encoded.flac | xdelta3 -s test.wav test.wav.xdelta
-        with open(self.wavpath_test_xdelta, "wb") as f:
-            p_flacdec = subprocess.Popen(("flac", "-c", "-d", testflacpath),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL)
-            p_xdelta = subprocess.Popen(("xdelta3", "-s", self.wavpath_test),
-                    stdin=p_flacdec.stdout,
-                    stdout=f,
-                    stderr=subprocess.DEVNULL)
-            p_flacdec.stdout.close()  # Allow flac to get a SIGPIPE if xdelta exits
-            p_xdelta.wait()
-            self.assertExitCode(p_xdelta, 0)
-            p_flacdec.wait()
-            self.assertExitCode(p_flacdec, 0)
+        flac_p, xdelta_p = flacdec_xdelta_encode(
+                testflacpath, self.wavpath_test, self.wavpath_test_xdelta)
+        self.assertExitCode(flac_p, 0)
+        self.assertExitCode(xdelta_p, 0)
 
         # Apply the xdelta patch to the corrupted wav file to generate a
         # repaired wav file
