@@ -40,8 +40,17 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
 3. Prompt for name <= 2 => 5
 
-   a. suggest contents of ``.filename_provided`` if it exists,
+   a. Suggest contents of ``.filename_provided`` if it exists,
       otherwise use the given filename_guess
+
+   b. Check the resulting timestamp:
+
+      * Parse out the timestamp from the ``$filename_provided``
+      * Verify that the weekday matches that from the timestamp
+      * Verify the timestamp is within a reasonable delta from the speech-recognized time
+      * Verify the timestamp isn't in the future
+      * If the verification fails, prompt the user to confirm or redo the
+        filename
 
    b. Create provided filename file::
 
@@ -73,9 +82,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    a. If ``$filename_provided.flac`` exists, skip step b
 
-   b. Rename flac and symlink back::
+   b. Symlink from the final filename to the ``.encoded.flac``::
 
-       symlink $filename_provided.flac -> .encoded.flac 
+       symlink $filename_provided.flac -> .encoded.flac
 
    c. If ``$filename_provided.flac.vol*.par2`` exists:
 
@@ -91,19 +100,21 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    e. Decache the dest flac and par2s::
 
-       fadvise DONTNEED $filename_provided.flac*
+       fadvise DONTNEED .encoded.flac *.par2
 
-   f. Verify dest flac par2s::
+   f. Verify ``fincore .encoded.flac`` is 0
+
+   g. Verify dest flac par2s::
 
        par2 verify $filename_provided.flac
 
-   g. Push progress dir into queue 5->7
+   h. Push progress dir into queue 5->7
 
 6. Xdelta wavs <= All(4) => 7
 
    a. If src wav no longer exists or if ``.xdelta`` exists, skip step b
 
-   b. Diff the src and decoded wav files::
+   b. Verify ``fincore src/.wav`` is 0 and diff the src and decoded wav files::
 
        flac decode .encoded.flac | xdelta3 -s src/.wav .xdelta
 
@@ -132,6 +143,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        mkdir src/flacs
        copy .encoded.flac src/flacs/$filename_provided.flac
+       update_mtime src/flacs/$filename_provided.flac
        copy
            $filename_provided.flac.vol0000+500.par2
            $filename_provided.flac.vol0500+499.par2
@@ -144,6 +156,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
    e. Move the final flac and par2 files into the dest directory::
 
        move .encoded.flac dest/$filename_provided.flac
+       update_mtime src/flacs/$filename_provided.flac
        move $filename_provided.flac.*par2 dest/
 
    f. Remove the temporary dest directory::
