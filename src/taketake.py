@@ -158,13 +158,11 @@ class ExtCmd(metaclass=ExtCmdListMeta):
                     f"\n  Expected: {self.params.keys()}")
         return [arg.format(**kwargs) for arg in self.template.split()]
 
-    async def exec_async(self, _stdout=None, _stderr=None, **kwargs):
+    async def exec_async(self, _stdin=None, _stdout=None, _stderr=None, **kwargs):
         args = self.construct_args(**kwargs)
 
         proc = await asyncio.create_subprocess_exec(*args,
-                stdout=_stdout, stderr=_stderr)
-
-        proc.args = args
+                stdin=_stdin, stdout=_stdout, stderr=_stderr)
 
         def mlfmt(b):
             lines = b.decode().splitlines()
@@ -174,6 +172,8 @@ class ExtCmd(metaclass=ExtCmdListMeta):
             return f"from {args[0]}\n  cmd: '{' '.join(args)}'\n" \
                     f"  stdout:\n    {mlfmt(proc.stdout_str)}\n" \
                     f"  stderr:\n    {mlfmt(proc.stderr_str)}"
+
+        proc.args = args
         proc.exmsg = exmsg
         proc.stdout_str = repr(proc.stdout)
         proc.stderr_str = repr(proc.stderr)
@@ -251,6 +251,22 @@ ExtCmd(
 
     infile="The input flac file",
     outfile="The output wav file",
+)
+
+ExtCmd(
+    "flac_decode_stdout",
+    "Decodes flac file to stdout for streaming into something else.",
+    "flac -c -d {infile}",
+
+    infile="The input flac file",
+)
+
+ExtCmd(
+    "xdelta_encode_from_source",
+    "Encode an xdelta file to stdout from the given source using the stdin as the dest.",
+    "xdelta3 -s {source}",
+
+    source="Input source file to generate the xdelta from",
 )
 
 ExtCmd(

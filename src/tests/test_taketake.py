@@ -1019,22 +1019,18 @@ async def flacdec_xdelta_encode(fpath_flac, fpath_wav, fpath_xdelta):
         # See https://stackoverflow.com/a/36666420
         read_into_xdelta, write_from_flac = os.pipe()
 
-        flac_args = ("flac", "-c", "-d", fpath_flac)
-        p_flacdec = await asyncio.create_subprocess_exec(
-                *flac_args,
-                stdout=write_from_flac,
-                stderr=asyncio.subprocess.DEVNULL)
+        p_flacdec = await taketake.ExtCmd.flac_decode_stdout.exec_async(
+                infile=fpath_flac,
+                _stdout=write_from_flac,
+                _stderr=asyncio.subprocess.DEVNULL)
         os.close(write_from_flac)  # Allow flac to get a SIGPIPE if xdelta exits
-        p_flacdec.args = flac_args
 
-        xdelta_args = ("xdelta3", "-s", fpath_wav)
-        p_xdelta = await asyncio.create_subprocess_exec(
-                *xdelta_args,
-                stdin=read_into_xdelta,
-                stdout=f,
-                stderr=asyncio.subprocess.DEVNULL)
+        p_xdelta = await taketake.ExtCmd.xdelta_encode_from_source.exec_async(
+                source=fpath_wav,
+                _stdin=read_into_xdelta,
+                _stdout=f,
+                _stderr=asyncio.subprocess.DEVNULL)
         os.close(read_into_xdelta)
-        p_xdelta.args = xdelta_args
 
         await p_xdelta.wait()
         await p_flacdec.wait()
@@ -1091,23 +1087,25 @@ class Test7_xdelta(unittest.TestCase, FileAssertions):
 
         # Generate an xdelta patch to the stdout of the decoded flac,
         # using the corrupted wav file as the source
-        self.wavpath_test_xdelta = self.wavpath_test + ".xdelta"
+        wavpath_test_xdelta = self.wavpath_test + ".xdelta"
         flac_p, xdelta_p = asyncio.run(flacdec_xdelta_encode(
-                testflacpath, self.wavpath_test, self.wavpath_test_xdelta))
+                testflacpath, self.wavpath_test, wavpath_test_xdelta))
         self.assertExitCode(flac_p, 0)
         self.assertExitCode(xdelta_p, 0)
 
         # Apply the xdelta patch to the corrupted wav file to generate a
         # repaired wav file
-        self.wavpath_repaired = os.path.join(self.test_tempdir, "repaired.wav")
+        wavpath_repaired = os.path.join(self.test_tempdir, "repaired.wav")
         #xdelta3 -d test.wav.xdelta repaired.wav
         subprocess.run(("xdelta3", "-d", "-s", self.wavpath_test,
-            self.wavpath_test_xdelta, self.wavpath_repaired),
+            wavpath_test_xdelta, wavpath_repaired),
             check=True)
 
         # Check that the repaired wav equals the src wav
-        self.assertEqualFiles(self.wavpath_src, self.wavpath_repaired)
+        self.assertEqualFiles(self.wavpath_src, wavpath_repaired)
 
+        #subprocess.run(("ls", "-al", self.test_tempdir))
+        #subprocess.run(("xdelta3", "printdelta", wavpath_test_xdelta))
         # Clean up the test-specific directory
         shutil.rmtree(self.test_tempdir)
 
