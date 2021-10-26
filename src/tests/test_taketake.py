@@ -848,7 +848,8 @@ class FileAssertions():
         p = subprocess.run(("file", f), capture_output=True, text=True, check=True)
         try:
             self.assertEqual(p.stdout.strip(), f"{f}: {typestring}")
-        except:
+        except AssertionError as e:
+            e.args = (f"Bad file type; see + line below for expected type:\n  {e.args[0]}", *e.args[1:])
             raise
 
 
