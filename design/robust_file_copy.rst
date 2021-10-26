@@ -73,10 +73,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    a. If ``$filename_provided.flac`` exists, skip step b
 
-   b. Rename flac and symlink back **(what if this is interrupted?)**::
+   b. Rename flac and symlink back::
 
-       rename .encoded.flac -> $filename_provided.flac
-       symlink .encoded.flac -> $filename_provided.flac
+       symlink $filename_provided.flac -> .encoded.flac 
 
    c. If ``$filename_provided.flac.vol*.par2`` exists:
 
@@ -118,10 +117,10 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
         .filename_guess
         .filename_provided
-        .encoded.flac [symlink, was non-symlink .in_progress.flac]
-        $filename_provided.flac
-        $filename_provided.flac.vol00+23.par2
-        $filename_provided.flac.vol23+22.par2
+        .encoded.flac [was .in_progress.flac]
+        $filename_provided.flac -> .encoded.flac
+        $filename_provided.flac.vol0000+500.par2
+        $filename_provided.flac.vol0500+499.par2
         .xdelta
 
    a. Remove the source wav file::
@@ -132,10 +131,10 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
       (use .in_progress copies)::
 
        mkdir src/flacs
+       copy .encoded.flac src/flacs/$filename_provided.flac
        copy
-           inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac
-           inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0000+500.par2
-           inst.20210101-1234-Mon.1h2s.Twitch.audio001.flac.vol0500+499.par2
+           $filename_provided.flac.vol0000+500.par2
+           $filename_provided.flac.vol0500+499.par2
         -> src/flacs
 
    c. Decache the copied dest files
@@ -144,6 +143,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    e. Move the final flac and par2 files into the dest directory::
 
+       move .encoded.flac dest/$filename_provided.flac
        move $filename_provided.flac.*par2 dest/
 
    f. Remove the temporary dest directory::
