@@ -824,8 +824,13 @@ class Test0_fmt_duration(unittest.TestCase):
 class FileAssertions():
 
     def mlfmt(self, b):
-        lines = b.decode().splitlines()
-        return "\n    ".join(lines)
+        if isinstance(b, bytes):
+            lines = b.decode().splitlines()
+            return "\n    ".join(lines)
+        elif b is None:
+            return ""
+        else:
+            return repr(b)
 
     def poutfmt(self, p):
         return f"\n  cmd: '{' '.join(p.args)}'" \
@@ -851,6 +856,10 @@ class FileAssertions():
         except AssertionError as e:
             e.args = (f"Bad file type; see + line below for expected type:\n  {e.args[0]}", *e.args[1:])
             raise
+
+    def assertExitCode(self, p, exitcode=0):
+        if p.returncode != exitcode:
+            raise AssertionError(f"Expected exit code {exitcode} != {p.returncode}:{self.poutfmt(p)}")
 
 
 class Test5_ext_commands_read_only(unittest.TestCase):
@@ -1054,15 +1063,24 @@ class Test7_xdelta(unittest.TestCase, FileAssertions):
         self.wavpath_test_xdelta = self.wavpath_test + ".xdelta"
         #flac decode .encoded.flac | xdelta3 -s test.wav test.wav.xdelta
         with open(self.wavpath_test_xdelta, "wb") as f:
-            subprocess.run((f"flac -c -d '{testflacpath}' | xdelta3 -s '{self.wavpath_test}'"),
-                shell=True, check=True, stdout=f, stderr=subprocess.DEVNULL)
+            p_flacdec = subprocess.Popen(("flac", "-c", "-d", testflacpath),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL)
+            p_xdelta = subprocess.Popen(("xdelta3", "-s", self.wavpath_test),
+                    stdin=p_flacdec.stdout,
+                    stdout=f,
+                    stderr=subprocess.DEVNULL)
+            p_flacdec.stdout.close()  # Allow flac to get a SIGPIPE if xdelta exits
+            p_xdelta.wait()
+            self.assertExitCode(p_xdelta, 0)
+            p_flacdec.wait()
+            self.assertExitCode(p_flacdec, 0)
 
         # Apply the xdelta patch to the corrupted wav file to generate a
         # repaired wav file
         self.wavpath_repaired = os.path.join(self.test_tempdir, "repaired.wav")
         #xdelta3 -d test.wav.xdelta repaired.wav
-        subprocess.run(("xdelta3", "-d",
-            "-s", self.wavpath_test,
+        subprocess.run(("xdelta3", "-d", "-s", self.wavpath_test,
             self.wavpath_test_xdelta, self.wavpath_repaired),
             check=True)
 
