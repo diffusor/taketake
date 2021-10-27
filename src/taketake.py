@@ -415,13 +415,14 @@ async def check_xdelta(xdelta_file, expected_size):
         lines_read = []
 
         async def getline():
+            nonlocal line_num
             line_num += 1
             line_bytes = await p.stdout.readline()
             lines_read.append(line_bytes.decode().strip())
             return lines_read[-1]
 
         def fail(msg):
-            lines_joined = "\n   ".join(lines_read)
+            lines_joined = "\n    ".join(lines_read)
             raise XdeltaMismatch(
                     f"Xdelta check failed - {msg}:"
                     f"\n  In  {xdelta_file}:{line_num}"
@@ -436,12 +437,13 @@ async def check_xdelta(xdelta_file, expected_size):
             if (not line) or line.startswith(" "):
                 break
             key, value = line.split(":", maxsplit=1)
+            value = value.strip()
             if key in expected_vcdiffs:
                 if expected_vcdiffs[key] == value:
                     # Found this one, make sure we don't get a second one
                     expected_vcdiffs[key] = None
                 else:
-                    fail(f"key '{key}' value {expected_vcdiffs[key]} != {value}")
+                    fail(f"key '{key}' value '{value}' != '{expected_vcdiffs[key]}'")
 
         # Ensure we found every expected VCDIFF line
         for key, value in expected_vcdiffs.items():
@@ -471,6 +473,17 @@ async def check_xdelta(xdelta_file, expected_size):
 
     finally:
         p.terminate()
+        await p.wait()
+
+        # Note we must wait for termination - otherwise we trigger resource warnings:
+        #/usr/lib/python3.9/asyncio/base_subprocess.py:125: ResourceWarning: unclosed transport <_UnixSubprocessTransport pid=118443 running stdout=<_UnixReadPipeTransport closed fd=6 closed>>
+        #  _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
+        #Object allocated at (most recent call last):
+        #  File "/usr/lib/python3.9/asyncio/unix_events.py", lineno 197
+        #    transp = _UnixSubprocessTransport(self, protocol, args, shell,
+        #
+        # This may be related to https://bugs.python.org/issue41320
+        #Loop <_UnixSelectorEventLoop running=False closed=True debug=False> that handles pid 115696 is closed
 
 
 def get_nearest_n(x, n):

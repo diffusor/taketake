@@ -1050,6 +1050,11 @@ class Test7_xdelta(unittest.TestCase, FileAssertions):
         shutil.copyfile(self.wavpath_src, self.wavpath_test)
         make_md5sum_file(self.wavpath_test, self.wavpath_test_md5)
 
+    def check_xdelta(self, xdelta_file, orig_file):
+        """Pull out the size from the file itself and run the checker"""
+        filesize = os.path.getsize(orig_file)
+        asyncio.run(taketake.check_xdelta(xdelta_file, filesize))
+
     def tearDown(self):
         """Verify the test corrupted the copied wav, then verify it can be repaired"""
         # Verify the original decoded wav was not corrupted
@@ -1065,6 +1070,10 @@ class Test7_xdelta(unittest.TestCase, FileAssertions):
                 testflacpath, self.wavpath_test, wavpath_test_xdelta))
         self.assertExitCode(flac_p, 0)
         self.assertExitCode(xdelta_p, 0)
+
+        # Ensure that check_xdelta() discovers that the files mismatch
+        with self.assertRaises(taketake.XdeltaMismatch):
+            self.check_xdelta(wavpath_test_xdelta, self.wavpath_src)
 
         # Apply the xdelta patch to the corrupted wav file to generate a
         # repaired wav file
