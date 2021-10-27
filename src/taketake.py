@@ -458,10 +458,13 @@ async def check_xdelta(xdelta_file, expected_size):
 
         line = await getline()
         if line:
-            fail(f"Expected no/empty line")
+            fail(f"Expected no further output")
 
         if not p.stdout.at_eof():
             fail(f"Expected EOF")
+
+        if p.returncode is None:
+            fail(f"Expected xdelta process to be finished")
 
         if p.returncode != 0:
             fail(f"Got unexpected {p.returncode=}")
