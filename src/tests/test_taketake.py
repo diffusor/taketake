@@ -19,10 +19,17 @@ import shutil
 import time
 import subprocess
 
+keeptemp = os.environ.get("TEST_TAKETAKE_KEEPTEMP", None)
 testflac = "testdata/audio.20210318-2020-Thu.timestamp-wrong-weekday-Monday.flac"
 testpath = os.path.dirname(os.path.abspath(__file__))
 testflacpath = os.path.join(testpath, testflac)
 
+def cleandir(d):
+    if keeptemp:
+        subprocess.run(("ls", "-d", d))
+        subprocess.run(("ls", "-al", d))
+    else:
+        shutil.rmtree(d)
 
 #===========================================================================
 # Speech recognition and parsing tests
@@ -919,10 +926,10 @@ class TempdirFixture(unittest.TestCase):
         #print("Tempdir:", self.tempdir)
 
     def tearDown(self):
-        # Comment out the rmtree and rerun failing test with -k to see the
-        # state of the temp files at the point of failure
-        shutil.rmtree(self.tempdir)
-        pass
+        cleandir(self.tempdir)
+
+    def tempfile(self, fname):
+        return os.path.join(self.tempdir, fname)
 
 
 class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
@@ -940,7 +947,7 @@ class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
         dt = datetime.datetime.strptime(tstr, tfmt)
         pstr = dt.strftime(tstr + " %z")
 
-        fpath = os.path.join(self.tempdir, "foo")
+        fpath = self.tempfile("foo")
         with open(fpath, 'w') as f:
             print(f"{tfmt=}\n{tstr=}\n{dt=}\n{pstr=}", file=f)
 
@@ -963,7 +970,7 @@ class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
 
 
     def test_flac_decode_encode(self):
-        wavpath = os.path.join(self.tempdir, "test.wav")
+        wavpath = self.tempfile("test.wav")
         flacpath = f"{wavpath}.flac"
         wavpath2 = f"{flacpath}.wav"
         flacpath2 = f"{wavpath2}.flac"
@@ -988,7 +995,7 @@ class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
 
 
     def test_par2(self):
-        wavpath = os.path.join(self.tempdir, "test.wav")
+        wavpath = self.tempfile("test.wav")
         asyncio.run(taketake.flac_decode(testflacpath, wavpath))
         asyncio.run(taketake.par2_create(wavpath, 2, 5))
 
@@ -1026,9 +1033,9 @@ class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
         self.assertEqual(num_pages_cached_post, 0)
 
 
-class Test7_check_xdelta_match(TempdirFixture, FileAssertions):
+class Test7_check_xdelta_basic(TempdirFixture, FileAssertions):
     def test_xdelta_good(self):
-        xdelta = os.path.join(self.tempdir, "test.xdelta")
+        xdelta = self.tempfile("test.xdelta")
         encode_xdelta(testflacpath, testflacpath, xdelta)
         self.check_xdelta(xdelta, testflacpath)
         return xdelta
@@ -1072,13 +1079,43 @@ class Test7_check_xdelta_match(TempdirFixture, FileAssertions):
         asyncio.run(check_xdelta_many())
         self.assertGreaterEqual(num_checks, max_checks)
 
+class XdeltaStringBase(TempdirFixture, FileAssertions):
+    def set_file_contents(self, fname, s):
+        with open(fname, "w") as f:
+            f.write(s)
 
-class Test7_check_xdelta_mmismatch(TempdirFixture, FileAssertions):
+    def assertXdeltaMatch(self, s):
+        xdelta = self.tempfile("test.xdelta")
+        source = self.tempfile("source")
+        target = self.tempfile("target")
+
+        self.set_file_contents(source, s)
+        self.set_file_contents(target, s)
+
+        encode_xdelta(source, target, xdelta)
+        self.check_xdelta(xdelta, source)
+
+    def assertXdeltaMismatch(self, source_string, target_string):
+        xdelta = self.tempfile("test.xdelta")
+        source = self.tempfile("source")
+        target = self.tempfile("target")
+
+        self.set_file_contents(source, source_string)
+        self.set_file_contents(target, target_string)
+
+        encode_xdelta(source, target, xdelta)
+        with self.assertRaises(taketake.XdeltaMismatch):
+            self.check_xdelta(xdelta, source)
+
+#XXX #@unittest.expectedFailure
+
+class Test7_check_xdelta_string_match(XdeltaStringBase):
+    def test_xdelta_80as(self):
+        self.assertXdeltaMatch("a"*80)
+
+class Test7_check_xdelta_string_mismatch(XdeltaStringBase):
     def test_xdelta_bad(self):
-        xdelta = os.path.join(self.tempdir, "test.xdelta")
-        encode_xdelta(testflacpath, testflacpath, xdelta)
-        self.check_xdelta(xdelta, testflacpath)
-        return xdelta
+        self.assertXdeltaMismatch("a", "b")
 
 
 class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
@@ -1104,11 +1141,7 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
 
     @classmethod
     def tearDownClass(cls):
-        """Verify the original decoded wav was not corrupted, rm -r main_tempdir"""
-        # Comment out the rmtree and rerun failing test with -k to see the
-        # state of the temp files at the point of failure
-        shutil.rmtree(cls.main_tempdir)
-        pass
+        cleandir(cls.main_tempdir)
 
 
     def setUp(self):
@@ -1123,7 +1156,10 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
         make_md5sum_file(self.wavpath_test, self.wavpath_test_md5)
 
     def tearDown(self):
-        """Verify the test corrupted the copied wav, then verify it can be repaired"""
+        """Verify the original wav was not corrupted, then that the test
+        corrupted the copied wav, then verify it can be repaired
+        """
+
         # Verify the original decoded wav was not corrupted
         self.assertMd5FileGood(self.wavpath_md5)
 
@@ -1154,10 +1190,8 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
         self.gen_xdelta_from_flac(testflacpath, wavpath_repaired, wavpath_repaired_xdelta)
         self.check_xdelta(wavpath_repaired_xdelta, wavpath_repaired)
 
-        #subprocess.run(("ls", "-al", self.test_tempdir))
         #subprocess.run(("xdelta3", "printdelta", wavpath_test_xdelta))
-        # Clean up the test-specific directory
-        shutil.rmtree(self.test_tempdir)
+        cleandir(self.test_tempdir)
 
 
     def fallocate(self, cmd):

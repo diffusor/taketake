@@ -404,7 +404,7 @@ async def check_xdelta(xdelta_file, expected_size):
     }
 
     header_line = "Offset Code Type1 Size1 @Addr1 + Type2 Size2 @Addr2"
-    expected_instr = f"000000 019  CPY_0 {expected_size} @0"
+    expected_instr = f"000000 019  CPY_0 {expected_size} @0".split()
 
     p = await ExtCmd.xdelta_printdelta.exec_async(
             xdelta=xdelta_file,
@@ -431,11 +431,11 @@ async def check_xdelta(xdelta_file, expected_size):
                     f"\n{lines_joined}"
                 )
 
-        def expect_line(line_type, expect, line):
-            if line != expect:
-                fail(f"Mismatched {line_type} line:"
-                        f"\n  Expected: '{header_line}'"
-                        f"\n  Got:      '{line}'")
+        def expect(line_type, expect, got):
+            if got != expect:
+                fail(f"Mismatched {line_type}:"
+                        f"\n  Expected: '{expect}'"
+                        f"\n  Got:      '{got}'")
 
         # Read line-by-line ensuring the file contains the expected headers
         while line := await getline():
@@ -456,11 +456,11 @@ async def check_xdelta(xdelta_file, expected_size):
                 fail(f"Couldn't find key '{key}'")
 
         # Still have a line out from the while loop
-        expect_line("header", header_line, line)
+        expect("header", header_line, line)
         line = await getline()
-        expect_line("instruction", expected_instr, line)
+        expect("instruction", expected_instr, line.split())
         line = await getline()
-        expect_line("empty", "", line)
+        expect("empty", "", line)
 
         if not p.stdout.at_eof():
             fail(f"Expected EOF")
