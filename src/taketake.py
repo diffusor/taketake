@@ -367,7 +367,7 @@ async def encode_xdelta_from_flac_to_wav(flac_file, wav_file, xdelta_file):
         return p_flacdec, p_xdelta
 
 
-async def check_xdelta_match(xdelta_file):
+async def check_xdelta_match(xdelta_file, expected_size):
     """Return True if the given xdelta file represents no difference.
 
     When the source and dest files match during an xdelta encode, the
@@ -389,18 +389,81 @@ async def check_xdelta_match(xdelta_file):
           000000 019  CPY_0 22670 @0     
     """
 
-    p = await ExtCmd.xdelta_printdelta(
+    expected_vcdiffs = {
+        "VCDIFF header indicator":      "VCD_APPHEADER",
+        "VCDIFF copy window length":    str(expected_size),
+        "VCDIFF copy window offset":    "0",
+        "VCDIFF target window length":  str(expected_size),
+        "VCDIFF data section length":   "0",
+    }
+
+    header_line = "  Offset Code Type1 Size1 @Addr1 + Type2 Size2 @Addr2"
+    expected_instr = f"  000000 019  CPY_0 {expected_size} @0"
+
+    p = await ExtCmd.xdelta_printdelta.exec_async(
             xdelta=xdelta_file,
             _stdout=asyncio.subprocess.PIPE)
 
-    # Read line-by-line ensuring the file contains the expected headers
-    line_num = 0
-    while True:
-        line_num += 1
-        line = await p.stdout.readline()
-        if not line:
-            # TODO check for errors
-            break
+    try:
+        line_num = 0
+        lastline = None
+
+        async def getline():
+            line_num += 1
+            line_bytes = await p.stdout.readline()
+            lastline = line_bytes.decode().strip()
+            return lastline
+
+        def explain(msg):
+            print(f" ** Xdelta check failed - {msg}:  {xdelta_file}:{line_num}  '{line}'")
+            pass
+
+        # Read line-by-line ensuring the file contains the expected headers
+        while line := await getline():
+            if (not line) or line.startswith(" "):
+                break
+            key, value = line.split(":", maxsplit=1)
+            if key in expected_vcdiffs:
+                if expected_vcdiffs[key] == value:
+                    # Found this one, make sure we don't get a second one
+                    expected_vcdiffs[key] = None
+                else:
+                    explain(f"key '{key}' value {expected_vcdiffs[key]} != {value}")
+                    return False
+
+        # Ensure we found every expected VCDIFF line
+        for key, value in expected_vcdiffs.items():
+            if value is not None:
+                explain(f"Couldn't find key '{key}'")
+                return False
+
+        # Still have a line gotten from the while loop
+        if not line.startswith(header_line):
+            explain(f"Expected header line '{header_line}'")
+            return False
+
+        line = await getline()
+        if not line.startswith(expected_instr):
+            explain(f"Expected instr line '{expected_instr}'")
+            return False
+
+        line = await getline()
+        if line:
+            explain(f"Expected no/empty line")
+            return False
+
+        if not p.stdout.at_eof():
+            explain(f"Expected EOF")
+            return False
+
+        if p.returncode != 0:
+            explain(f"Got unexpected {p.returncode=}")
+            return False
+
+        return True
+
+    finally:
+        p.terminate()
 
 
 def get_nearest_n(x, n):
