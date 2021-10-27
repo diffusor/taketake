@@ -65,6 +65,7 @@ import datetime
 import ctypes
 from dataclasses import dataclass, field
 from typing import List
+import warnings
 
 import speech_recognition
 from word2number import w2n
@@ -192,7 +193,6 @@ class ExtCmd(metaclass=ExtCmdListMeta):
         # deprecated loop keyword in some async calls.  This squelches the warning.
         # DeprecationWarning: The loop argument is deprecated since Python 3.8, and scheduled for removal in Python 3.10.
         # https://bugs.python.org/issue45097
-        import warnings
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore",
                     message="The loop argument is deprecated since Python 3.8",
@@ -370,8 +370,14 @@ async def encode_xdelta_from_flac_to_wav(flac_file, wav_file, xdelta_file):
         return p_flacdec, p_xdelta
 
 
-async def check_xdelta(xdelta_file, expected_size):
+async def check_xdelta(xdelta_file, expected_size, target_size):
     """Raise XdeltaMismatch if the given xdelta file shows a difference.
+
+    Warning: if the target file size is smaller than the source, then xdelta
+    will simply encode a copy for the number of bytes in the target, and the
+    xdelta file will appear to express a match if that size is passed in as
+    the expected_size!  Thus it is imperative that both expected_size and
+    target_size be passed in for checking.
 
     Note: this fails for matching files smaller than 18 bytes, where xdelta
     just encodes the contents of the target file directly into the xdelta
@@ -399,6 +405,11 @@ async def check_xdelta(xdelta_file, expected_size):
     exception describing the point of discovery for the mismatch.
     """
 
+    if expected_size != target_size:
+        raise XdeltaMismatch(f"Xdelta pre-parse check failed:"
+                f"\n  Source filesize {expected_size}"
+                f"\n  Target filesize {target_size}")
+
     expected_vcdiffs = {
         "VCDIFF header indicator":      "VCD_APPHEADER",
         "VCDIFF copy window length":    str(expected_size),
@@ -412,7 +423,8 @@ async def check_xdelta(xdelta_file, expected_size):
 
     p = await ExtCmd.xdelta_printdelta.exec_async(
             xdelta=xdelta_file,
-            _stdout=asyncio.subprocess.PIPE)
+            _stdout=asyncio.subprocess.PIPE,
+            _stderr=asyncio.subprocess.PIPE)
 
     try:
         line_num = 0
@@ -469,11 +481,19 @@ async def check_xdelta(xdelta_file, expected_size):
         if not p.stdout.at_eof():
             fail(f"Expected EOF")
 
-        # Wait 100ms for the xdelta3 process to finish.  For a matching file
-        # (the expected case), this wait will succeed immediately.
-        # There will only be a delay for mismatching files if the xdelta is
-        # extremely large, making it take a long time to process.
-        await asyncio.wait_for(p.wait(), timeout=0.1)
+        # Wait for the xdelta3 process to finish.  For a matching file
+        # (the expected case), this wait will succeed immediately, since we
+        # have already confirmed that the output stream is ended.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore",
+                    message="The loop argument is deprecated since Python 3.8",
+                    category=DeprecationWarning)
+            stdout, stderr = await p.communicate()
+
+        if stderr:
+            fail(f"Got non-empty stderr:\n{''.join(stderr)}")
+        if stdout:
+            fail(f"Got unexpected stdout after EOF detected:\n{''.join(stdout)}")
 
         if p.returncode != 0:
             fail(f"Got unexpected {p.returncode=}")
@@ -490,9 +510,15 @@ async def check_xdelta(xdelta_file, expected_size):
         # See https://bugs.python.org/issue43578
         #
         # As a workaround to minimize the number of times we see this in
-        # testing, add a 10ms timeout call to p.wait() to allow the
-        # process to complete on its own.
-        await asyncio.wait_for(p.wait(), timeout=0.01)
+        # testing, we can add a 10ms wait_for timeout call to p.wait() to
+        # allow the process to complete on its own.
+        #
+        # However, this results in cleanup errors sometimes:
+        # 'RuntimeError: Event loop is closed'
+        #try:
+        #    await asyncio.wait_for(p.wait(), timeout=0.01)
+        #except asyncio.exceptions.TimeoutError:
+        #    pass
         if p.returncode is None:
             p.terminate()
         await p.wait()

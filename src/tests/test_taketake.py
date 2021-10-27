@@ -24,6 +24,7 @@ min_xdelta_target_size_for_match = 19
 testflac = "testdata/audio.20210318-2020-Thu.timestamp-wrong-weekday-Monday.flac"
 testpath = os.path.dirname(os.path.abspath(__file__))
 testflacpath = os.path.join(testpath, testflac)
+flacsize = os.path.getsize(testflacpath)
 
 def cleandir(d):
     if keeptemp:
@@ -894,10 +895,13 @@ class FileAssertions():
         self.assertExitCode(flac_p, 0)
         self.assertExitCode(xdelta_p, 0)
 
-    def check_xdelta(self, xdelta_file, orig_file):
+    def check_xdelta(self, xdelta_file, source_file, target_file):
         """Pull out the size from the file itself and run the checker"""
-        filesize = os.path.getsize(orig_file)
-        asyncio.run(taketake.check_xdelta(xdelta_file, filesize))
+        if not isinstance(source_file, int):
+            source_file = os.path.getsize(source_file)
+        if not isinstance(target_file, int):
+            target_file = os.path.getsize(target_file)
+        asyncio.run(taketake.check_xdelta(xdelta_file, source_file, target_file))
 
 
 class Test5_ext_commands_read_only(unittest.TestCase):
@@ -1041,28 +1045,24 @@ class Test7_check_xdelta_basic(TempdirFixture, FileAssertions):
     def test_xdelta_good(self):
         xdelta = self.tempfile("test.xdelta")
         encode_xdelta(testflacpath, testflacpath, xdelta)
-        self.check_xdelta(xdelta, testflacpath)
+        self.check_xdelta(xdelta, flacsize, flacsize)
         return xdelta
 
     def test_xdelta_good_many_asyncio_loops(self):
         xdelta = self.test_xdelta_good()
-        filesize = os.path.getsize(testflacpath)
         for x in range(self.runcount):
-            asyncio.run(taketake.check_xdelta(xdelta, filesize))
+            asyncio.run(taketake.check_xdelta(xdelta, flacsize, flacsize))
 
     def test_xdelta_good_many_in_same_loop(self):
         xdelta = self.test_xdelta_good()
-        filesize = os.path.getsize(testflacpath)
-
         async def check_xdelta_many():
             for x in range(self.runcount):
-                await taketake.check_xdelta(xdelta, filesize)
+                await taketake.check_xdelta(xdelta, flacsize, flacsize)
 
         asyncio.run(check_xdelta_many())
 
     def test_xdelta_good_many_in_parallel(self):
         xdelta = self.test_xdelta_good()
-        filesize = os.path.getsize(testflacpath)
         num_workers = 8
         max_checks = self.runcount
         num_checks = 0
@@ -1071,7 +1071,7 @@ class Test7_check_xdelta_basic(TempdirFixture, FileAssertions):
             nonlocal num_checks
             while num_checks < max_checks:
                 #await asyncio.sleep(0.0001)
-                await taketake.check_xdelta(xdelta, filesize)
+                await taketake.check_xdelta(xdelta, flacsize, flacsize)
                 num_checks += 1
 
         async def check_xdelta_many():
@@ -1105,7 +1105,7 @@ class XdeltaStringBase(TempdirFixture, FileAssertions):
 
         encode_xdelta(source, target, xdelta)
         try:
-            self.check_xdelta(xdelta, source)
+            self.check_xdelta(xdelta, source, target)
         except taketake.XdeltaMismatch:
             raise AssertionError(f"Xdelta reports string mismatches itself: '{s}'")
 
@@ -1119,7 +1119,7 @@ class XdeltaStringBase(TempdirFixture, FileAssertions):
 
         encode_xdelta(source, target, xdelta)
         with self.assertRaises(taketake.XdeltaMismatch):
-            self.check_xdelta(xdelta, source)
+            self.check_xdelta(xdelta, source, target)
 
 
 class Test7_check_xdelta_string_match(XdeltaStringBase):
@@ -1198,7 +1198,6 @@ class Test7_check_xdelta_string_mismatch(XdeltaStringBase):
                 self.assertXdeltaMismatch(s, s[:idx-1]+"_"+s[idx:])
 
 
-
 class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
     """Test taketake's wrapping of xdelta3.
 
@@ -1208,6 +1207,8 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
     of unit testing.
     """
 
+    pagesize = 4096
+
     @classmethod
     def setUpClass(cls):
         """Create a long-lived tempdir and decode the flac into it."""
@@ -1215,7 +1216,9 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
         cls.main_tempdir = tempfile.mkdtemp(
                 prefix=f'{cls.__name__}.{timestamp}.')
         cls.wavpath_src = os.path.join(cls.main_tempdir, "src.wav")
+
         asyncio.run(taketake.flac_decode(testflacpath, cls.wavpath_src))
+        cls.wavsize = os.path.getsize(cls.wavpath_src)
 
         cls.wavpath_md5 = cls.wavpath_src + ".md5"
         make_md5sum_file(cls.wavpath_src, cls.wavpath_md5)
@@ -1254,14 +1257,16 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
 
         # Ensure that check_xdelta() discovers that the files mismatch
         with self.assertRaises(taketake.XdeltaMismatch):
-            self.check_xdelta(wavpath_test_xdelta, self.wavpath_src)
+            self.check_xdelta(wavpath_test_xdelta, self.wavsize, self.wavpath_test)
 
         # Apply the xdelta patch to the corrupted wav file to generate a
         # repaired wav file
         wavpath_repaired = os.path.join(self.test_tempdir, "repaired.wav")
-        subprocess.run(("xdelta3", "-d", "-s", self.wavpath_test,
+        p = subprocess.run(("xdelta3", "-d", "-s", self.wavpath_test,
             wavpath_test_xdelta, wavpath_repaired),
-            check=True)
+            capture_output=True, text=True, check=True)
+        self.assertEqual(p.stdout, "")
+        self.assertIn(p.stderr, ["", "xdelta3: warning: output window 0 does not copy source\n"])
 
         # Check that the repaired wav equals the src wav
         self.assertEqualFiles(self.wavpath_src, wavpath_repaired)
@@ -1269,7 +1274,7 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
         # Generate a new xdelta for the repaired wav and check it matches
         wavpath_repaired_xdelta = wavpath_repaired + ".xdelta"
         self.gen_xdelta_from_flac(testflacpath, wavpath_repaired, wavpath_repaired_xdelta)
-        self.check_xdelta(wavpath_repaired_xdelta, wavpath_repaired)
+        self.check_xdelta(wavpath_repaired_xdelta, self.wavsize, wavpath_repaired)
 
         #subprocess.run(("xdelta3", "printdelta", wavpath_test_xdelta))
         cleandir(self.test_tempdir)
@@ -1277,14 +1282,71 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
 
     def fallocate(self, cmd):
         """Call fallocate with the given command on the test wavfile"""
+        # Unfortunately fallocate --posix doesn't work - the file remains the
+        # same as before
         subprocess.run(("fallocate", *cmd.split(), self.wavpath_test),
                 check=True)
 
-    def test_silly(self):
-        self.fallocate("--punch-hole --offset 4096 --length 4096")
+    def test_insert_1st_page(self):
+        self.fallocate("--insert-range --offset 0 --length 4096")
 
-    def test_zerostart(self):
-        self.fallocate("--punch-hole --offset 0 --length 1")
+    def test_insert_2nd_page(self):
+        self.fallocate("--insert-range --offset 4096 --length 4096")
+
+    def test_remove_1st_page(self):
+        self.fallocate("--collapse-range --offset 0 --length 4096")
+
+    def test_remove_2nd_page(self):
+        self.fallocate("--collapse-range --offset 4096 --length 4096")
+
+    def test_truncate_file(self):
+        newsize = 0
+        os.truncate(self.wavpath_test, newsize)
+        self.assertEqual(os.path.getsize(self.wavpath_test), newsize)
+
+    def test_truncate_to_1_byte(self):
+        newsize = 1
+        os.truncate(self.wavpath_test, newsize)
+        self.assertEqual(os.path.getsize(self.wavpath_test), newsize)
+
+    def test_truncate_to_1_page(self):
+        newsize = self.pagesize
+        os.truncate(self.wavpath_test, newsize)
+        self.assertEqual(os.path.getsize(self.wavpath_test), newsize)
+
+    def test_truncate_last_byte(self):
+        newsize = self.wavsize - 1
+        os.truncate(self.wavpath_test, newsize)
+        self.assertEqual(os.path.getsize(self.wavpath_test), newsize)
+
+    def test_truncate_last_page(self):
+        newsize = self.wavsize - self.pagesize
+        os.truncate(self.wavpath_test, newsize)
+        self.assertEqual(os.path.getsize(self.wavpath_test), newsize)
+
+    def test_corrupt_first_byte(self):
+        with open(self.wavpath_test, "rb+") as f:
+            f.seek(0, os.SEEK_SET)
+            f.write(b"x")
+
+    def test_corrupt_early_byte(self):
+        with open(self.wavpath_test, "rb+") as f:
+            f.seek(1516, os.SEEK_SET)
+            f.write(b"x")
+
+    def test_corrupt_last_byte(self):
+        with open(self.wavpath_test, "rb+") as f:
+            f.seek(-1, os.SEEK_END)
+            f.write(b"x")
+
+    def test_corrupt_near_end_byte(self):
+        with open(self.wavpath_test, "rb+") as f:
+            f.seek(-12986, os.SEEK_END)
+            f.write(b"x")
+
+    def test_add_byte(self):
+        with open(self.wavpath_test, "ab") as f:
+            f.write(b"x")
 
 # File corruption automation:
 # dd if=/dev/zero of=filepath bs=1 count=1024 seek=2048 conv=notrunc
