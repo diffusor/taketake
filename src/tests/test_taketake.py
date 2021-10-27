@@ -20,6 +20,7 @@ import time
 import subprocess
 
 keeptemp = os.environ.get("TEST_TAKETAKE_KEEPTEMP", None)
+min_xdelta_target_size_for_match = 19
 testflac = "testdata/audio.20210318-2020-Thu.timestamp-wrong-weekday-Monday.flac"
 testpath = os.path.dirname(os.path.abspath(__file__))
 testflacpath = os.path.join(testpath, testflac)
@@ -833,7 +834,8 @@ def make_md5sum_file(fname, md5file):
         subprocess.run(("md5sum", "-b", fname), stdout=f, check=True, text=True)
 
 def encode_xdelta(source, input, xdelta):
-    subprocess.run(("xdelta3", "-s", source, input, xdelta),
+    assert xdelta.endswith(".xdelta")
+    subprocess.run(("xdelta3", "-f", "-s", source, input, xdelta),
             capture_output=True, check=True, text=True)
 
 class FileAssertions():
@@ -1034,6 +1036,8 @@ class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
 
 
 class Test7_check_xdelta_basic(TempdirFixture, FileAssertions):
+    runcount = 50
+
     def test_xdelta_good(self):
         xdelta = self.tempfile("test.xdelta")
         encode_xdelta(testflacpath, testflacpath, xdelta)
@@ -1043,7 +1047,7 @@ class Test7_check_xdelta_basic(TempdirFixture, FileAssertions):
     def test_xdelta_good_many_asyncio_loops(self):
         xdelta = self.test_xdelta_good()
         filesize = os.path.getsize(testflacpath)
-        for x in range(100):
+        for x in range(self.runcount):
             asyncio.run(taketake.check_xdelta(xdelta, filesize))
 
     def test_xdelta_good_many_in_same_loop(self):
@@ -1051,7 +1055,7 @@ class Test7_check_xdelta_basic(TempdirFixture, FileAssertions):
         filesize = os.path.getsize(testflacpath)
 
         async def check_xdelta_many():
-            for x in range(100):
+            for x in range(self.runcount):
                 await taketake.check_xdelta(xdelta, filesize)
 
         asyncio.run(check_xdelta_many())
@@ -1060,7 +1064,7 @@ class Test7_check_xdelta_basic(TempdirFixture, FileAssertions):
         xdelta = self.test_xdelta_good()
         filesize = os.path.getsize(testflacpath)
         num_workers = 8
-        max_checks = 100
+        max_checks = self.runcount
         num_checks = 0
 
         async def xdelta_checker():
@@ -1080,6 +1084,13 @@ class Test7_check_xdelta_basic(TempdirFixture, FileAssertions):
         self.assertGreaterEqual(num_checks, max_checks)
 
 class XdeltaStringBase(TempdirFixture, FileAssertions):
+    teststrings = ["asnt3709oiznat2f-i.",
+            "x"*min_xdelta_target_size_for_match,
+            "\n"*min_xdelta_target_size_for_match,
+            "a"*40,
+            "b"*80,
+            "the quick red fox jumped over the lazy brown dog"]
+
     def set_file_contents(self, fname, s):
         with open(fname, "w") as f:
             f.write(s)
@@ -1093,7 +1104,10 @@ class XdeltaStringBase(TempdirFixture, FileAssertions):
         self.set_file_contents(target, s)
 
         encode_xdelta(source, target, xdelta)
-        self.check_xdelta(xdelta, source)
+        try:
+            self.check_xdelta(xdelta, source)
+        except taketake.XdeltaMismatch:
+            raise AssertionError(f"Xdelta reports string mismatches itself: '{s}'")
 
     def assertXdeltaMismatch(self, source_string, target_string):
         xdelta = self.tempfile("test.xdelta")
@@ -1107,15 +1121,82 @@ class XdeltaStringBase(TempdirFixture, FileAssertions):
         with self.assertRaises(taketake.XdeltaMismatch):
             self.check_xdelta(xdelta, source)
 
-#XXX #@unittest.expectedFailure
 
 class Test7_check_xdelta_string_match(XdeltaStringBase):
-    def test_xdelta_80as(self):
-        self.assertXdeltaMatch("a"*80)
+    def test_xdelta_fails_matching_short_strings(self):
+        """The xdelta file contains the entirety of the data if it's small enough.
+
+        In that case, there's no good way to determine if the file actually
+        matches using just the xdelta.  It's best to compare the files
+        manually in that case.
+        """
+        for i in range(min_xdelta_target_size_for_match):
+            with self.subTest(i=i):
+                self.assertXdeltaMismatch("x"*i, "x"*i)
+
+    def test_xdelta_matching_strings(self):
+        for s in self.teststrings:
+            with self.subTest(s=s):
+                self.assertXdeltaMatch(s)
 
 class Test7_check_xdelta_string_mismatch(XdeltaStringBase):
-    def test_xdelta_bad(self):
-        self.assertXdeltaMismatch("a", "b")
+    def test_xdelta_mismatch_vs_empty(self):
+        for s in self.teststrings:
+            with self.subTest(s=s, type="first_empty"):
+                self.assertXdeltaMismatch("", s)
+            with self.subTest(s=s, type="second_empty"):
+                self.assertXdeltaMismatch(s, "")
+
+    def test_xdelta_mismatch_vs_newline(self):
+        for s in self.teststrings:
+            with self.subTest(s=s, type="first_is_newline"):
+                self.assertXdeltaMismatch("\n", s)
+            with self.subTest(s=s, type="second_is_newline"):
+                self.assertXdeltaMismatch(s, "\n")
+
+    def test_xdelta_mismatch_vs_reverse(self):
+        for i, s1 in enumerate(self.teststrings):
+            s2 = self.teststrings[-i-1]
+            if s1 != s2:
+                with self.subTest(s1=s1, s2=s2):
+                    self.assertXdeltaMismatch(s1, s2)
+
+    def test_xdelta_mismatch_one_more_byte(self):
+        for s in self.teststrings:
+            with self.subTest(s=s, type="at_end_of_first"):
+                self.assertXdeltaMismatch(s+"_", s)
+            with self.subTest(s=s, type="at_start_of_first"):
+                self.assertXdeltaMismatch("_"+s, s)
+            with self.subTest(s=s, type="in_middle_of_first"):
+                idx = len(s) // 2
+                self.assertXdeltaMismatch(s[:idx]+"_"+s[idx:], s)
+
+            with self.subTest(s=s, type="at_end_of_second"):
+                self.assertXdeltaMismatch(s, s+"_")
+            with self.subTest(s=s, type="at_start_of_second"):
+                self.assertXdeltaMismatch(s, "_"+s)
+            with self.subTest(s=s, type="in_middle_of_second"):
+                idx = len(s) // 2
+                self.assertXdeltaMismatch(s, s[:idx]+"_"+s[idx:])
+
+    def test_xdelta_mismatch_one_changed_byte(self):
+        for s in self.teststrings:
+            with self.subTest(s=s, type="at_end_of_first"):
+                self.assertXdeltaMismatch(s[:-1]+"_", s)
+            with self.subTest(s=s, type="at_start_of_first"):
+                self.assertXdeltaMismatch("_"+s[1:], s)
+            with self.subTest(s=s, type="in_middle_of_first"):
+                idx = len(s) // 2
+                self.assertXdeltaMismatch(s[:idx-1]+"_"+s[idx:], s)
+
+            with self.subTest(s=s, type="at_end_of_second"):
+                self.assertXdeltaMismatch(s, s[:-1]+"_")
+            with self.subTest(s=s, type="at_start_of_second"):
+                self.assertXdeltaMismatch(s, "_"+s[1:])
+            with self.subTest(s=s, type="in_middle_of_second"):
+                idx = len(s) // 2
+                self.assertXdeltaMismatch(s, s[:idx-1]+"_"+s[idx:])
+
 
 
 class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):

@@ -373,6 +373,10 @@ async def encode_xdelta_from_flac_to_wav(flac_file, wav_file, xdelta_file):
 async def check_xdelta(xdelta_file, expected_size):
     """Raise XdeltaMismatch if the given xdelta file shows a difference.
 
+    Note: this fails for matching files smaller than 18 bytes, where xdelta
+    just encodes the contents of the target file directly into the xdelta
+    file.
+
     When the source and dest files match during an xdelta encode, the
     resulting xdelta files will contain a single CPY_0 command instructing
     xdelta to reconstruct the target file by simply copying the entirety of
@@ -465,6 +469,10 @@ async def check_xdelta(xdelta_file, expected_size):
         if not p.stdout.at_eof():
             fail(f"Expected EOF")
 
+        # Wait 100ms for the xdelta3 process to finish.  For a matching file
+        # (the expected case), this wait will succeed immediately.
+        # There will only be a delay for mismatching files if the xdelta is
+        # extremely large, making it take a long time to process.
         await asyncio.wait_for(p.wait(), timeout=0.1)
 
         if p.returncode != 0:
@@ -477,6 +485,14 @@ async def check_xdelta(xdelta_file, expected_size):
         fail(f"Got unexpected exception")
 
     finally:
+        # terminate(): will sometimes emit a warning
+        # 'Unknown child process pid 266074, will report returncode 255'
+        # See https://bugs.python.org/issue43578
+        #
+        # As a workaround to minimize the number of times we see this in
+        # testing, add a 10ms timeout call to p.wait() to allow the
+        # process to complete on its own.
+        await asyncio.wait_for(p.wait(), timeout=0.01)
         if p.returncode is None:
             p.terminate()
         await p.wait()
