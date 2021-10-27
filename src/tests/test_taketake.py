@@ -821,6 +821,10 @@ class Test0_fmt_duration(unittest.TestCase):
 # ExtCmd external command component tests
 #===========================================================================
 
+def make_md5sum_file(fname, md5file):
+    with open(md5file, "w") as f:
+        subprocess.run(("md5sum", "-b", fname), stdout=f, check=True, text=True)
+
 class FileAssertions():
 
     def mlfmt(self, b):
@@ -860,6 +864,27 @@ class FileAssertions():
     def assertExitCode(self, p, exitcode=0):
         if p.returncode != exitcode:
             raise AssertionError(f"Expected exit code {exitcode} != {p.returncode}:{self.poutfmt(p)}")
+
+    def assertMd5FileGood(self, md5file):
+        p = subprocess.run(("md5sum", "-c", md5file), capture_output=True, text=True)
+        if p.returncode != 0:
+            raise AssertionError(f"md5sum check failed:{self.poutfmt(p)}")
+
+    def assertMd5FileBad(self, md5file):
+        p = subprocess.run(("md5sum", "-c", md5file), capture_output=True, text=True)
+        if p.returncode == 0:
+            raise AssertionError(f"md5sum check unexpectedly passed:{self.poutfmt(p)}")
+
+    def gen_xdelta(self, flac, wav, xdelta):
+        flac_p, xdelta_p = asyncio.run(
+                taketake.encode_xdelta_from_flac_to_wav(flac, wav, xdelta))
+        self.assertExitCode(flac_p, 0)
+        self.assertExitCode(xdelta_p, 0)
+
+    def check_xdelta(self, xdelta_file, orig_file):
+        """Pull out the size from the file itself and run the checker"""
+        filesize = os.path.getsize(orig_file)
+        asyncio.run(taketake.check_xdelta(xdelta_file, filesize))
 
 
 class Test5_ext_commands_read_only(unittest.TestCase):
@@ -997,18 +1022,6 @@ class Test6_ext_commands_tempdir(unittest.TestCase, FileAssertions):
         self.assertEqual(num_pages_cached_post, 0)
 
 
-def make_md5sum_file(fname, md5file):
-    with open(md5file, "w") as f:
-        subprocess.run(("md5sum", "-b", fname), stdout=f, check=True, text=True)
-
-def check_md5sum_file(md5file):
-    """Return True if the md5 check passes, False otherwise"""
-    p = subprocess.run(("md5sum", "-c", md5file),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL)
-    return p.returncode == 0
-
-
 class Test7_xdelta(unittest.TestCase, FileAssertions):
     """Test taketake's wrapping of xdelta3.
 
@@ -1050,24 +1063,13 @@ class Test7_xdelta(unittest.TestCase, FileAssertions):
         shutil.copyfile(self.wavpath_src, self.wavpath_test)
         make_md5sum_file(self.wavpath_test, self.wavpath_test_md5)
 
-    def gen_xdelta(self, flac, wav, xdelta):
-        flac_p, xdelta_p = asyncio.run(
-                taketake.encode_xdelta_from_flac_to_wav(flac, wav, xdelta))
-        self.assertExitCode(flac_p, 0)
-        self.assertExitCode(xdelta_p, 0)
-
-    def check_xdelta(self, xdelta_file, orig_file):
-        """Pull out the size from the file itself and run the checker"""
-        filesize = os.path.getsize(orig_file)
-        asyncio.run(taketake.check_xdelta(xdelta_file, filesize))
-
     def tearDown(self):
         """Verify the test corrupted the copied wav, then verify it can be repaired"""
         # Verify the original decoded wav was not corrupted
-        self.assertTrue(check_md5sum_file(self.wavpath_md5))
+        self.assertMd5FileGood(self.wavpath_md5)
 
         # Verify the test's copy of the wav was indeed corrupted
-        self.assertFalse(check_md5sum_file(self.wavpath_test_md5))
+        self.assertMd5FileBad(self.wavpath_test_md5)
 
         # Generate an xdelta patch to the stdout of the decoded flac,
         # using the corrupted wav file as the source
