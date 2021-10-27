@@ -1050,6 +1050,12 @@ class Test7_xdelta(unittest.TestCase, FileAssertions):
         shutil.copyfile(self.wavpath_src, self.wavpath_test)
         make_md5sum_file(self.wavpath_test, self.wavpath_test_md5)
 
+    def gen_xdelta(self, flac, wav, xdelta):
+        flac_p, xdelta_p = asyncio.run(
+                taketake.encode_xdelta_from_flac_to_wav(flac, wav, xdelta))
+        self.assertExitCode(flac_p, 0)
+        self.assertExitCode(xdelta_p, 0)
+
     def check_xdelta(self, xdelta_file, orig_file):
         """Pull out the size from the file itself and run the checker"""
         filesize = os.path.getsize(orig_file)
@@ -1066,10 +1072,7 @@ class Test7_xdelta(unittest.TestCase, FileAssertions):
         # Generate an xdelta patch to the stdout of the decoded flac,
         # using the corrupted wav file as the source
         wavpath_test_xdelta = self.wavpath_test + ".xdelta"
-        flac_p, xdelta_p = asyncio.run(taketake.encode_xdelta_from_flac_to_wav(
-                testflacpath, self.wavpath_test, wavpath_test_xdelta))
-        self.assertExitCode(flac_p, 0)
-        self.assertExitCode(xdelta_p, 0)
+        self.gen_xdelta(testflacpath, self.wavpath_test, wavpath_test_xdelta)
 
         # Ensure that check_xdelta() discovers that the files mismatch
         with self.assertRaises(taketake.XdeltaMismatch):
@@ -1085,6 +1088,11 @@ class Test7_xdelta(unittest.TestCase, FileAssertions):
         # Check that the repaired wav equals the src wav
         self.assertEqualFiles(self.wavpath_src, wavpath_repaired)
 
+        # Generate a new xdelta for the repaired wav and check it matches
+        wavpath_repaired_xdelta = wavpath_repaired + ".xdelta"
+        self.gen_xdelta(testflacpath, wavpath_repaired, wavpath_repaired_xdelta)
+        self.check_xdelta(wavpath_repaired_xdelta, wavpath_repaired)
+
         #subprocess.run(("ls", "-al", self.test_tempdir))
         #subprocess.run(("xdelta3", "printdelta", wavpath_test_xdelta))
         # Clean up the test-specific directory
@@ -1098,6 +1106,9 @@ class Test7_xdelta(unittest.TestCase, FileAssertions):
 
     def test_silly(self):
         self.fallocate("--punch-hole --offset 4096 --length 4096")
+
+    def test_zerostart(self):
+        self.fallocate("--punch-hole --offset 0 --length 1")
 
 # File corruption automation:
 # dd if=/dev/zero of=filepath bs=1 count=1024 seek=2048 conv=notrunc

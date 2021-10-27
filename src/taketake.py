@@ -403,8 +403,8 @@ async def check_xdelta(xdelta_file, expected_size):
         "VCDIFF data section length":   "0",
     }
 
-    header_line = "  Offset Code Type1 Size1 @Addr1 + Type2 Size2 @Addr2"
-    expected_instr = f"  000000 019  CPY_0 {expected_size} @0"
+    header_line = "Offset Code Type1 Size1 @Addr1 + Type2 Size2 @Addr2"
+    expected_instr = f"000000 019  CPY_0 {expected_size} @0"
 
     p = await ExtCmd.xdelta_printdelta.exec_async(
             xdelta=xdelta_file,
@@ -418,23 +418,28 @@ async def check_xdelta(xdelta_file, expected_size):
             nonlocal line_num
             line_num += 1
             line_bytes = await p.stdout.readline()
-            lines_read.append(line_bytes.decode().strip())
-            return lines_read[-1]
+            lines_read.append(line_bytes.decode())
+            return lines_read[-1].strip()
 
         def fail(msg):
-            lines_joined = "\n    ".join(lines_read)
+            lines_joined = "".join(lines_read)
             raise XdeltaMismatch(
-                    f"Xdelta check failed - {msg}:"
-                    f"\n  In  {xdelta_file}:{line_num}"
+                    f"Xdelta check failed - {msg}"
                     f"\n  Cmd {p.args}"
                     f"\n  Returncode {p.returncode}"
-                    f"\n  Header contents processed:"
-                    f"\n    {lines_joined}"
+                    f"\n  At line {line_num} in output:"
+                    f"\n{lines_joined}"
                 )
+
+        def expect_line(line_type, expect, line):
+            if line != expect:
+                fail(f"Mismatched {line_type} line:"
+                        f"\n  Expected: '{header_line}'"
+                        f"\n  Got:      '{line}'")
 
         # Read line-by-line ensuring the file contains the expected headers
         while line := await getline():
-            if (not line) or line.startswith(" "):
+            if ":" not in line:
                 break
             key, value = line.split(":", maxsplit=1)
             value = value.strip()
@@ -450,29 +455,33 @@ async def check_xdelta(xdelta_file, expected_size):
             if value is not None:
                 fail(f"Couldn't find key '{key}'")
 
-        # Still have a line gotten from the while loop
-        if not line.startswith(header_line):
-            fail(f"Expected header line '{header_line}'")
-
+        # Still have a line out from the while loop
+        expect_line("header", header_line, line)
         line = await getline()
-        if not line.startswith(expected_instr):
-            fail(f"Expected instr line '{expected_instr}'")
-
+        expect_line("instruction", expected_instr, line)
         line = await getline()
-        if line:
-            fail(f"Expected no further output")
+        expect_line("empty", "", line)
 
         if not p.stdout.at_eof():
             fail(f"Expected EOF")
 
-        if p.returncode is None:
-            fail(f"Expected xdelta process to be finished")
+        await asyncio.wait_for(p.wait(), timeout=0.1)
 
         if p.returncode != 0:
             fail(f"Got unexpected {p.returncode=}")
 
+    except XdeltaMismatch:
+        raise
+
+    except:
+        fail(f"Got unexpected exception")
+
     finally:
-        p.terminate()
+        if p.returncode is not None:
+            try:
+                p.terminate()
+            except ProcessLookupError:
+                pass
         await p.wait()
 
         # Note we must wait for termination - otherwise we trigger resource warnings:
