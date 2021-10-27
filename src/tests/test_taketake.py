@@ -825,6 +825,10 @@ def make_md5sum_file(fname, md5file):
     with open(md5file, "w") as f:
         subprocess.run(("md5sum", "-b", fname), stdout=f, check=True, text=True)
 
+def encode_xdelta(source, input, xdelta):
+    subprocess.run(("xdelta3", "-s", source, input, xdelta),
+            capture_output=True, check=True, text=True)
+
 class FileAssertions():
 
     def mlfmt(self, b):
@@ -875,7 +879,7 @@ class FileAssertions():
         if p.returncode == 0:
             raise AssertionError(f"md5sum check unexpectedly passed:{self.poutfmt(p)}")
 
-    def gen_xdelta(self, flac, wav, xdelta):
+    def gen_xdelta_from_flac(self, flac, wav, xdelta):
         flac_p, xdelta_p = asyncio.run(
                 taketake.encode_xdelta_from_flac_to_wav(flac, wav, xdelta))
         self.assertExitCode(flac_p, 0)
@@ -1021,6 +1025,51 @@ class Test6_ext_commands_tempdir(unittest.TestCase, FileAssertions):
         num_pages_cached_post = get_cached_pages_for_flacfile()
         self.assertEqual(num_pages_cached_post, 0)
 
+    def test_xdelta_good(self):
+        xdelta = os.path.join(self.tempdir, "test.xdelta")
+        encode_xdelta(testflacpath, testflacpath, xdelta)
+        self.check_xdelta(xdelta, testflacpath)
+        return xdelta
+
+    def test_xdelta_good_many_asyncio_loops(self):
+        xdelta = self.test_xdelta_good()
+        filesize = os.path.getsize(testflacpath)
+        for x in range(100):
+            asyncio.run(taketake.check_xdelta(xdelta, filesize))
+
+    def test_xdelta_good_many_in_same_loop(self):
+        xdelta = self.test_xdelta_good()
+        filesize = os.path.getsize(testflacpath)
+
+        async def check_xdelta_many():
+            for x in range(100):
+                await taketake.check_xdelta(xdelta, filesize)
+
+        asyncio.run(check_xdelta_many())
+
+    def test_xdelta_good_many_in_parallel(self):
+        xdelta = self.test_xdelta_good()
+        filesize = os.path.getsize(testflacpath)
+        num_workers = 8
+        max_checks = 100
+        num_checks = 0
+
+        async def xdelta_checker():
+            nonlocal num_checks
+            while num_checks < max_checks:
+                #await asyncio.sleep(0.0001)
+                await taketake.check_xdelta(xdelta, filesize)
+                num_checks += 1
+
+        async def check_xdelta_many():
+            tasks = []
+            for i in range(num_workers):
+                tasks.append(asyncio.create_task(xdelta_checker()))
+            await asyncio.gather(*tasks)
+
+        asyncio.run(check_xdelta_many())
+        self.assertGreaterEqual(num_checks, max_checks)
+
 
 class Test7_xdelta(unittest.TestCase, FileAssertions):
     """Test taketake's wrapping of xdelta3.
@@ -1074,7 +1123,7 @@ class Test7_xdelta(unittest.TestCase, FileAssertions):
         # Generate an xdelta patch to the stdout of the decoded flac,
         # using the corrupted wav file as the source
         wavpath_test_xdelta = self.wavpath_test + ".xdelta"
-        self.gen_xdelta(testflacpath, self.wavpath_test, wavpath_test_xdelta)
+        self.gen_xdelta_from_flac(testflacpath, self.wavpath_test, wavpath_test_xdelta)
 
         # Ensure that check_xdelta() discovers that the files mismatch
         with self.assertRaises(taketake.XdeltaMismatch):
@@ -1092,7 +1141,7 @@ class Test7_xdelta(unittest.TestCase, FileAssertions):
 
         # Generate a new xdelta for the repaired wav and check it matches
         wavpath_repaired_xdelta = wavpath_repaired + ".xdelta"
-        self.gen_xdelta(testflacpath, wavpath_repaired, wavpath_repaired_xdelta)
+        self.gen_xdelta_from_flac(testflacpath, wavpath_repaired, wavpath_repaired_xdelta)
         self.check_xdelta(wavpath_repaired_xdelta, wavpath_repaired)
 
         #subprocess.run(("ls", "-al", self.test_tempdir))
