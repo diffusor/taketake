@@ -478,10 +478,7 @@ async def check_xdelta(xdelta_file, expected_size):
 
     finally:
         if p.returncode is None:
-            try:
-                p.terminate()
-            except ProcessLookupError:
-                pass
+            p.terminate()
         await p.wait()
 
         # Note we must wait for termination - otherwise we trigger resource warnings:
