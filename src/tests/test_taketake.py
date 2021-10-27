@@ -911,8 +911,7 @@ class Test5_ext_commands_read_only(unittest.TestCase):
             taketake.TimeRange(start=5.94787, duration=1.91383),
             taketake.TimeRange(start=10.117, duration=0.593175)])
 
-
-class Test6_ext_commands_tempdir(unittest.TestCase, FileAssertions):
+class TempdirFixture(unittest.TestCase):
     def setUp(self):
         timestamp = time.strftime("%Y%m%d-%H%M%S-%a")
         self.tempdir = tempfile.mkdtemp(
@@ -926,6 +925,7 @@ class Test6_ext_commands_tempdir(unittest.TestCase, FileAssertions):
         pass
 
 
+class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
     def test_timestamp_update(self):
         """Check our timestamp handling assumptions.
 
@@ -1025,6 +1025,8 @@ class Test6_ext_commands_tempdir(unittest.TestCase, FileAssertions):
         num_pages_cached_post = get_cached_pages_for_flacfile()
         self.assertEqual(num_pages_cached_post, 0)
 
+
+class Test7_check_xdelta_match(TempdirFixture, FileAssertions):
     def test_xdelta_good(self):
         xdelta = os.path.join(self.tempdir, "test.xdelta")
         encode_xdelta(testflacpath, testflacpath, xdelta)
@@ -1071,7 +1073,15 @@ class Test6_ext_commands_tempdir(unittest.TestCase, FileAssertions):
         self.assertGreaterEqual(num_checks, max_checks)
 
 
-class Test7_xdelta(unittest.TestCase, FileAssertions):
+class Test7_check_xdelta_mmismatch(TempdirFixture, FileAssertions):
+    def test_xdelta_bad(self):
+        xdelta = os.path.join(self.tempdir, "test.xdelta")
+        encode_xdelta(testflacpath, testflacpath, xdelta)
+        self.check_xdelta(xdelta, testflacpath)
+        return xdelta
+
+
+class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
     """Test taketake's wrapping of xdelta3.
 
     Each test corrupts a wav file in some way, then the tearDown checks it can
