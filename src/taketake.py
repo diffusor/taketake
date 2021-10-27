@@ -114,6 +114,9 @@ class TimestampGrokError(RuntimeError):
 class NoSuitableAudioSpan(RuntimeError):
     pass
 
+class XdeltaMismatch(RuntimeError):
+    pass
+
 #============================================================================
 # External command infrastructure
 #============================================================================
@@ -367,8 +370,8 @@ async def encode_xdelta_from_flac_to_wav(flac_file, wav_file, xdelta_file):
         return p_flacdec, p_xdelta
 
 
-async def check_xdelta_match(xdelta_file, expected_size):
-    """Return True if the given xdelta file represents no difference.
+async def check_xdelta(xdelta_file, expected_size):
+    """Raise XdeltaMismatch if the given xdelta file shows a difference.
 
     When the source and dest files match during an xdelta encode, the
     resulting xdelta files will contain a single CPY_0 command instructing
@@ -387,6 +390,9 @@ async def check_xdelta_match(xdelta_file, expected_size):
         VCDIFF data section length:   0
           Offset Code Type1 Size1 @Addr1 + Type2 Size2 @Addr2
           000000 019  CPY_0 22670 @0     
+
+    If these conditions aren't met, the function raises an XdeltaMismatch
+    exception describing the point of discovery for the mismatch.
     """
 
     expected_vcdiffs = {
@@ -406,17 +412,24 @@ async def check_xdelta_match(xdelta_file, expected_size):
 
     try:
         line_num = 0
-        lastline = None
+        lines_read = []
 
         async def getline():
             line_num += 1
             line_bytes = await p.stdout.readline()
-            lastline = line_bytes.decode().strip()
-            return lastline
+            lines_read.append(line_bytes.decode().strip())
+            return lines_read[-1]
 
-        def explain(msg):
-            print(f" ** Xdelta check failed - {msg}:  {xdelta_file}:{line_num}  '{line}'")
-            pass
+        def fail(msg):
+            lines_joined = "\n   ".join(lines_read)
+            raise XdeltaMismatch(
+                    f"Xdelta check failed - {msg}:"
+                    f"\n  In  {xdelta_file}:{line_num}"
+                    f"\n  Cmd {p.args}"
+                    f"\n  Returncode {p.returncode}"
+                    f"\n  Header contents processed:"
+                    f"\n    {lines_joined}"
+                )
 
         # Read line-by-line ensuring the file contains the expected headers
         while line := await getline():
@@ -428,39 +441,30 @@ async def check_xdelta_match(xdelta_file, expected_size):
                     # Found this one, make sure we don't get a second one
                     expected_vcdiffs[key] = None
                 else:
-                    explain(f"key '{key}' value {expected_vcdiffs[key]} != {value}")
-                    return False
+                    fail(f"key '{key}' value {expected_vcdiffs[key]} != {value}")
 
         # Ensure we found every expected VCDIFF line
         for key, value in expected_vcdiffs.items():
             if value is not None:
-                explain(f"Couldn't find key '{key}'")
-                return False
+                fail(f"Couldn't find key '{key}'")
 
         # Still have a line gotten from the while loop
         if not line.startswith(header_line):
-            explain(f"Expected header line '{header_line}'")
-            return False
+            fail(f"Expected header line '{header_line}'")
 
         line = await getline()
         if not line.startswith(expected_instr):
-            explain(f"Expected instr line '{expected_instr}'")
-            return False
+            fail(f"Expected instr line '{expected_instr}'")
 
         line = await getline()
         if line:
-            explain(f"Expected no/empty line")
-            return False
+            fail(f"Expected no/empty line")
 
         if not p.stdout.at_eof():
-            explain(f"Expected EOF")
-            return False
+            fail(f"Expected EOF")
 
         if p.returncode != 0:
-            explain(f"Got unexpected {p.returncode=}")
-            return False
-
-        return True
+            fail(f"Got unexpected {p.returncode=}")
 
     finally:
         p.terminate()
