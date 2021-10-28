@@ -25,6 +25,7 @@ testflac = "testdata/audio.20210318-2020-Thu.timestamp-wrong-weekday-Monday.flac
 testpath = os.path.dirname(os.path.abspath(__file__))
 testflacpath = os.path.join(testpath, testflac)
 flacsize = os.path.getsize(testflacpath)
+flacwavsize = 1889324
 
 def cleandir(d):
     if keeptemp:
@@ -924,6 +925,11 @@ class Test5_ext_commands_read_only(unittest.TestCase):
             taketake.TimeRange(start=5.94787, duration=1.91383),
             taketake.TimeRange(start=10.117, duration=0.593175)])
 
+    def test_flac_wav_size(self):
+        size = asyncio.run(taketake.get_flac_wav_size(testflacpath))
+        self.assertEqual(size, flacwavsize)
+
+
 class TempdirFixture(unittest.TestCase):
     def setUp(self):
         timestamp = time.strftime("%Y%m%d-%H%M%S-%a")
@@ -990,7 +996,7 @@ class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
         self.assertNotEqualFiles(wavpath, flacpath)
 
         wavsize = os.path.getsize(wavpath)
-        self.assertEqual(wavsize, 1889324)
+        self.assertEqual(wavsize, flacwavsize)
         self.assertGreater(wavsize/5, os.path.getsize(flacpath))
 
         wavtypestr = "RIFF (little-endian) data, WAVE audio, Microsoft PCM, 16 bit, stereo 44100 Hz"

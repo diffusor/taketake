@@ -329,6 +329,38 @@ async def flac_decode(flac_fpath, wav_fpath):
     #print(f"Decoded to {wav_fpath}:", proc.stderr_str.decode())
 
 
+async def get_flac_wav_size(flac_file):
+    """Decode the flac file to count the number of bytes of the resulting wav.
+
+    Does not actually write the wav to disk.
+    """
+    read_into_wc, write_from_flac = os.pipe()
+
+    p_flacdec = await ExtCmd.flac_decode_stdout.exec_async(
+            infile=flac_file,
+            _stdout=write_from_flac,
+            _stderr=asyncio.subprocess.DEVNULL)
+    os.close(write_from_flac)  # Allow flac to get a SIGPIPE if wc exits
+
+    p_wc = await asyncio.create_subprocess_exec("wc", "-c",
+            stdin=read_into_wc,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE)
+    os.close(read_into_wc)
+
+    stdout, stderr = await p_wc.communicate()
+    if p_wc.returncode:
+        raise SubprocessError(f"Got bad exit code {p_wc.returncode} from wc")
+    if stderr:
+        raise SubprocessError(f"Got unexpected stderr from wc: '{stderr.decode()}'")
+
+    await p_flacdec.wait()
+    if p_flacdec.returncode:
+        raise SubprocessError(f"Got bad exit code {p_flacdec.returncode} from flac")
+
+    return int(stdout.decode().strip())
+
+
 async def encode_xdelta_from_flac_to_wav(flac_file, wav_file, xdelta_file):
     """Encode an xdelta_file from the wav_file to the decoded flac_file.
 
