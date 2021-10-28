@@ -1197,6 +1197,81 @@ async def process_file_speech(finfo):
 
 
 #============================================================================
+# Signaling interface
+#============================================================================
+
+class NamedQueue(asyncio.Queue):
+    def __init__(self, name):
+        self.name = name
+        super().__init__()
+
+class Stepper:
+    """Manage a set of NamedQueues for coordinating stepping a sequence.
+
+    The end of the sequence should be indicated be the given end token.
+    """
+    def __init__(self, sync_pre=None, sync_across=None,
+            send_to=None, send_post=None, end=None):
+
+        self.sync_pre = sync_pre
+        self.sync_across = sync_across
+        self.send_to = send_to
+        self.send_post = send_post
+        self.end = end
+
+        self.pre_sync_met = self.sync_pre is None
+
+    class DesynchronizationError(RuntimeError):
+        pass
+
+    async def _get_across(self, q_list):
+        last_token = None
+        last_queue = None
+        # sync across the next token from each stream
+        for q in q_list:
+            token = await q.get()
+            q.task_done()
+            if last_queue is not None and token != last_token:
+                raise Stepper.DesynchronizationError(
+                        f"Mismatching tokens between queues!"
+                        f"\n  {last_token!r} <= {last_queue.name}"
+                        f"\n  {token!r} <= {q.name}")
+            last_token = token
+            last_queue = q
+        return last_token
+
+
+    async def pre_sync(self):
+        """wait for end on all sync_pre Queues"""
+        if not self.pre_sync_met:
+            for q in self.sync_pre:
+                while True:
+                    token = await q.get()
+                    q.task_done()
+                    if token == self.end:
+                        break
+            self.pre_sync_met = True
+
+
+    async def get(self):
+        """Pre-sync, then wait for all sync_across queues to emit their next token.
+
+        Raises Stepper.DesynchronizationError of the sync_across queues don't
+        all report matching tokens.
+        """
+        await pre_sync()
+        return await self._get_across(self.sync_across)
+
+
+    async def put(self, token):
+        for q in self.send_to:
+            await q.put()
+
+        if token == self.end:
+            for q in self.send_post:
+                await q.put()
+
+#============================================================================
 # Phase A: Encode - encode flacs, rename, generate pars
 #============================================================================
 
