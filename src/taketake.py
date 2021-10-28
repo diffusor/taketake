@@ -1205,6 +1205,18 @@ class NamedQueue(asyncio.Queue):
         self.name = name
         super().__init__()
 
+def make_queues(s):
+    """Make a NamedQueue named for each word in s.
+
+    Returns a dict keyed off of the given names, but also with
+    attributes set based on those names so they are dot accessible.
+    """
+    qdict = {}
+    for qname in s.split():
+        qdict[qname] = NamedQueue(qname)
+        setattr(qdict, qname, qdict[qname])
+    return qdict
+
 class Stepper:
     """Manage a set of NamedQueues for coordinating stepping a sequence.
 
