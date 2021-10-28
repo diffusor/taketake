@@ -1285,7 +1285,7 @@ class Stepper:
         Raises Stepper.DesynchronizationError of the sync_across queues don't
         all report matching tokens.
         """
-        await pre_sync()
+        await self.pre_sync()
         return await self._get_across(self.sync_across)
 
 

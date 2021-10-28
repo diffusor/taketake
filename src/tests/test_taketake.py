@@ -877,6 +877,97 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(runlist, ['finisher', 'goer', '-0', '+0', '-1', '+1', '-None', 'done', '+None'])
 
+    async def test_join(self):
+        d = taketake.make_queues("q1 q2 q3")
+        num_tokens = 3
+
+        async def joiner(stepper):
+            r = ""
+            while (token := await stepper.get()) is not None:
+                r += str(token)
+            return r
+
+        async def sender(name, stepper):
+            for i in range(num_tokens):
+                await stepper.put(i)
+            await stepper.put(None)
+            return i
+
+        senders = []
+        for i, q in enumerate(d.values()):
+            senders.append(sender(f"s{i}", taketake.Stepper(send_to=q)))
+
+        r = await asyncio.gather(
+                joiner(taketake.Stepper(sync_across=d.values())),
+                *senders)
+
+        self.assertEqual(r, ['012'] + [num_tokens-1] * len(d))
+
+    async def test_bad_join(self):
+        d = taketake.make_queues("q1 q2")
+
+        async def joiner(stepper):
+            while (token := await stepper.get()) is not None:
+                pass
+
+        async def sender(name, stepper):
+            await stepper.put(name)
+            await stepper.put(None)
+
+        senders = []
+        for i, q in enumerate(d.values()):
+            senders.append(sender(f"s{i}", taketake.Stepper(send_to=q)))
+
+        with self.assertRaisesRegex(
+                taketake.Stepper.DesynchronizationError,
+                "Mismatching tokens between queues!"):
+            await asyncio.gather(
+                    joiner(taketake.Stepper(sync_across=d.values())),
+                    *senders)
+
+    async def test_send_post(self):
+        d = taketake.make_queues("q1 q2 end")
+        runlist = []
+        def log(msg):
+            runlist.append(msg)
+
+        async def joiner(stepper):
+            i = 0
+            log("-j")
+            while (token := await stepper.get()) is not None:
+                i += 1
+                log(f"j{i}")
+                self.assertEqual(token, i)
+            log("jNone")
+            await stepper.put(None)
+            log("+j")
+
+        async def finisher(stepper):
+            log("-f")
+            await asyncio.wait_for(stepper.pre_sync(), timeout=1)
+            log("+f")
+
+        async def sender(name, stepper):
+            log(f"-{name}")
+            await stepper.put(1)
+            log(f"1{name}")
+            await asyncio.sleep(0)
+            await stepper.put(2)
+            log(f"2{name}")
+            await stepper.put(None)
+            log(f"+{name}")
+
+        r = await asyncio.gather(
+                finisher(taketake.Stepper(sync_pre=d.end)),
+                joiner(taketake.Stepper(
+                    sync_across=[d.q1, d.q2],
+                    send_post=d.end,
+                    )),
+                sender("q1", taketake.Stepper(send_to=d.q1)),
+                sender("q2", taketake.Stepper(send_to=d.q2)))
+
+        self.assertEqual(" ".join(runlist),
+                "-f -j -q1 1q1 -q2 1q2 j1 2q1 +q1 2q2 +q2 j2 jNone +j +f")
 
 #===========================================================================
 # ExtCmd external command component tests
