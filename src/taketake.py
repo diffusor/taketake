@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 
-# TODO - duration, renaming, touch, flac conversion, par2, copy, verify
-# TODO - https://quantlane.com/blog/ensure-asyncio-task-exceptions-get-logged/
-
 """Rename file[s] based on the spoken information at the front of the file.
 
 When using TalkyTime to timestamp a recording, this eases management of the
@@ -143,14 +140,14 @@ async def communicate(p, *args, **kwargs):
     """Call p.communicate with the given args.
 
     Stuff the resulting stdout and stderr bytes objects into new
-    stdout_str and stderr_str attributes of the given p object.
+    stdout_data and stderr_data attributes of the given p object.
     """
     import warnings
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore",
                 message="The loop argument is deprecated since Python 3.8",
                 category=DeprecationWarning)
-        p.stdout_str, p.stderr_str = await p.communicate(*args, **kwargs)
+        p.stdout_data, p.stderr_data = await p.communicate(*args, **kwargs)
 
 
 class ExtCmdListMeta(type):
@@ -205,13 +202,13 @@ class ExtCmd(metaclass=ExtCmdListMeta):
 
         def exmsg():
             return f"from {args[0]}\n  cmd: '{' '.join(args)}'\n" \
-                    f"  stdout:\n    {mlfmt(proc.stdout_str)}\n" \
-                    f"  stderr:\n    {mlfmt(proc.stderr_str)}"
+                    f"  stdout:\n    {mlfmt(proc.stdout_data)}\n" \
+                    f"  stderr:\n    {mlfmt(proc.stderr_data)}"
 
         proc.args = args
         proc.exmsg = exmsg
-        proc.stdout_str = repr(proc.stdout)
-        proc.stderr_str = repr(proc.stderr)
+        proc.stdout_data = repr(proc.stdout)
+        proc.stderr_data = repr(proc.stderr)
 
         return proc
 
@@ -345,12 +342,12 @@ ExtCmd(
 async def flac_encode(wav_fpath, flac_fpath):
     #flac --preserve-modtime 7d29t001.WAV -o 7d29t001.flac
     proc = await ExtCmd.flac_encode.run_fg(infile=wav_fpath, outfile=flac_fpath)
-    #print(f"Encoded to {flac_fpath}:", proc.stderr_str.decode())
+    #print(f"Encoded to {flac_fpath}:", proc.stderr_data.decode())
 
 
 async def flac_decode(flac_fpath, wav_fpath):
     proc = await ExtCmd.flac_decode.run_fg(infile=flac_fpath, outfile=wav_fpath)
-    #print(f"Decoded to {wav_fpath}:", proc.stderr_str.decode())
+    #print(f"Decoded to {wav_fpath}:", proc.stderr_data.decode())
 
 
 async def get_flac_wav_size(flac_file):
@@ -375,14 +372,14 @@ async def get_flac_wav_size(flac_file):
 
     if p_wc.returncode:
         raise SubprocessError(f"Got bad exit code {p_wc.returncode} from wc")
-    if p_wc.stderr_str:
-        raise SubprocessError(f"Got unexpected stderr from wc: '{p_wc.stderr_str.decode()}'")
+    if p_wc.stderr_data:
+        raise SubprocessError(f"Got unexpected stderr from wc: '{p_wc.stderr_data.decode()}'")
 
     await p_flacdec.wait()
     if p_flacdec.returncode:
         raise SubprocessError(f"Got bad exit code {p_flacdec.returncode} from flac")
 
-    return int(p_wc.stdout_str.decode().strip())
+    return int(p_wc.stdout_data.decode().strip())
 
 
 async def encode_xdelta_from_flac_to_wav(flac_file, wav_file, xdelta_file):
@@ -542,10 +539,10 @@ async def check_xdelta(xdelta_file, expected_size, target_size):
         # have already confirmed that the output stream is ended.
         await communicate(p)
 
-        if p.stderr_str:
-            fail(f"Got non-empty stderr:\n{''.join(p.stderr_str.decode())}")
-        if p.stdout_str:
-            fail(f"Got unexpected stdout after EOF detected:\n{''.join(p.stdout_str.decode())}")
+        if p.stderr_data:
+            fail(f"Got non-empty stderr:\n{''.join(p.stderr_data.decode())}")
+        if p.stdout_data:
+            fail(f"Got unexpected stdout after EOF detected:\n{''.join(p.stdout_data.decode())}")
 
         if p.returncode != 0:
             fail(f"Got unexpected {p.returncode=}")
@@ -637,11 +634,11 @@ async def get_file_duration(fpath):
     """Use ffprobe to determine how many seconds the file identified by fpath plays for."""
     proc = await ExtCmd.get_media_duration.run_fg(file=fpath)
 
-    if proc.stderr_str:
+    if proc.stderr_data:
         raise InvalidMediaFile(f"Got extra stderr {proc.exmsg()}")
 
     try:
-        duration = float(proc.stdout_str)
+        duration = float(proc.stdout_data)
     except ValueError as e:
         raise InvalidMediaFile(f"Could not parse duration stdout {proc.exmsg()}") from e
 
@@ -659,7 +656,7 @@ async def detect_silence(fpath):
             threshold=Config.silence_threshold_dbfs,
             duration=Config.silence_min_duration_s)
 
-    detected_lines = [line for line in proc.stderr_str.splitlines()
+    detected_lines = [line for line in proc.stderr_data.splitlines()
                         if line.startswith(b'[silencedetect')]
 
     offsets = [float(line.split()[-1]) for line in detected_lines if b"silence_start" in line]
