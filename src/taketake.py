@@ -65,7 +65,6 @@ import datetime
 import ctypes
 from dataclasses import dataclass, field
 from typing import List
-import warnings
 
 import speech_recognition
 from word2number import w2n
@@ -121,6 +120,38 @@ class XdeltaMismatch(RuntimeError):
 #============================================================================
 # External command infrastructure
 #============================================================================
+
+# Python 3.9.7 has an issue where asyncio.subprocess internally loses the
+# deprecated loop keyword in some async calls.  This squelches the warning.
+# DeprecationWarning: The loop argument is deprecated since Python 3.8, and scheduled for removal in Python 3.10.
+# https://bugs.python.org/issue45097
+#
+# These warnings show up when running unittest because it explicitly enables
+# warnings by prepending a new filter when running the tests.
+#
+# One can ignore all warnings, but that will cover future issues:
+#       unittest.main(warnings='ignore')
+#
+# Note we wan't use this around unittest.main() because the TestRunner
+# prepends non-ignore filters:
+#
+#        with warnings.catch_warnings():
+#            warnings.filterwarnings("ignore",
+#                    message="The loop argument is deprecated since Python 3.8",
+#                    category=DeprecationWarning)
+async def communicate(p, *args, **kwargs):
+    """Call p.communicate with the given args.
+
+    Stuff the resulting stdout and stderr bytes objects into new
+    stdout_str and stderr_str attributes of the given p object.
+    """
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore",
+                message="The loop argument is deprecated since Python 3.8",
+                category=DeprecationWarning)
+        p.stdout_str, p.stderr_str = await p.communicate(*args, **kwargs)
+
 
 class ExtCmdListMeta(type):
     """Allow access to instances of derived classes by lookup through the
@@ -189,15 +220,8 @@ class ExtCmd(metaclass=ExtCmdListMeta):
                 _stdout=asyncio.subprocess.PIPE,
                 _stderr=asyncio.subprocess.PIPE,
                 **kwargs)
-        # Python 3.9.7 has an issue where asyncio.subprocess internally loses the
-        # deprecated loop keyword in some async calls.  This squelches the warning.
-        # DeprecationWarning: The loop argument is deprecated since Python 3.8, and scheduled for removal in Python 3.10.
-        # https://bugs.python.org/issue45097
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore",
-                    message="The loop argument is deprecated since Python 3.8",
-                    category=DeprecationWarning)
-            (proc.stdout_str, proc.stderr_str) = await proc.communicate()
+
+        await communicate(proc)
 
         if proc.returncode:
             raise SubprocessError(f"Got bad exit code {proc.returncode} {proc.exmsg()}")
@@ -347,18 +371,18 @@ async def get_flac_wav_size(flac_file):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE)
     os.close(read_into_wc)
+    await communicate(p_wc)
 
-    stdout, stderr = await p_wc.communicate()
     if p_wc.returncode:
         raise SubprocessError(f"Got bad exit code {p_wc.returncode} from wc")
-    if stderr:
-        raise SubprocessError(f"Got unexpected stderr from wc: '{stderr.decode()}'")
+    if p_wc.stderr_str:
+        raise SubprocessError(f"Got unexpected stderr from wc: '{p_wc.stderr_str.decode()}'")
 
     await p_flacdec.wait()
     if p_flacdec.returncode:
         raise SubprocessError(f"Got bad exit code {p_flacdec.returncode} from flac")
 
-    return int(stdout.decode().strip())
+    return int(p_wc.stdout_str.decode().strip())
 
 
 async def encode_xdelta_from_flac_to_wav(flac_file, wav_file, xdelta_file):
@@ -516,16 +540,12 @@ async def check_xdelta(xdelta_file, expected_size, target_size):
         # Wait for the xdelta3 process to finish.  For a matching file
         # (the expected case), this wait will succeed immediately, since we
         # have already confirmed that the output stream is ended.
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore",
-                    message="The loop argument is deprecated since Python 3.8",
-                    category=DeprecationWarning)
-            stdout, stderr = await p.communicate()
+        await communicate(p)
 
-        if stderr:
-            fail(f"Got non-empty stderr:\n{''.join(stderr)}")
-        if stdout:
-            fail(f"Got unexpected stdout after EOF detected:\n{''.join(stdout)}")
+        if p.stderr_str:
+            fail(f"Got non-empty stderr:\n{''.join(p.stderr_str.decode())}")
+        if p.stdout_str:
+            fail(f"Got unexpected stdout after EOF detected:\n{''.join(p.stdout_str.decode())}")
 
         if p.returncode != 0:
             fail(f"Got unexpected {p.returncode=}")
