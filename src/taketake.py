@@ -1213,13 +1213,16 @@ class Stepper:
     def __init__(self, sync_pre=None, sync_across=None,
             send_to=None, send_post=None, end=None):
 
-        self.sync_pre = sync_pre
-        self.sync_across = sync_across
-        self.send_to = send_to
-        self.send_post = send_post
+        self.sync_pre = self._de_nonify(sync_pre)
+        self.sync_across = self._de_nonify(sync_across)
+        self.send_to = self._de_nonify(send_to)
+        self.send_post = self._de_nonify(send_post)
         self.end = end
 
-        self.pre_sync_met = self.sync_pre is None
+        self.pre_sync_met = False
+
+    def _de_nonify(self, iterable):
+        return [] if iterable is None else list(iterable)
 
     class DesynchronizationError(RuntimeError):
         pass
