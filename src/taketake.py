@@ -57,6 +57,7 @@ import sys
 import os
 import glob
 import itertools
+import collections
 import subprocess
 import datetime
 import ctypes
@@ -1200,27 +1201,28 @@ async def process_file_speech(finfo):
 # Signaling interface
 #============================================================================
 
-class NamedQueue(asyncio.Queue):
-    def __init__(self, name):
-        self.name = name
-        super().__init__()
+class QDict(dict):
+    """Allow additing attributes.  dict locks down its slots."""
 
 def make_queues(s):
-    """Make a NamedQueue named for each word in s.
+    """Make an asyncio.Queue with an added name attribute for each word in s.
 
     Returns a dict keyed off of the given names, but also with
     attributes set based on those names so they are dot accessible.
     """
-    qdict = {}
+    qdict = QDict()
     for qname in s.split():
-        qdict[qname] = NamedQueue(qname)
+        qdict[qname] = asyncio.Queue()
+        qdict[qname].name = qname
         setattr(qdict, qname, qdict[qname])
     return qdict
 
 class Stepper:
-    """Manage a set of NamedQueues for coordinating stepping a sequence.
+    """Manage a set of asyncio.Queues for coordinating stepping a sequence.
 
     The end of the sequence should be indicated be the given end token.
+    Each sync_ and send_ parameter should be None, an asyncio.Queue with a
+    .name attr as returned by make_queues, or a list of such.
     """
     def __init__(self, sync_pre=None, sync_across=None,
             send_to=None, send_post=None, end=None):
@@ -1233,8 +1235,17 @@ class Stepper:
 
         self.pre_sync_met = False
 
-    def _de_nonify(self, iterable):
-        return [] if iterable is None else list(iterable)
+    def _de_nonify(self, qparam):
+        if qparam is None:
+            return []
+        elif isinstance(qparam, asyncio.Queue):
+            return [qparam]
+        elif isinstance(qparam, collections.abc.Sequence):
+            return qparam
+        elif isinstance(qparam, collections.abc.Iterable):
+            return list(qparam)
+        else:
+            raise RuntimeError(f"Invalid queue parameter {qparam!r}")
 
     class DesynchronizationError(RuntimeError):
         pass
@@ -1280,11 +1291,11 @@ class Stepper:
 
     async def put(self, token):
         for q in self.send_to:
-            await q.put()
+            await q.put(token)
 
         if token == self.end:
             for q in self.send_post:
-                await q.put()
+                await q.put(token)
 
 #============================================================================
 # Phase A: Encode - encode flacs, rename, generate pars

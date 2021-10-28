@@ -828,6 +828,57 @@ class Test0_fmt_duration(unittest.TestCase):
 
 
 #===========================================================================
+# Queues and Steppers
+#===========================================================================
+
+class Test1_stepper(unittest.IsolatedAsyncioTestCase):
+    def test_make_queues_empty(self):
+        d = taketake.make_queues("")
+        self.assertEqual(d, {})
+
+    async def test_make_queues(self):
+        names = " a b a_queue "
+        d = taketake.make_queues(names)
+        self.assertEqual(list(d.keys()), names.split())
+        for n in names.split():
+            self.assertEqual(getattr(d, n), d[n])
+            self.assertIsInstance(d[n], asyncio.Queue)
+            self.assertEqual(d[n].name, n)
+
+    async def test_pre_sync(self):
+        d = taketake.make_queues("coms")
+        runlist = []
+
+        async def finisher(stepper):
+            runlist.append("finisher")
+            await stepper.pre_sync()
+            runlist.append("done")
+
+        async def goer(stepper):
+            runlist.append("goer")
+            for i in range(2):
+                runlist.append(f"-{i}")
+                await asyncio.sleep(0)
+                await stepper.put(i)
+                await asyncio.sleep(0)
+                runlist.append(f"+{i}")
+                await asyncio.sleep(0)
+            runlist.append(f"-None")
+            await asyncio.sleep(0)
+            await stepper.put(None)
+            await asyncio.sleep(0)
+            runlist.append(f"+None")
+            await asyncio.sleep(0)
+
+        await asyncio.gather(
+                finisher(taketake.Stepper(sync_pre=d.coms)),
+                goer(taketake.Stepper(send_to=d.coms)),
+                )
+
+        self.assertEqual(runlist, ['finisher', 'goer', '-0', '+0', '-1', '+1', '-None', 'done', '+None'])
+
+
+#===========================================================================
 # ExtCmd external command component tests
 #===========================================================================
 
