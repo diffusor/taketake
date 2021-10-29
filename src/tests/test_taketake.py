@@ -1091,9 +1091,10 @@ class Test6_args(TempdirFixture, FileAssertions):
     def setUp(self):
         super().setUp()
         self.saved_config = dict(**taketake.Config.__dict__)
-        self.base_args = dict(debug=False, prefix=None, keep_wavs=False,
+        self.base_args = dict(_dest=None, debug=False,
+                prefix=None, keep_wavs=False,
                 skip_copyback=False, skip_tests=False,
-                continue_from=None, dest=Path('.'), wavs=[])
+                continue_from=None, dest=Path(), wavs=[])
 
     def tearDown(self):
         # Make sure we restore any config settings adjusted by the processed
@@ -1111,6 +1112,12 @@ class Test6_args(TempdirFixture, FileAssertions):
 
     def test_no_args(self):
         self.check_args("")
+
+    def test_dest_in_positionals(self):
+        self.check_args("dest_foo", dest=Path("dest_foo"))
+
+    def test_dest_in_option(self):
+        self.check_args("-t dest_foo", dest=Path("dest_foo"))
 
     @unittest.SkipTest  # Turning on debug is too verbose for a test!
     def test_debug_arg(self):

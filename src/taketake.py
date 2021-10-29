@@ -1743,7 +1743,7 @@ def process_args(argv=None):
         help="Source hierarchy specification")
 
     # This is left empty because wavs is greedy.  process_args() fills it.
-    arg('dest', metavar='DEST_PATH', nargs='?', type=Path,
+    arg('_dest', metavar='DEST_PATH', nargs='?', type=Path,
         help=f"""Destination directory for encoded flac and par2 files.
 
             This directory will also contain the timestamped
