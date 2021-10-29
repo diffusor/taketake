@@ -17,6 +17,13 @@ actors to process the files.
 The actors get and send indexes into their input and output queues.  These
 index into the array of FileInfo objects to coordinate processing.
 
+Under each step header, a => flow line describes the inputs and outputs to the
+current ``[actor]``, which is surrounded by square brackets.  Before
+processing an index, the actor waits for all the inbound queues to have that
+index ready for getting.  After processing the index, the actor puts that
+index into all its outbound queues.  A terminal token is used to indicate that
+there are no more items to process.
+
 1. **setup**: *[global]* Determine wavs to process
 
    ``[setup] => listen,flacenc``
@@ -38,8 +45,8 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    ``setup => [listen] => prompt``
 
-   a. Skip if ``.filename_guess`` exists, pushing its
-      contents into the outbound queue to step 3
+   a. Skip steps b and c if ``.filename_guess`` exists,
+      filling in the guess into the TransferInfo
 
    b. Run speech to text, parse timestamp, construct filename guess
 
