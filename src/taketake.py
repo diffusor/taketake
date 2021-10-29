@@ -1224,9 +1224,10 @@ class Stepper:
     Each sync_ and send_ parameter should be None, an asyncio.Queue with a
     .name attr as returned by make_queues, or a list of such.
     """
-    def __init__(self, sync_pre=None, sync_across=None,
+    def __init__(self, name=None, sync_pre=None, sync_across=None,
             send_to=None, send_post=None, end=None):
 
+        self.name = name
         self.sync_pre = self._de_nonify(sync_pre)
         self.sync_across = self._de_nonify(sync_across)
         self.send_to = self._de_nonify(send_to)
@@ -1247,10 +1248,17 @@ class Stepper:
         else:
             raise RuntimeError(f"Invalid queue parameter {qparam!r}")
 
+    def log(self, msg):
+        #print(f" *Stepper<{self.name}>* : {msg}")
+        pass
+
+    def fmtqueues(self, queues):
+        return ", ".join(q.name for q in queues)
+
     class DesynchronizationError(RuntimeError):
         pass
 
-    async def _get_across(self, q_list):
+    async def _get_across(self, q_list, ident=""):
         last_token = None
         last_queue = None
         # sync across the next token from each stream
@@ -1264,18 +1272,17 @@ class Stepper:
                         f"\n  {token!r} <= {q.name}")
             last_token = token
             last_queue = q
+        if q_list:
+            self.log(f"got {last_token} from {len(q_list)} {ident}queues:"
+                    f" {self.fmtqueues(q_list)}")
         return last_token
 
 
     async def pre_sync(self):
         """wait for end on all sync_pre Queues"""
         if not self.pre_sync_met:
-            for q in self.sync_pre:
-                while True:
-                    token = await q.get()
-                    q.task_done()
-                    if token == self.end:
-                        break
+            while (token := await self._get_across(self.sync_pre, "pre-")) != self.end:
+                pass
             self.pre_sync_met = True
 
 
@@ -1292,10 +1299,16 @@ class Stepper:
     async def put(self, token):
         for q in self.send_to:
             await q.put(token)
+        if self.send_to:
+            self.log(f"sent {token} to {len(self.send_to)} queues:"
+                    f" {self.fmtqueues(self.send_to)}")
 
         if token == self.end:
             for q in self.send_post:
                 await q.put(token)
+            if self.send_post:
+                self.log(f"sent {token} to {len(self.send_post)} endqueues:"
+                        f" {self.fmtqueues(self.send_post)}")
 
 #============================================================================
 # Phase A: Encode - encode flacs, rename, generate pars
@@ -1497,8 +1510,88 @@ async def phaseC_verify_backcopy(dest):
 
 
 #============================================================================
+# Tasks
+#============================================================================
+
+async def task_setup(filepaths, dest, worklist, stepper):
+    await stepper.put(None)
+
+async def task_listen(worklist, stepper):
+    await stepper.get()
+    await stepper.put(None)
+
+async def task_prompt(worklist, stepper):
+    await stepper.get()
+    await stepper.put(None)
+
+async def task_flacenc(worklist, stepper):
+    await stepper.get()
+    await stepper.put(None)
+
+async def task_pargen(worklist, stepper):
+    await stepper.get()
+    await stepper.put(None)
+
+async def task_xdelta(worklist, stepper):
+    await stepper.get()
+    await stepper.put(None)
+
+async def task_cleanup(worklist, stepper):
+    await stepper.get()
+    await stepper.put(None)
+
+async def task_finish(worklist, stepper):
+    await stepper.get()
+
+#============================================================================
 # Main sequence
 #============================================================================
+
+async def run_tasks(filepaths, dest):
+    # setup listen prompt flacenc pargen xdelta cleanup finish
+    q = make_queues("""
+        setup2listen setup2flacenc
+        listen2prompt
+        prompt2pargen flacenc2pargen flacenc2xdelta
+        pargen2cleanup xdelta2cleanup
+        cleanup2finish""")
+
+    worklist = []
+
+    await asyncio.gather(
+        task_setup(filepaths, dest, worklist, Stepper("setup",
+            send_to=[q.setup2listen, q.setup2flacenc])),
+
+        task_listen(worklist, Stepper("listen",
+            sync_across=q.setup2listen,
+            send_to=q.listen2prompt)),
+
+        task_prompt(worklist, Stepper("prompt",
+            sync_across=q.listen2prompt,
+            send_to=q.prompt2pargen)),
+
+        task_flacenc(worklist, Stepper("flacenc",
+            sync_across=q.setup2flacenc,
+            send_to=q.flacenc2pargen,
+            send_post=q.flacenc2xdelta)),
+
+        task_pargen(worklist, Stepper("pargen",
+            sync_across=[q.prompt2pargen, q.flacenc2pargen],
+            send_to=q.pargen2cleanup)),
+
+        task_xdelta(worklist, Stepper("xdelta",
+            sync_pre=q.flacenc2xdelta,
+            send_post=q.xdelta2cleanup)),
+
+        task_cleanup(worklist, Stepper("cleanup",
+            sync_pre=q.xdelta2cleanup,
+            sync_across=q.pargen2cleanup,
+            send_post=q.cleanup2finish)),
+
+        task_finish(worklist, Stepper("finish",
+            sync_pre=q.cleanup2finish)),
+    )
+
 
 def taketake_files(filepaths, dest):
     if dest is None:

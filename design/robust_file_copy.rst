@@ -9,8 +9,17 @@ Design goals:
 
 Flow:
 -----
+The **setup** actor processes the command line options and figures out which
+wav files to process or continue processing based in what progress directories
+exist.  It builds an array of FileInfo objects which will be indexed by all
+actors to process the files.
 
-1. *[global]* Determine wavs to process => 2, 4
+The actors get and send indexes into their input and output queues.  These
+index into the array of FileInfo objects to coordinate processing.
+
+1. **setup**: *[global]* Determine wavs to process
+
+   ``[setup] => listen,flacenc``
 
    a. Verify unit tests pass
 
@@ -22,12 +31,12 @@ Flow:
        echo srcdir > .taketake.20211025-1802-Mon/.src
        mkdir .taketake.20211025-1802-Mon/audio001.wav ...
 
-   d. Fill input queues 1->2 and 1->4 with src wav progress dirs
-
 *Perform the following steps for each wav, assuming each non-src filename is
 relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory*
 
-2. Speech to text <= 1 => 3
+2. **listen**: Speech to text
+
+   ``setup => [listen] => prompt``
 
    a. Skip if ``.filename_guess`` exists, pushing its
       contents into the outbound queue to step 3
@@ -38,9 +47,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        echo $filename_guess > .filename_guess
 
-   d. Push progress dir and filename_guess into queue 2->3
+3. **prompt**: Prompt for name
 
-3. Prompt for name <= 2 => 5
+   ``listen => [prompt] => pargen``
 
    a. Suggest contents of ``.filename_provided`` if it exists,
       otherwise use the given filename_guess
@@ -58,9 +67,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        echo $filename_provided > .filename_provided
 
-   c. Push progress dir and filename_provided into queue 3->5
+4. **flacenc**: Flac encode
 
-4. Flac encode <= 1 => 5, 6
+   ``setup => [flacenc] => pargen``
 
    a. If ``.in_progress.flac`` exists, remove it
 
@@ -78,9 +87,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        fadvise DONTNEED src/audio001.wav
 
-   f. Push progress dir into queue 4->5
+5. **pargen**: Rename and par2 dest flac file
 
-5. Rename and par2 dest flac file <= 3, 4 => 7
+   ``prompt,flacenc => [pargen] => cleanup``
 
    a. If ``$filename_provided.flac`` exists, skip step b
 
@@ -110,9 +119,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        par2 verify $filename_provided.flac
 
-   h. Push progress dir into queue 5->7
+6. **xdelta**: Xdelta check wavs
 
-6. Xdelta wavs <= All(4) => 7
+   ``All(flacenc) => [xdelta] => cleanup``
 
    a. If src wav no longer exists or if ``.xdelta`` exists, skip step b
 
@@ -122,9 +131,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    c. Check ``.xdelta`` for actual diffs
 
-   d. Push progress dir into queue 6->7
+7. **cleanup**: Delete src wav and copy back flac
 
-7. Delete src wav and copy back flac <= 5, All(6) => 8
+   ``All(xdelta),pargen => [cleanup] => finish``
 
    **Status of ``.taketake.$datestamp/$wavfilename``**::
 
@@ -167,9 +176,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        rm -r .taketake.$datestamp/$wavfilename
 
-   g. Push progress dir into queue 7->8
+8. **finish**: *[global]* Wait for all processing to complete
 
-8. *[global]* Finish <= All(8)
+   ``All(cleanup) => [finish]``
 
     a. Remove top-level progress dir ``.taketake.$datestamp``
 

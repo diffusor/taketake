@@ -1512,8 +1512,10 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
 # File processing integration tests
 #===========================================================================
 
-class Test8_one_wav(unittest.TestCase):
-    pass
+class Test8_tasks(unittest.IsolatedAsyncioTestCase):
+    """Test task processing in taketake"""
+    async def test_empty_runtasks(self):
+        await taketake.run_tasks("", "")
 
 if __name__ == '__main__':
     unittest.main()
