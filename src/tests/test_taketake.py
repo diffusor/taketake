@@ -6,6 +6,7 @@ import unittest
 # From https://codeolives.com/2020/01/10/python-reference-module-in-parent-directory/
 import sys
 import os
+import re
 import inspect
 import datetime
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
@@ -783,7 +784,7 @@ class Test0_words_to_timestamp(unittest.TestCase):
 
 class Test0_fmt_duration(unittest.TestCase):
     def check(self, duration, expect):
-        formatted = taketake.fmt_duration(duration)
+        formatted = taketake.format_duration(duration)
         self.assertEqual(formatted, expect)
 
     def test_seconds(self):
@@ -1121,6 +1122,9 @@ def raises_nodir(dirname):
         return wrapper
     return decorator
 
+def pathlist(s):
+    return [Path(word) for word in s.split()]
+
 class Test6_args(CdTempdirFixture):
     def setUp(self):
         super().setUp()
@@ -1134,7 +1138,6 @@ class Test6_args(CdTempdirFixture):
                 skip_tests=False,
                 continue_from=None,
                 dest=Path(),
-                recurse=False,
                 sources=[],
                 wavs=[])
 
@@ -1151,25 +1154,49 @@ class Test6_args(CdTempdirFixture):
         Path(self.tempdir, subdir, name).mkdir()
         return name
 
-    def check_args(self, cmdline, **kwargs):
-        args = taketake.process_args(cmdline.split()).args
-        taketake.Config.debug = False # Arg processing sets this state, revert it
-        self.base_args.update(kwargs)
-        self.assertEqual(args.__dict__, self.base_args) # got != expected
+    def check_args(self, cmdline, *expected_errors, **kwargs):
+        argparser = taketake.process_args(cmdline.split())
+        errors = argparser.errors
+        fmterr = taketake.format_errors
+
+        if expected_errors:
+            # Check errors only
+            remaining_errors = set(errors)
+            unmatched_errpats = []
+            for errpat in expected_errors:
+                for errstr in remaining_errors:
+                    if re.search(errpat, errstr):
+                        remaining_errors.remove(errstr)
+                        break
+                else:
+                    unmatched_errpats.append(errpat)
+            self.assertFalse(remaining_errors or unmatched_errpats,
+                msg=f"\nUnmatched argparse errors:{fmterr(remaining_errors)}"
+                    f"\nUnmatched expected errors:{fmterr(unmatched_errpats)}")
+
+        else:
+            # Ensure there are no errors
+            self.assertEqual(len(errors), 0,
+                    msg=f"\nUnexpected argparse errors:{fmterr(errors)}")
+            # Check args
+            args = vars(argparser.args)
+            self.base_args.update(kwargs)
+            self.assertEqual(args, self.base_args) # got != expected
 
     def test_no_args(self):
-        self.check_args("")
+        self.check_args("",
+                "No DEST_PATH specified!")
 
     def test_no_args_1c(self):
         p1 = self.mkdir_progress("foo")
-        self.check_args("", continue_from=p1)
+        self.check_args("",
+                "No DEST_PATH specified!")
 
     def test_no_args_2c(self):
         self.mkdir_progress("foo")
         self.mkdir_progress("bar")
-        with self.assertRaisesRegex(taketake.TaketakeRuntimeError,
-                "Too many progress directories found"):
-            self.check_args("")
+        self.check_args("",
+                "No DEST_PATH specified!")
 
     def test_dest_in_positionals(self):
         d = Path("dest_foo")
@@ -1197,32 +1224,35 @@ class Test6_args(CdTempdirFixture):
         d.mkdir()
         p1 = self.mkdir_progress("foo", d)
         p2 = self.mkdir_progress("bar", d)
-        with self.assertRaisesRegex(taketake.TaketakeRuntimeError,
-                "Too many progress directories found"):
-            self.check_args(str(d),
-                    dest=d)
+        self.check_args(str(d),
+                "Too many progress directories found in DEST_PATH")
 
     def test_dest_in_option(self):
         d = Path("dest_foo")
         d.mkdir()
         self.check_args(f"-t {d}", dest=d)
 
-    @raises_nodir("dest_foo")
-    def test_dest_in_option_nodir(self, d):
-        self.check_args(f"-t {d}", dest=d)
+    def test_dest_in_option_nodir(self):
+        d = Path("dest_foo")
+        self.check_args(f"-t {d}",
+                "Specified DEST_PATH does not exist!")
 
     def test_two_positionals(self):
         d = Path("dest_foo")
         d.mkdir()
-        self.check_args(f"wav_foo {d}",
-                wavs=[Path("wav_foo")],
+        sources = "wav_foo"
+        self.check_args(f"{sources} {d}",
+                sources=pathlist(sources),
+                wavs=pathlist(sources),
                 dest=d)
 
     def test_two_wavs_and_target(self):
         d = Path("dest_foo")
         d.mkdir()
-        self.check_args(f"wav_foo1 wav_foo2 --target {d}",
-                wavs=[Path("wav_foo1"), Path("wav_foo2")],
+        sources = "wav_foo1 wav_foo2"
+        self.check_args(f"{sources} --target {d}",
+                sources=pathlist(sources),
+                wavs=pathlist(sources),
                 dest=d)
 
     @unittest.SkipTest  # Turning on debug is too verbose for a test!

@@ -1154,7 +1154,7 @@ async def process_timestamp_from_audio(finfo):
     finfo.parsed_timestamp, finfo.extra_speech = words_to_timestamp(finfo.orig_speech)
 
 
-def fmt_duration(duration):
+def format_duration(duration):
     """Returns a string of the form XhYmZs given a duration in seconds.
 
     The duration s is first rounded to the nearest second.
@@ -1206,7 +1206,7 @@ async def process_file_speech(finfo):
         tstr = finfo.parsed_timestamp.strftime(time_fmt)
 
         # Format the duration
-        dstr = fmt_duration(finfo.duration_s)
+        dstr = format_duration(finfo.duration_s)
 
         # Format the notes
         if finfo.extra_speech:
@@ -1659,7 +1659,7 @@ def dbg(*args, **kwargs):
         print(f"*{Config.dbg_prog}* -", *args, **kwargs)
 
 
-def fmt_args(args):
+def format_args(args):
     arglist=[]
     for arg, val in vars(args).items():
         if val is not False and val is not None:
@@ -1688,7 +1688,7 @@ def validate_args(parser):
     if args.debug:
         Config.debug = True
 
-    dbg("args pre-val: ", fmt_args(args))
+    dbg("args pre-val: ", format_args(args))
 
     # Use the final positional parameter as dest, like mv does
     if args.sources and args.dest is None:
@@ -1698,35 +1698,25 @@ def validate_args(parser):
     args.wavs = []
     for source in args.sources:
         if source.is_dir():
+            if args.wavs:
+                err("more than one SOURCE_WAV was specified, "
+                    "but one was a directory:", source,
+                    f"- Sources: [{' '.join(str(d) for d in args.sources)}]")
             new_wavs = set()
             for ext in Config.wav_extensions:
-                wildcard = "**/*" if args.recurse else "*"
-                new_wavs |= source.glob(f"{wildcard}.{ext}")
-            args.wavs.extend(new_wavs)
+                new_wavs |= source.glob(f"*.{ext}")
+            args.wavs = list(new_wavs)
         else:
             args.wavs.append(source)
-    if len(set(args.wavs)) != len(args.wavs):
-        # https://stackoverflow.com/a/9835819
-        seen = set()
-        dups = []
-        for wav in args.wavs:
-            if wav not in seen:
-                seen[wav] = 1
-            else:
-                if seen[wav] == 1
-                    dups.append(str(wav))
-                seen[wav] += 1
-        err("Duplicate wav files specified: ", " ".join(dups))
-
 
     # Set up dest using continue_from or sources
     if args.continue_from:
         if not args.continue_from.is_dir():
-            err("PROGRESS_DIR (-c|--continue) does not exist!", args.continue_from)
+            err("PROGRESS_DIR does not exist! --continue", args.continue_from)
         if args.sources:
             err("--continue was specified, but so were SOURCE_WAVs:", *args.sources)
         if args.dest:
-            err("--continue was specified, but so was -t DEST_PATH:", args.dest)
+            err("--continue was specified, but so was DEST_PATH:", args.dest)
 
         # Override dest when continuing from a progress dir
         p = args.continue_from
@@ -1736,10 +1726,10 @@ def validate_args(parser):
         args.dest = p.parent
 
     if not args.dest:
-        err("DEST_PATH (-t|--target) not specified!")
+        err("No DEST_PATH specified!")
 
     elif not args.dest.is_dir():
-        err("DEST_PATH (-t|--target) does not exist!", args.dest)
+        err("Specified DEST_PATH does not exist!", args.dest)
 
     elif not args.continue_from:
         # Check for interrupted progress directories in dest
@@ -1756,8 +1746,10 @@ def validate_args(parser):
             args.continue_from = progress_dirs[0]
 
     # Check wavs exist, or are in the progress_dirs
+    for wav in args.wavs:
+        pass
 
-    dbg("args post-val:", fmt_args(args))
+    dbg("args post-val:", format_args(args))
 
 
 def process_args(argv=None):
@@ -1805,14 +1797,10 @@ def process_args(argv=None):
             The final positional will not be handled specially--all
             positional arguments will be treated as SOURCE arguments""")
 
-    arg('-r', '--recurse', action='store',
-        help="""Recurse into each SOURCE_WAV that is a directory, looking for
-            *.wav and *.WAV files""")
-
     arg('sources', metavar='SOURCE_WAV', nargs='*', type=Path,
-        help="""Transfer the specified SOURCE_WAV files.
-            Transfer all *.wav and *.WAV files in each SOURCE_WAV that is a
-            directory.""")
+        help="""Transfer the specified SOURCE_WAV files.  If there is only
+            a single SOURCE_WAV specified and it is a directory, then
+            transfer all wav files found in that directory.""")
 
     # This is left empty because sources is greedy.  process_args() fills it.
     arg('_dest', metavar='DEST_PATH', nargs='?', type=Path,
@@ -1825,6 +1813,8 @@ def process_args(argv=None):
     validate_args(parser)
     return parser
 
+def format_errors(errors):
+    return "".join("\n  * {}".format(e) for e in errors)
 
 def main():
     arg_parser = process_args()
@@ -1832,7 +1822,7 @@ def main():
     # Report errors
     if arg_parser.errors:
         arg_parser.error("Invalid command line options:"
-                + "".join("\n  * {}".format(e) for e in arg_parser.errors))
+                + format_errors(arg_parser.errors))
 
     args = arg_parser.args
     if not args.skip_tests:

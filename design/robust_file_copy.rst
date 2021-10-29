@@ -30,13 +30,17 @@ there are no more items to process.
 
    a. Verify unit tests pass
 
-   b. Check for progress directory and resume
+   b. If resuming from a progress directory, skip steps c and d
 
-   c. Otherwise, create src wav progress directories::
+   c. Create main progress directory::
 
        mkdir .taketake.20211025-1802-Mon
-       #echo srcdir > .taketake.20211025-1802-Mon/.src
-       mkdir .taketake.20211025-1802-Mon/audio001.wav/ ...
+
+   d. Create src wav progress directories and symlinks for each wav, e.g. ``audio001.wav``::
+
+       mkdir .taketake.20211025-1802-Mon/audio001.wav/
+       symlink .taketake.20211025-1802-Mon/audio001.wav/.source.wav
+            -> /absolute/path/to/source/audio001.wav
 
 *Perform the following steps for each wav, assuming each non-src filename is
 relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory*
@@ -144,6 +148,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    **Status of ``.taketake.$datestamp/$wavfilename``**::
 
+        .source.wav -> /absolute/path/to/source/audio001.wav
         .filename_guess
         .filename_provided
         .encoded.flac [was .in_progress.flac]
@@ -179,9 +184,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
        update_mtime src/flacs/$filename_provided.flac
        move $filename_provided.flac.*par2 dest/
 
-   f. Remove the temporary dest directory contents::
+   f. Remove the temporary dest directory contents except for the ``.source.wav`` symlink::
 
-       rm .taketake.$datestamp/$wavfilename/*
+       rm .taketake.$datestamp/$wavfilename/* (except .source.wav)
 
 8. **finish**: *[global]* Wait for all processing to complete
 
@@ -189,6 +194,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
     a. Remove top-level progress dir ``.taketake.$datestamp``::
 
+        rm .taketake.$datestamp/*/.source.wav
         rmdir .taketake.$datestamp/*
         rmdir .taketake.$datestamp
 
