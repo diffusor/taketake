@@ -1657,23 +1657,26 @@ def dbg(*args, **kwargs):
     if Config.debug:
         print(f"*{Config.dbg_prog}* -", *args, **kwargs)
 
-def validate_args(args):
+def validate_args(args, parser):
     """Set args.dest and check for consistency, including dir existance."""
     if args.debug:
         Config.debug = True
 
     dbg("args pre-val: ", args)
     errors = []
+    def err(*args):
+        errors.append(" ".join(str(a) for a in args))
 
     # Set up dest using continue_from or wavs
     if args.continue_from:
+        if not args.continue_from.is_dir():
+            err("PROGRESS_DIR (-c|--continue) does not exist!", args.continue_from)
+
         # Override dest when continuing from a progress dir
         if args.wavs:
-            errors.append("--continue was specified, but so were SOURCE_WAVs: "
-                    f"{' '.join(str(w) for w in args.wavs)}")
+            err("--continue was specified, but so were SOURCE_WAVs:", *args.wavs)
         if args.dest:
-            errors.append("--continue was specified, but so was -t DEST_PATH: "
-                    f"{args.dest}")
+            err("--continue was specified, but so was -t DEST_PATH:", args.dest)
         args.dest = args.continue_from.parent
 
     elif args.dest is None:
@@ -1686,24 +1689,24 @@ def validate_args(args):
             args.dest = args.wavs.pop()
 
     if not args.dest.is_dir():
-        raise TaketakeRuntimeError(f"Dest dir does not exist! '{args.dest}'")
+        err("DEST_PATH (-t|--target) does not exist!", args.dest)
 
     if not args.continue_from:
         progress_dirs = sorted(Path(args.dest).glob(Config.progress_dir_fmt.format("*")))
         if len(progress_dirs) > 1:
-            sep = "\n    "
-            raise TaketakeRuntimeError(
-                    "Too many progress directories found:"
-                    f"{sep}{sep.join(str(d) for d in progress_dirs)}"
-                    "\n  Use -r on a specific directory to continue the transfer represented by that directory"
-                    f"\n  For example:  {Config.prog} -r '{progress_dirs[0]}'")
+            sep = "\n      "
+            err("Too many progress directories found in DEST_PATH:", args.dest,
+                f"{sep}{sep.join(str(d) for d in progress_dirs)}"
+                "\n    Use -c|--continue on a specific directory"
+                " to continue the transfer represented by that directory"
+                f"\n    For example:  {Config.prog} -c '{progress_dirs[0]}'")
 
         elif len(progress_dirs) == 1:
             args.continue_from = progress_dirs[0]
 
     # Report errors
     if errors:
-        parser.error("Inconsistent options specified:"
+        parser.error("Invalid command line options:"
                      + "".join("\n  * {}".format(e) for e in errors))
 
     dbg("args post-val:", args)
@@ -1760,7 +1763,7 @@ def process_args(argv=None):
             This directory will also contain the timestamped
             {Config.progress_dir_fmt.format('*')} directory for tracking progress.""")
 
-    return validate_args(parser.parse_args(argv))
+    return validate_args(parser.parse_args(argv), parser)
 
 
 def main():
