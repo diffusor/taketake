@@ -1119,6 +1119,14 @@ class Test6_args(TempdirFixture, FileAssertions):
     def test_dest_in_option(self):
         self.check_args("-t dest_foo", dest=Path("dest_foo"))
 
+    def test_two_positionals(self):
+        self.check_args("wav_foo dest_foo",
+                wavs=[Path("wav_foo")], dest=Path("dest_foo"))
+
+    def test_two_wavs_and_target(self):
+        self.check_args("wav_foo1 wav_foo2 --target dest_foo",
+                wavs=[Path("wav_foo1"), Path("wav_foo2")], dest=Path("dest_foo"))
+
     @unittest.SkipTest  # Turning on debug is too verbose for a test!
     def test_debug_arg(self):
         self.check_args("-d", debug=True)
