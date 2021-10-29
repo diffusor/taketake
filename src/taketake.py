@@ -111,6 +111,8 @@ class Config:
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
 
+    source_wav_linkname = ".source.wav"
+
 
 @dataclass
 class TimeRange:
@@ -1747,7 +1749,24 @@ def validate_args(parser):
 
     # Check wavs exist, or are in the progress_dirs
     for wav in args.wavs:
-        pass
+        if args.continue_from:
+            tempwavdir = args.continue_from / wav.name
+
+        if args.continue_from and tempwavdir.exists:
+            srclink = tempwavdir / Config.source_wav_linkname
+            if not tempwavdir.is_dir():
+                err("temp wavfile exists in progress dir",
+                    "but is not a directory!", tempwavdir)
+            elif not srclink.is_symlink():
+                err("temp wavfile tracker is not a symlink!", srclink)
+            elif wav.resolve() != srclink.resolve():
+                err("temp symlink tracker doesn't link back to the "
+                    "specified wav file!"
+                    f"\n    SOURCE_WAV: {wav} -> {wav.resolve()}"
+                    f"\n    Symlink:    {srclink} -> {srclink.resolve()}")
+        elif not wav.is_file():
+            # No progress dir entry
+            err("SOURCE_WAV not found:", wav)
 
     dbg("args post-val:", format_args(args))
 

@@ -1125,6 +1125,9 @@ def raises_nodir(dirname):
 def pathlist(s):
     return [Path(word) for word in s.split()]
 
+def fmtpaths(paths):
+    return " ".join(str(p) for p in paths)
+
 class Test6_args(CdTempdirFixture):
     def setUp(self):
         super().setUp()
@@ -1240,19 +1243,21 @@ class Test6_args(CdTempdirFixture):
     def test_two_positionals(self):
         d = Path("dest_foo")
         d.mkdir()
-        sources = "wav_foo"
-        self.check_args(f"{sources} {d}",
-                sources=pathlist(sources),
-                wavs=pathlist(sources),
+        sources = pathlist("wav_foo")
+        [s.touch() for s in sources]
+        self.check_args(f"{fmtpaths(sources)} {d}",
+                sources=sources,
+                wavs=sources,
                 dest=d)
 
     def test_two_wavs_and_target(self):
         d = Path("dest_foo")
         d.mkdir()
-        sources = "wav_foo1 wav_foo2"
-        self.check_args(f"{sources} --target {d}",
-                sources=pathlist(sources),
-                wavs=pathlist(sources),
+        sources = pathlist("wav_foo1 wav_foo2")
+        [s.touch() for s in sources]
+        self.check_args(f"{fmtpaths(sources)} --target {d}",
+                sources=sources,
+                wavs=sources,
                 dest=d)
 
     @unittest.SkipTest  # Turning on debug is too verbose for a test!
