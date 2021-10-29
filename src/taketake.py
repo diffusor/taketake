@@ -1752,8 +1752,8 @@ def process_args(argv=None):
     return validate_args(parser.parse_args(argv))
 
 
-def main(argv=None):
-    args = process_args(argv)
+def main():
+    args = process_args()
 
     if not args.skip_tests:
         run_tests_in_subprocess()
