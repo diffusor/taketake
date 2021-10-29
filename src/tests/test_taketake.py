@@ -1290,6 +1290,39 @@ class Test6_args(CdTempdirFixture):
         self.check_args(f"{source} {d}",
                 f"temp wavfile tracker is not a symlink! {linkback}")
 
+    def test_progress_wav_src_link_to_wrong_file(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        p1 = self.mkdir_progress("foo", d)
+        source = Path("wav_foo")
+        path_to_source = d / p1 / source
+        path_to_source.mkdir()
+        linkback = path_to_source / taketake.Config.source_wav_linkname
+        linkback.symlink_to("foo")
+        self.check_args(f"{source} {d}",
+                f"temp symlink tracker doesn't link back to the specified wav file!")
+
+    def test_progress_wav_src_link_to_correct_file(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        p1 = self.mkdir_progress("foo", d)
+        source = Path("wav_foo")
+        path_to_source = d / p1 / source
+        path_to_source.mkdir()
+        linkback = path_to_source / taketake.Config.source_wav_linkname
+        linkback.symlink_to(source.resolve())
+        self.check_args(f"{source} {d}",
+                continue_from=d/p1,
+                dest=d,
+                sources=[source],
+                wavs=[source])
+
+    # TODO - add tests for:
+    # more than one SOURCE_WAV was specified, but one was a directory
+    # PROGRESS_DIR does not exist! --continue
+    # --continue was specified, but so were SOURCE_WAVs
+    # --continue was specified, but so was DEST_PATH
+
     @unittest.SkipTest  # Turning on debug is too verbose for a test!
     def test_debug_arg(self):
         self.check_args("-d", debug=True)

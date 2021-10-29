@@ -1701,8 +1701,8 @@ def validate_args(parser):
     for source in args.sources:
         if source.is_dir():
             if args.wavs:
-                err("more than one SOURCE_WAV was specified, "
-                    "but one was a directory:", source,
+                err("multiple SOURCE_WAVs specified, but one was a directory:",
+                    source,
                     f"- Sources: [{' '.join(str(d) for d in args.sources)}]")
             new_wavs = set()
             for ext in Config.wav_extensions:
