@@ -55,7 +55,6 @@ import asyncio
 import time
 import sys
 import os
-import pathlib
 import glob
 import itertools
 import collections
@@ -65,6 +64,7 @@ import types
 import ctypes
 from dataclasses import dataclass, field
 from typing import List
+from pathlib import Path
 
 import speech_recognition
 from word2number import w2n
@@ -88,6 +88,7 @@ class Config:
     par2_base_blocksize = 4096      # A multiple of this is used to avoid the 32K limit
     par2_max_num_blocks = 10000     # par2 doesn't support more than 32K num blocks, but gets unweildy with a lot of blocks anyway, so limit things a bit
 
+    progress_dir_prefix = ".taketake."
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
 
@@ -1632,7 +1633,7 @@ def taketake_files(filepaths, dest):
     asyncio.run(phaseC_verify_backcopy(dest))
 
 def run_tests_in_subprocess():
-    file_dir = pathlib.Path(__file__).resolve().parent
+    file_dir = Path(__file__).resolve().parent
     test_script = str(file_dir / 'tests' / 'test_taketake.py')
 
     print("Ensuring taketake ecosystem integrity - running", test_script)
