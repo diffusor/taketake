@@ -19,6 +19,7 @@ import shutil
 import time
 import subprocess
 import argparse
+import contextlib
 from pathlib import Path
 
 keeptemp = os.environ.get("TEST_TAKETAKE_KEEPTEMP", None)
@@ -1087,14 +1088,41 @@ class TempdirFixture(unittest.TestCase):
     def tempfile(self, fname):
         return os.path.join(self.tempdir, fname)
 
-class Test6_args(TempdirFixture, FileAssertions):
+class CdTempdirFixture(TempdirFixture):
+    """Changes dirictory into the tempdir for execution of each test."""
+    def setUp(self):
+        super().setUp()
+        self.origdir = os.getcwd()
+        os.chdir(self.tempdir)
+
+    def tearDown(self):
+        os.chdir(self.origdir)
+        super().tearDown()
+
+# from https://stackoverflow.com/a/170174
+@contextlib.contextmanager
+def cd(newdir):
+    olddir = os.getcwd()
+    try:
+        os.chdir(newdir)
+        yield
+    finally:
+        os.chdir(olddir)
+
+class Test6_args(CdTempdirFixture):
     def setUp(self):
         super().setUp()
         self.saved_config = dict(**taketake.Config.__dict__)
-        self.base_args = dict(_dest=None, debug=False,
-                prefix=None, keep_wavs=False,
-                skip_copyback=False, skip_tests=False,
-                continue_from=None, dest=Path(), wavs=[])
+        self.base_args = dict(
+                _dest=None,
+                debug=False,
+                prefix=None,
+                keep_wavs=False,
+                skip_copyback=False,
+                skip_tests=False,
+                continue_from=None,
+                dest=Path(),
+                wavs=[])
 
     def tearDown(self):
         # Make sure we restore any config settings adjusted by the processed
@@ -1103,6 +1131,11 @@ class Test6_args(TempdirFixture, FileAssertions):
             if not k.startswith('_'):
                 setattr(taketake.Config, k, v)
         super().tearDown()
+
+    def mkdir_progress(self, tag, subdir="."):
+        name = Path(taketake.Config.progress_dir_fmt.format(tag))
+        Path(self.tempdir, subdir, name).mkdir()
+        return name
 
     def check_args(self, cmdline, **kwargs):
         args = taketake.process_args(cmdline.split())
@@ -1113,8 +1146,32 @@ class Test6_args(TempdirFixture, FileAssertions):
     def test_no_args(self):
         self.check_args("")
 
+    def test_no_args_1c(self):
+        p1 = self.mkdir_progress("foo")
+        self.check_args("", continue_from=p1)
+
+    def test_no_args_2c(self):
+        self.mkdir_progress("foo")
+        self.mkdir_progress("bar")
+        with self.assertRaisesRegex(taketake.TaketakeRuntimeError,
+                "Too many progress directories found"):
+            self.check_args("")
+
     def test_dest_in_positionals(self):
         self.check_args("dest_foo", dest=Path("dest_foo"))
+
+    def test_dest_in_positionals_1c_in_parent(self):
+        p1 = self.mkdir_progress("foo")
+        self.check_args("dest_foo",
+                dest=Path("dest_foo"))
+
+    def test_dest_in_positionals_1c_in_dest(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        p1 = self.mkdir_progress("foo", d)
+        self.check_args(str(d),
+                dest=Path(d),
+                continue_from=d/p1)
 
     def test_dest_in_option(self):
         self.check_args("-t dest_foo", dest=Path("dest_foo"))
@@ -1130,6 +1187,7 @@ class Test6_args(TempdirFixture, FileAssertions):
     @unittest.SkipTest  # Turning on debug is too verbose for a test!
     def test_debug_arg(self):
         self.check_args("-d", debug=True)
+
 
 class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
     def test_timestamp_update(self):

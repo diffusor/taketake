@@ -1664,17 +1664,24 @@ def validate_args(args):
     dbg("args pre-val: ", args)
     errors = []
 
+    # Set up dest using continue_from or wavs
     if args.continue_from:
+        # Override dest when continuing from a progress dir
         if args.wavs:
             errors.append("--continue was specified, but so were SOURCE_WAVs: "
                     f"{' '.join(str(w) for w in args.wavs)}")
+        if args.dest:
+            errors.append("--continue was specified, but so was -t DEST_PATH: "
+                    f"{args.dest}")
         args.dest = args.continue_from.parent
 
     elif args.dest is None:
+        # No -t or -c
         if not args.wavs:
+            # Implicitly choose the current working directory
             args.dest = Path()
         else:
-            # Handle implicit destination (mv-style) if --target wasn't used
+            # Implicit dest is the final positional param (mv-style)
             args.dest = args.wavs.pop()
 
     if not args.continue_from:
@@ -1683,9 +1690,9 @@ def validate_args(args):
             sep = "\n    "
             raise TaketakeRuntimeError(
                     "Too many progress directories found:"
-                    f"{sep}{sep.join(progress_dirs)}"
+                    f"{sep}{sep.join(str(d) for d in progress_dirs)}"
                     "\n  Use -r on a specific directory to continue the transfer represented by that directory"
-                    f"\n  For example:  {prog} -r '{progress_dirs[0]}'")
+                    f"\n  For example:  {Config.prog} -r '{progress_dirs[0]}'")
 
         elif len(progress_dirs) == 1:
             args.continue_from = progress_dirs[0]
