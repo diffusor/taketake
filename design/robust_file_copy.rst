@@ -179,15 +179,18 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
        update_mtime src/flacs/$filename_provided.flac
        move $filename_provided.flac.*par2 dest/
 
-   f. Remove the temporary dest directory::
+   f. Remove the temporary dest directory contents::
 
-       rm -r .taketake.$datestamp/$wavfilename
+       rm .taketake.$datestamp/$wavfilename/*
 
 8. **finish**: *[global]* Wait for all processing to complete
 
    ``All(cleanup) => [finish]``
 
-    a. Remove top-level progress dir ``.taketake.$datestamp``
+    a. Remove top-level progress dir ``.taketake.$datestamp``::
+
+        rmdir .taketake.$datestamp/*
+        rmdir .taketake.$datestamp
 
 
 Xdelta3 usage

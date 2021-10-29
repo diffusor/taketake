@@ -106,6 +106,7 @@ class Config:
     par2_base_blocksize = 4096      # A multiple of this is used to avoid the 32K limit
     par2_max_num_blocks = 10000     # par2 doesn't support more than 32K num blocks, but gets unweildy with a lot of blocks anyway, so limit things a bit
 
+    wav_extensions = "wav WAV".split()
     progress_dir_fmt = ".taketake.{0}.tmp"
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
@@ -1657,41 +1658,91 @@ def dbg(*args, **kwargs):
     if Config.debug:
         print(f"*{Config.dbg_prog}* -", *args, **kwargs)
 
-def validate_args(args, parser):
-    """Set args.dest and check for consistency, including dir existance."""
+
+def fmt_args(args):
+    arglist=[]
+    for arg, val in vars(args).items():
+        if val is not False and val is not None:
+            if val is True:
+                arglist.append(str(arg))
+            elif isinstance(val, collections.abc.Sequence):
+                arglist.append(f"{arg}=[{', '.join(str(e) for e in val)}]")
+            else:
+                arglist.append(f"{arg}={val}")
+    return " ".join(arglist)
+
+
+def validate_args(parser):
+    """Validates arguments processed by the parser and set in parser.args.
+
+    Sets parser.args.dest and check for consistency, including dir existance.
+    Sets parser.errors, which is a list of errors encountered during parsing.
+    """
+
+    parser.errors = []
+    def err(*args):
+        parser.errors.append(" ".join(str(a) for a in args))
+
+    args = parser.args
+    # debug must be set prior to the first call to dbg()
     if args.debug:
         Config.debug = True
 
-    dbg("args pre-val: ", args)
-    errors = []
-    def err(*args):
-        errors.append(" ".join(str(a) for a in args))
+    dbg("args pre-val: ", fmt_args(args))
 
-    # Set up dest using continue_from or wavs
+    # Use the final positional parameter as dest, like mv does
+    if args.sources and args.dest is None:
+        args.dest = args.sources.pop()
+
+    # Expand any sources that are directories
+    args.wavs = []
+    for source in args.sources:
+        if source.is_dir():
+            new_wavs = set()
+            for ext in Config.wav_extensions:
+                wildcard = "**/*" if args.recurse else "*"
+                new_wavs |= source.glob(f"{wildcard}.{ext}")
+            args.wavs.extend(new_wavs)
+        else:
+            args.wavs.append(source)
+    if len(set(args.wavs)) != len(args.wavs):
+        # https://stackoverflow.com/a/9835819
+        seen = set()
+        dups = []
+        for wav in args.wavs:
+            if wav not in seen:
+                seen[wav] = 1
+            else:
+                if seen[wav] == 1
+                    dups.append(str(wav))
+                seen[wav] += 1
+        err("Duplicate wav files specified: ", " ".join(dups))
+
+
+    # Set up dest using continue_from or sources
     if args.continue_from:
         if not args.continue_from.is_dir():
             err("PROGRESS_DIR (-c|--continue) does not exist!", args.continue_from)
-
-        # Override dest when continuing from a progress dir
-        if args.wavs:
-            err("--continue was specified, but so were SOURCE_WAVs:", *args.wavs)
+        if args.sources:
+            err("--continue was specified, but so were SOURCE_WAVs:", *args.sources)
         if args.dest:
             err("--continue was specified, but so was -t DEST_PATH:", args.dest)
-        args.dest = args.continue_from.parent
 
-    elif args.dest is None:
-        # No -t or -c
-        if not args.wavs:
-            # Implicitly choose the current working directory
-            args.dest = Path()
-        else:
-            # Implicit dest is the final positional param (mv-style)
-            args.dest = args.wavs.pop()
+        # Override dest when continuing from a progress dir
+        p = args.continue_from
+        # Try to stay relative and with symlinks unresolved.
+        if p.name == "." or p.name == "..":
+            p = p.resolve()
+        args.dest = p.parent
 
-    if not args.dest.is_dir():
+    if not args.dest:
+        err("DEST_PATH (-t|--target) not specified!")
+
+    elif not args.dest.is_dir():
         err("DEST_PATH (-t|--target) does not exist!", args.dest)
 
-    if not args.continue_from:
+    elif not args.continue_from:
+        # Check for interrupted progress directories in dest
         progress_dirs = sorted(Path(args.dest).glob(Config.progress_dir_fmt.format("*")))
         if len(progress_dirs) > 1:
             sep = "\n      "
@@ -1704,13 +1755,9 @@ def validate_args(args, parser):
         elif len(progress_dirs) == 1:
             args.continue_from = progress_dirs[0]
 
-    # Report errors
-    if errors:
-        parser.error("Invalid command line options:"
-                     + "".join("\n  * {}".format(e) for e in errors))
+    # Check wavs exist, or are in the progress_dirs
 
-    dbg("args post-val:", args)
-    return args
+    dbg("args post-val:", fmt_args(args))
 
 
 def process_args(argv=None):
@@ -1744,8 +1791,13 @@ def process_args(argv=None):
     arg('-c', '--continue',
         metavar='PROGRESS_DIR', action='store', dest='continue_from',
         type=Path,
-        help="""Explicitly specify the directory to be used to continue
-            an interrupted transfer.""")
+        help="""Continue processing an interrupted transfer.
+            The PROGRESS_DIR must exist and be a child directory
+            contained within the target DEST_PATH.
+            When -c is used, specifying SOURCE_WAV and DEST_PATH
+            is unnecessary, but if they are specified, they must
+            match what is found in the given PROGRESS_DIR.
+            """)
 
     arg('-t', '--target', '--target-directory', dest='dest', type=Path,
         metavar='DEST_PATH', action='store',
@@ -1753,22 +1805,36 @@ def process_args(argv=None):
             The final positional will not be handled specially--all
             positional arguments will be treated as SOURCE arguments""")
 
-    arg('wavs', metavar='SOURCE_WAV', nargs='*', type=Path,
-        help="Source hierarchy specification")
+    arg('-r', '--recurse', action='store',
+        help="""Recurse into each SOURCE_WAV that is a directory, looking for
+            *.wav and *.WAV files""")
 
-    # This is left empty because wavs is greedy.  process_args() fills it.
+    arg('sources', metavar='SOURCE_WAV', nargs='*', type=Path,
+        help="""Transfer the specified SOURCE_WAV files.
+            Transfer all *.wav and *.WAV files in each SOURCE_WAV that is a
+            directory.""")
+
+    # This is left empty because sources is greedy.  process_args() fills it.
     arg('_dest', metavar='DEST_PATH', nargs='?', type=Path,
         help=f"""Destination directory for encoded flac and par2 files.
 
             This directory will also contain the timestamped
             {Config.progress_dir_fmt.format('*')} directory for tracking progress.""")
 
-    return validate_args(parser.parse_args(argv), parser)
+    parser.args = parser.parse_args(argv)
+    validate_args(parser)
+    return parser
 
 
 def main():
-    args = process_args()
+    arg_parser = process_args()
 
+    # Report errors
+    if arg_parser.errors:
+        arg_parser.error("Invalid command line options:"
+                + "".join("\n  * {}".format(e) for e in arg_parser.errors))
+
+    args = arg_parser.args
     if not args.skip_tests:
         run_tests_in_subprocess()
 

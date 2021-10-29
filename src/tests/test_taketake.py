@@ -1134,6 +1134,8 @@ class Test6_args(CdTempdirFixture):
                 skip_tests=False,
                 continue_from=None,
                 dest=Path(),
+                recurse=False,
+                sources=[],
                 wavs=[])
 
     def tearDown(self):
@@ -1150,7 +1152,7 @@ class Test6_args(CdTempdirFixture):
         return name
 
     def check_args(self, cmdline, **kwargs):
-        args = taketake.process_args(cmdline.split())
+        args = taketake.process_args(cmdline.split()).args
         taketake.Config.debug = False # Arg processing sets this state, revert it
         self.base_args.update(kwargs)
         self.assertEqual(args.__dict__, self.base_args) # got != expected
@@ -1197,7 +1199,8 @@ class Test6_args(CdTempdirFixture):
         p2 = self.mkdir_progress("bar", d)
         with self.assertRaisesRegex(taketake.TaketakeRuntimeError,
                 "Too many progress directories found"):
-            self.check_args(str(d))
+            self.check_args(str(d),
+                    dest=d)
 
     def test_dest_in_option(self):
         d = Path("dest_foo")
