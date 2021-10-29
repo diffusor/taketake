@@ -55,11 +55,13 @@ import asyncio
 import time
 import sys
 import os
+import pathlib
 import glob
 import itertools
 import collections
 import subprocess
 import datetime
+import types
 import ctypes
 from dataclasses import dataclass, field
 from typing import List
@@ -1510,10 +1512,36 @@ async def phaseC_verify_backcopy(dest):
 
 
 #============================================================================
+# TransferInfo and worklists
+#============================================================================
+
+class TransferInfo(types.SimpleNamespace):
+    """Contains the state of each transfer.
+
+    A TransferInfo object is created for each file to transfer, based
+    on the wav files that exist and any in-progress transfer directories
+    in the destination directory.
+
+    These objects are stored in worklist array, which each task indexes into
+    based on the tokens it gets from its incoming Stepper queues.
+    """
+
+    src_fpath = None
+    dest_dir = None
+    progress_dir = None
+
+    fname_guess = None
+    fname_prompted = None
+    mtime = None
+    flac_fpath = None
+    par_fpaths = None
+
+#============================================================================
 # Tasks
 #============================================================================
 
 async def task_setup(filepaths, dest, worklist, stepper):
+    # glob
     await stepper.put(None)
 
 async def task_listen(worklist, stepper):
@@ -1603,15 +1631,31 @@ def taketake_files(filepaths, dest):
     flush_fs_caches()
     asyncio.run(phaseC_verify_backcopy(dest))
 
+def run_tests_in_subprocess():
+    file_dir = pathlib.Path(__file__).resolve().parent
+    test_script = str(file_dir / 'tests' / 'test_taketake.py')
+
+    print("Ensuring taketake ecosystem integrity - running", test_script)
+    p = subprocess.run([test_script])
+    if p.returncode != 0:
+        print("taketake pre-testing failed!  Aborting.")
+        sys.exit(1)
 
 def main():
     files = sys.argv[1:]
-    if not files or files[0] in '-h --help -?'.split():
-        print(f"""Usage: {sys.argv[0]} files...
+    if files and files[0] in '-h --help -?'.split():
+        # -n no_act
+        # -k keep wav
+        # --skip-copyback
+        # --skip-tests
+        # --continue progress_dir
+        print(f"""Usage: {sys.argv[0]} [-d dest] [src_files...]
 
 During Rename, press alt-h to hear the file via the configured media player""")
     else:
-        taketake_files(files, dest=None)
+        run_tests_in_subprocess()
+        asyncio.run(run_tasks(files, dest=None))
+        #taketake_files(files, dest=None)
 
     return 0
 

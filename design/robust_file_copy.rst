@@ -35,8 +35,8 @@ there are no more items to process.
    c. Otherwise, create src wav progress directories::
 
        mkdir .taketake.20211025-1802-Mon
-       echo srcdir > .taketake.20211025-1802-Mon/.src
-       mkdir .taketake.20211025-1802-Mon/audio001.wav ...
+       #echo srcdir > .taketake.20211025-1802-Mon/.src
+       mkdir .taketake.20211025-1802-Mon/audio001.wav/ ...
 
 *Perform the following steps for each wav, assuming each non-src filename is
 relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory*
