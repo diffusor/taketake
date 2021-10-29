@@ -1089,10 +1089,15 @@ class TempdirFixture(unittest.TestCase):
 
 class Test6_args(TempdirFixture, FileAssertions):
     def setUp(self):
-        self.saved_config = dict(**taketake.Config.__dict__)
         super().setUp()
+        self.saved_config = dict(**taketake.Config.__dict__)
+        self.base_args = dict(debug=False, prefix=None, keep_wavs=False,
+                skip_copyback=False, skip_tests=False,
+                continue_from=None, dest=Path('.'), wavs=[])
 
     def tearDown(self):
+        # Make sure we restore any config settings adjusted by the processed
+        # arguments, such as Config.debug
         for k, v in self.saved_config.items():
             if not k.startswith('_'):
                 setattr(taketake.Config, k, v)
@@ -1101,14 +1106,15 @@ class Test6_args(TempdirFixture, FileAssertions):
     def check_args(self, cmdline, **kwargs):
         args = taketake.process_args(cmdline.split())
         taketake.Config.debug = False # Arg processing sets this state, revert it
-        self.assertEqual(args.__dict__, kwargs) # got != expected
+        self.base_args.update(kwargs)
+        self.assertEqual(args.__dict__, self.base_args) # got != expected
 
     def test_no_args(self):
-        self.check_args("", debug=False, prefix=None, keep_wavs=False, skip_copyback=False, skip_tests=False, continue_from=None, dest=Path('.'), wavs=[])
+        self.check_args("")
 
-    @unittest.SkipTest
+    @unittest.SkipTest  # Turning on debug is too verbose for a test!
     def test_debug_arg(self):
-        self.check_args("-d", debug=True, prefix=None, keep_wavs=False, skip_copyback=False, skip_tests=False, continue_from=None, dest=Path('.'), wavs=[])
+        self.check_args("-d", debug=True)
 
 class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
     def test_timestamp_update(self):
