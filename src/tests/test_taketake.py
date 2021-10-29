@@ -1208,6 +1208,7 @@ class Test6_args(CdTempdirFixture):
                 dest=d)
 
     def test_dest_in_positionals_1c_in_parent(self):
+        """Progress dir shouldn't be detected since it's not in dest."""
         d = Path("dest_foo")
         d.mkdir()
         p1 = self.mkdir_progress("foo")
@@ -1259,6 +1260,35 @@ class Test6_args(CdTempdirFixture):
                 sources=sources,
                 wavs=sources,
                 dest=d)
+
+    def test_wav_not_exist(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        sources = pathlist("wav_foo")
+        self.check_args(f"{fmtpaths(sources)} {d}",
+                "SOURCE_WAV not found")
+
+    def test_progress_wav_not_dir(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        p1 = self.mkdir_progress("foo", d)
+        source = Path("wav_foo")
+        path_to_source = d / p1 / source
+        path_to_source.touch()
+        self.check_args(f"{source} {d}",
+                f"temp wavfile exists in progress dir but is not a directory! {path_to_source}")
+
+    def test_progress_wav_src_link_not_found(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        p1 = self.mkdir_progress("foo", d)
+        source = Path("wav_foo")
+        path_to_source = d / p1 / source
+        path_to_source.mkdir()
+        linkback = path_to_source / taketake.Config.source_wav_linkname
+        linkback.touch()
+        self.check_args(f"{source} {d}",
+                f"temp wavfile tracker is not a symlink! {linkback}")
 
     @unittest.SkipTest  # Turning on debug is too verbose for a test!
     def test_debug_arg(self):
