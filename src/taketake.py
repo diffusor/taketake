@@ -1,26 +1,39 @@
 #!/usr/bin/env python3
 
-"""Rename file[s] based on the spoken information at the front of the file.
+# TODO support transfering from flac files?
+
+"""Transfer wav files into flac files.
+
+This is meant for convenient but robust download from digitial piano USB drives.
+
+* Suggest file names based on spoken timestamp information in each wav
+* Prompt the user to rename the file, allowing listening to it via Alt-h
+* Encode par2 recovery files for the destination flac
+* Flush cached data and verify the copied/encoded contents
+* Automatically delete the source wav file
+* Copy the encoded flac and par2 files back onto the USB for archival
+* If the process hits an error or is interrupted, it can be resumed
 
 When using TalkyTime to timestamp a recording, this eases management of the
 recorded files.
 
-Supports .wav and .flac.
+During Rename, press alt-h to hear the file via the configured media player.
 
 Setup:
-    $ python3 -m pip install --user SpeechRecognition PocketSphinx word2number prompt_toolkit
 
-Silence detection:
-    $ ffmpeg -i in.flac -af silencedetect=noise=-50dB:d=1 -f null -
+ $ python3 -m pip install --user SpeechRecognition PocketSphinx word2number prompt_toolkit
 
-par2 parity archive creation:
-    $ par2 create -s4096 -r5 -n2 -u in.flac
-
-Run tests:
-    $ tests/test_rename_by_voice.py
+External tools required:
+* flac
+* par2
+* mpv (for auditioning files to check speech recognition)
+* ffmpeg
+* xdelta3
 """
 
+
 # Silence detection example:
+# $ ffmpeg -i in.flac -af silencedetect=noise=-50dB:d=1 -f null -
 #
 #...
 #Input #0, flac, from 'in.flac':
@@ -51,6 +64,7 @@ Run tests:
 #   -> But there is a limit of how many blocks: probably 32K of them for the full file
 #   -> par2 exits with non-zero code if it has an error
 
+import argparse
 import asyncio
 import time
 import sys
@@ -77,6 +91,10 @@ from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.key_binding import KeyBindings
 
 class Config:
+    debug = False
+    dbg_prog = "taketake"
+    prog = sys.argv[0]
+
     silence_threshold_dbfs = -55    # Audio above this threshold is not considered silence
     silence_min_duration_s = 0.5    # Silence shorter than this is not detected
     file_scan_duration_s = 90       # -t (time duration).  Note -ss is startseconds
@@ -88,7 +106,7 @@ class Config:
     par2_base_blocksize = 4096      # A multiple of this is used to avoid the 32K limit
     par2_max_num_blocks = 10000     # par2 doesn't support more than 32K num blocks, but gets unweildy with a lot of blocks anyway, so limit things a bit
 
-    progress_dir_prefix = ".taketake."
+    progress_dir_fmt = ".taketake.{0}.tmp"
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
 
@@ -100,22 +118,25 @@ class TimeRange:
 
 
 # Exceptions
-class SubprocessError(RuntimeError):
+class TaketakeRuntimeError(RuntimeError):
     pass
 
-class InvalidMediaFile(RuntimeError):
+class SubprocessError(TaketakeRuntimeError):
     pass
 
-class MissingPar2File(RuntimeError):
+class InvalidMediaFile(TaketakeRuntimeError):
     pass
 
-class TimestampGrokError(RuntimeError):
+class MissingPar2File(TaketakeRuntimeError):
     pass
 
-class NoSuitableAudioSpan(RuntimeError):
+class TimestampGrokError(TaketakeRuntimeError):
     pass
 
-class XdeltaMismatch(RuntimeError):
+class NoSuitableAudioSpan(TaketakeRuntimeError):
+    pass
+
+class XdeltaMismatch(TaketakeRuntimeError):
     pass
 
 #============================================================================
@@ -1541,8 +1562,7 @@ class TransferInfo(types.SimpleNamespace):
 # Tasks
 #============================================================================
 
-async def task_setup(filepaths, dest, worklist, stepper):
-    # glob
+async def task_setup(args, worklist, stepper):
     await stepper.put(None)
 
 async def task_listen(worklist, stepper):
@@ -1576,8 +1596,8 @@ async def task_finish(worklist, stepper):
 # Main sequence
 #============================================================================
 
-async def run_tasks(filepaths, dest):
-    # setup listen prompt flacenc pargen xdelta cleanup finish
+async def run_tasks(args):
+    """Connect up the various tasks with queues and run them."""
     q = make_queues("""
         setup2listen setup2flacenc
         listen2prompt
@@ -1588,7 +1608,7 @@ async def run_tasks(filepaths, dest):
     worklist = []
 
     await asyncio.gather(
-        task_setup(filepaths, dest, worklist, Stepper("setup",
+        task_setup(args, worklist, Stepper("setup",
             send_to=[q.setup2listen, q.setup2flacenc])),
 
         task_listen(worklist, Stepper("listen",
@@ -1622,16 +1642,6 @@ async def run_tasks(filepaths, dest):
     )
 
 
-def taketake_files(filepaths, dest):
-    if dest is None:
-        dest = "."
-
-    asyncio.run(phaseA_encode(filepaths, dest))
-    flush_fs_caches()
-    asyncio.run(phaseB_verify_and_copyback(dest))
-    flush_fs_caches()
-    asyncio.run(phaseC_verify_backcopy(dest))
-
 def run_tests_in_subprocess():
     file_dir = Path(__file__).resolve().parent
     test_script = str(file_dir / 'tests' / 'test_taketake.py')
@@ -1642,21 +1652,119 @@ def run_tests_in_subprocess():
         print("taketake pre-testing failed!  Aborting.")
         sys.exit(1)
 
-def main():
-    files = sys.argv[1:]
-    if files and files[0] in '-h --help -?'.split():
-        # -n no_act
-        # -k keep wav
-        # --skip-copyback
-        # --skip-tests
-        # --continue progress_dir
-        print(f"""Usage: {sys.argv[0]} [-d dest] [src_files...]
 
-During Rename, press alt-h to hear the file via the configured media player""")
-    else:
+def dbg(*args, **kwargs):
+    if Config.debug:
+        print(f"*{Config.dbg_prog}* -", *args, **kwargs)
+
+def validate_args(args):
+    if args.debug:
+        Config.debug = True
+
+    dbg("args pre-val: ", args)
+    errors = []
+
+    if args.continue_from:
+        if args.wavs:
+            errors.append("--continue was specified, but so were SOURCE_WAVs: "
+                    f"{' '.join(str(w) for w in args.wavs)}")
+        args.dest = args.continue_from.parent
+
+    elif args.dest is None:
+        if not args.wavs:
+            args.dest = Path()
+        else:
+            # Handle implicit destination (mv-style) if --target wasn't used
+            args.dest = args.wavs.pop()
+
+    if not args.continue_from:
+        progress_dirs = sorted(Path(args.dest).glob(Config.progress_dir_fmt.format("*")))
+        if len(progress_dirs) > 1:
+            sep = "\n    "
+            raise TaketakeRuntimeError(
+                    "Too many progress directories found:"
+                    f"{sep}{sep.join(progress_dirs)}"
+                    "\n  Use -r on a specific directory to continue the transfer represented by that directory"
+                    f"\n  For example:  {prog} -r '{progress_dirs[0]}'")
+
+        elif len(progress_dirs) == 1:
+            args.continue_from = progress_dirs[0]
+
+    # Report errors
+    if errors:
+        parser.error("Inconsistent options specified:"
+                     + "".join("\n  * {}".format(e) for e in errors))
+
+    dbg("args post-val:", args)
+    return args
+
+
+def process_args(argv=None):
+    parser = argparse.ArgumentParser(
+            description=__doc__,
+            formatter_class=argparse.RawDescriptionHelpFormatter)
+    arg = parser.add_argument
+
+    #arg('-n', '--no-act', action='store_true',
+    #    help="Do not do anything, just summarize what would be done")
+
+    arg('-d', '--debug', action='store_true',
+        help="Show debug output, including tracebacks from exceptions")
+
+    arg('-p', '--prefix', action='store',
+        help="Prefix flac files with the given string")
+
+    arg('-k', '--keep-wavs', action='store_true',
+        help="Don't delete processed source wav files")
+
+    arg('--skip-copyback', action='store_true',
+        help="Don't copy the encoded flacs back to their source wav dir")
+
+    arg('--skip-tests', action='store_true',
+        help="""Do not run unit tests prior to starting the transfer.
+
+            This saves a few seconds at startup, but you risk integrity
+            issues if some system change causes differences that wouldn't
+            otherwise be detectable during normal running.""")
+
+    arg('-c', '--continue',
+        metavar='PROGRESS_DIR', action='store', dest='continue_from',
+        type=Path,
+        help="""Explicitly specify the directory to be used to continue
+            an interrupted transfer.""")
+
+    arg('-t', '--target', '--target-directory', dest='dest', type=Path,
+        metavar='DEST_PATH', action='store',
+        help="""Causes the specified path to be used as the destination.
+            The final positional will not be handled specially--all
+            positional arguments will be treated as SOURCE arguments""")
+
+    arg('wavs', metavar='SOURCE_WAV', nargs='*', type=Path,
+        help="Source hierarchy specification")
+
+    # This is left empty because wavs is greedy.  process_args() fills it.
+    arg('dest', metavar='DEST_PATH', nargs='?', type=Path,
+        help=f"""Destination directory for encoded flac and par2 files.
+
+            This directory will also contain the timestamped
+            {Config.progress_dir_fmt.format('*')} directory for tracking progress.""")
+
+    return validate_args(parser.parse_args(argv))
+
+
+def main(argv=None):
+    args = process_args(argv)
+
+    if not args.skip_tests:
         run_tests_in_subprocess()
-        asyncio.run(run_tasks(files, dest=None))
-        #taketake_files(files, dest=None)
+
+    try:
+        asyncio.run(run_tasks(args))
+    except TaketakeRuntimeError as e:
+        print(f"Error - aborting: {e}", file=sys.stderr)
+        if args.debug:
+            raise
+        return(1)
 
     return 0
 

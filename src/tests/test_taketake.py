@@ -1515,7 +1515,7 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
 class Test8_tasks(unittest.IsolatedAsyncioTestCase):
     """Test task processing in taketake"""
     async def test_empty_runtasks(self):
-        await taketake.run_tasks("", "")
+        await taketake.run_tasks(None)
 
 if __name__ == '__main__':
     unittest.main()
