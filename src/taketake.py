@@ -1658,6 +1658,7 @@ def dbg(*args, **kwargs):
         print(f"*{Config.dbg_prog}* -", *args, **kwargs)
 
 def validate_args(args):
+    """Set args.dest and check for consistency, including dir existance."""
     if args.debug:
         Config.debug = True
 
@@ -1683,6 +1684,9 @@ def validate_args(args):
         else:
             # Implicit dest is the final positional param (mv-style)
             args.dest = args.wavs.pop()
+
+    if not args.dest.is_dir():
+        raise TaketakeRuntimeError(f"Dest dir does not exist! '{args.dest}'")
 
     if not args.continue_from:
         progress_dirs = sorted(Path(args.dest).glob(Config.progress_dir_fmt.format("*")))

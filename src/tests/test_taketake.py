@@ -20,6 +20,7 @@ import time
 import subprocess
 import argparse
 import contextlib
+import functools
 from pathlib import Path
 
 keeptemp = os.environ.get("TEST_TAKETAKE_KEEPTEMP", None)
@@ -1109,6 +1110,17 @@ def cd(newdir):
     finally:
         os.chdir(olddir)
 
+def raises_nodir(dirname):
+    """Decorates test function, injects Path(dirname) as an argument"""
+    def decorator(function):
+        @functools.wraps(function)
+        def wrapper(self, *args, **kwargs):
+            with self.assertRaisesRegex(taketake.TaketakeRuntimeError,
+                    f"Dest dir does not exist! '{dirname}'"):
+                return function(self, Path(dirname), *args, **kwargs)
+        return wrapper
+    return decorator
+
 class Test6_args(CdTempdirFixture):
     def setUp(self):
         super().setUp()
@@ -1158,12 +1170,17 @@ class Test6_args(CdTempdirFixture):
             self.check_args("")
 
     def test_dest_in_positionals(self):
-        self.check_args("dest_foo", dest=Path("dest_foo"))
+        d = Path("dest_foo")
+        d.mkdir()
+        self.check_args(f"{d}",
+                dest=d)
 
     def test_dest_in_positionals_1c_in_parent(self):
+        d = Path("dest_foo")
+        d.mkdir()
         p1 = self.mkdir_progress("foo")
-        self.check_args("dest_foo",
-                dest=Path("dest_foo"))
+        self.check_args(f"{d}",
+                dest=d)
 
     def test_dest_in_positionals_1c_in_dest(self):
         d = Path("dest_foo")
@@ -1173,16 +1190,37 @@ class Test6_args(CdTempdirFixture):
                 dest=Path(d),
                 continue_from=d/p1)
 
+    def test_dest_in_positionals_2c_in_dest(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        p1 = self.mkdir_progress("foo", d)
+        p2 = self.mkdir_progress("bar", d)
+        with self.assertRaisesRegex(taketake.TaketakeRuntimeError,
+                "Too many progress directories found"):
+            self.check_args(str(d))
+
     def test_dest_in_option(self):
-        self.check_args("-t dest_foo", dest=Path("dest_foo"))
+        d = Path("dest_foo")
+        d.mkdir()
+        self.check_args(f"-t {d}", dest=d)
+
+    @raises_nodir("dest_foo")
+    def test_dest_in_option_nodir(self, d):
+        self.check_args(f"-t {d}", dest=d)
 
     def test_two_positionals(self):
-        self.check_args("wav_foo dest_foo",
-                wavs=[Path("wav_foo")], dest=Path("dest_foo"))
+        d = Path("dest_foo")
+        d.mkdir()
+        self.check_args(f"wav_foo {d}",
+                wavs=[Path("wav_foo")],
+                dest=d)
 
     def test_two_wavs_and_target(self):
-        self.check_args("wav_foo1 wav_foo2 --target dest_foo",
-                wavs=[Path("wav_foo1"), Path("wav_foo2")], dest=Path("dest_foo"))
+        d = Path("dest_foo")
+        d.mkdir()
+        self.check_args(f"wav_foo1 wav_foo2 --target {d}",
+                wavs=[Path("wav_foo1"), Path("wav_foo2")],
+                dest=d)
 
     @unittest.SkipTest  # Turning on debug is too verbose for a test!
     def test_debug_arg(self):
