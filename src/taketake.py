@@ -1288,6 +1288,16 @@ def make_queues(s):
         setattr(qdict, qname, qdict[qname])
     return qdict
 
+def listify(arg):
+    if arg is None:
+        return []
+    elif isinstance(arg, collections.abc.Sequence):
+        return arg
+    elif isinstance(arg, collections.abc.Iterable):
+        return list(arg)
+    else:
+        return [arg]
+
 class Stepper:
     """Manage a set of asyncio.Queues for coordinating stepping a sequence.
 
@@ -1303,27 +1313,15 @@ class Stepper:
             send_to=None, sync_to=None, end=None):
 
         self.name = name
-        self.sync_from = self._de_nonify(sync_from)
-        self.pull_from = self._de_nonify(pull_from)
-        self.send_to = self._de_nonify(send_to)
-        self.sync_to = self._de_nonify(sync_to)
+        self.sync_from = listify(sync_from)
+        self.pull_from = listify(pull_from)
+        self.send_to = listify(send_to)
+        self.sync_to = listify(sync_to)
         self.end = end
 
         self.value = end # last gotten value
 
         self.pre_sync_met = False
-
-    def _de_nonify(self, qparam):
-        if qparam is None:
-            return []
-        elif isinstance(qparam, asyncio.Queue):
-            return [qparam]
-        elif isinstance(qparam, collections.abc.Sequence):
-            return qparam
-        elif isinstance(qparam, collections.abc.Iterable):
-            return list(qparam)
-        else:
-            raise RuntimeError(f"Invalid queue parameter {qparam!r}")
 
     def log(self, *args, **kwargs):
         dbg(f" *Stepper<{self.name}>* :", *args, **kwargs)
@@ -1446,21 +1444,48 @@ class StepNetwork:
         # Coroutine to Stepper instance maps
         self.producers = {}  # coro -> (args, kwargs)
         self.steps = {}      # coro -> (args, kwargs)
-        self.consumers = {}  # coro -> (args, kwargs)
 
         # Plan:
         # * Add args, kwargs, step (coro) to Stepper
         # * Remove name from Stepper, use step.__name__
         # * Fill queue lists from StepNetwork
 
-    def add_producer(self, coro, *args, send_to, sync_to, **kwargs):
+    def add_producer(self, coro, *args, send_to=None, sync_to=None, **kwargs):
         """Add a producer into the StepNetwork.
 
         Producer coroutines are not automatically stepped, unlike step
         coroutines.  They define the start of the workunit network pipeline,
         so they do not have inbound sync_from or pull_from queues.
+
+        send_to is a coroutine (or list of them) to send tokens to
+        sync_to is a coroutine (or list of them) to send end tokens to
+
+        The given coro must use stepper.put() to feed its send_to and sync_to
+        queues.
         """
         pass
+
+    def add_step(self, coro, *args, sync_from=None, pull_from=None,
+                 send_to=None, sync_to=None, **kwargs):
+        """Add a step to the StepNetwork.
+
+        The given coro will be automatically stepped via Stepper.walk.
+
+        The [sync/pull/send]_[to/_from] arguments specify a single
+        step/producer/consumer, or a list of them, from which the
+        correspending queues will be hooked up between the steppers.
+
+        When execute() is called, the queues will be created and hooked into
+        the Steppers.
+        """
+
+    def execute():
+        """Wire up the queues and run asyncio.gather.
+
+        execute matches the send/pull/sync queues across the Steppers in
+        the network, and then gathers across the added producer coroutines
+        and the Stepper.walk() coroutine for each step.
+        """
 
 #============================================================================
 # Phase A: Encode - encode flacs, rename, generate pars
@@ -1761,6 +1786,13 @@ async def task_finish(worklist):
 
 async def run_tasks(args):
     """Connect up the various tasks with queues and run them."""
+    worklist = []
+
+    network = StepNetwork("wavflacer")
+
+    network.add_producer(task_setup, args, worklist,
+            send_to=[task_listen, task_flacenc])
+
     q = make_queues("""
         setup2listen setup2flacenc
         listen2prompt
@@ -1768,8 +1800,6 @@ async def run_tasks(args):
         flacenc2xdelta flacenc2xdelta_sync
         pargen2cleanup xdelta2cleanup_sync
         """)
-
-    worklist = []
 
     await asyncio.gather(
         task_setup(args, worklist, Stepper("setup",
