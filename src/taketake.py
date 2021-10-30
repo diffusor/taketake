@@ -1700,14 +1700,23 @@ def validate_args(parser):
     args.wavs = []
     for source in args.sources:
         if source.is_dir():
-            if args.wavs:
-                err("multiple SOURCE_WAVs specified, but one was a directory:",
-                    source,
-                    f"- Sources: [{' '.join(str(d) for d in args.sources)}]")
+            if len(args.sources) > 1:
+                others = list(args.sources)
+                others.remove(source)
+                err("When transfering from a whole directory, "
+                    "no other SOURCE_WAV parameters should be specified."
+                    "\n    Found SOURCE_WAV directory:", source,
+                    "\n    other SOURCE_WAVs:",
+                    f"[{' '.join(str(d) for d in others)}]")
+
+            # The globs may match the same file multiple times,
+            # so make sure they are unique
             new_wavs = set()
             for ext in Config.wav_extensions:
-                new_wavs |= source.glob(f"*.{ext}")
-            args.wavs = list(new_wavs)
+                new_wavs |= set(source.glob(f"*.{ext}"))
+            args.wavs = sorted(new_wavs)
+            break
+
         else:
             args.wavs.append(source)
 

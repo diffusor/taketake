@@ -1174,8 +1174,8 @@ class Test6_args(CdTempdirFixture):
                 else:
                     unmatched_errpats.append(errpat)
             self.assertFalse(remaining_errors or unmatched_errpats,
-                msg=f"\nUnmatched argparse errors:{fmterr(remaining_errors)}"
-                    f"\nUnmatched expected errors:{fmterr(unmatched_errpats)}")
+                msg=f"\nExtra argparse errors:{fmterr(remaining_errors)}"
+                    f"\nUnused error patterns:{fmterr(unmatched_errpats)}")
 
         else:
             # Ensure there are no errors
@@ -1317,8 +1317,24 @@ class Test6_args(CdTempdirFixture):
                 sources=[source],
                 wavs=[source])
 
+    def test_dir_among_wavs(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        sources = pathlist("wav0 wav1 wav2")
+        sdir = Path("sdir")
+        sdir.mkdir()
+        self.check_args(f"{sdir} {fmtpaths(sources)} {d}",
+                "When transfering from a whole directory")
+
+    def test_multiple_missing_wavs(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        sources = pathlist("wav0 wav1 wav2")
+        self.check_args(f"{fmtpaths(sources)} {d}",
+                *(f"SOURCE_WAV not found: wav{i}" for i in range(3)))
+
     # TODO - add tests for:
-    # more than one SOURCE_WAV was specified, but one was a directory
+    # no other SOURCE_WAV parameters should be specified
     # PROGRESS_DIR does not exist! --continue
     # --continue was specified, but so were SOURCE_WAVs
     # --continue was specified, but so was DEST_PATH
