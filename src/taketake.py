@@ -1707,9 +1707,9 @@ async def run_tasks(args):
     q = make_queues("""
         setup2listen setup2flacenc
         listen2prompt
-        prompt2pargen flacenc2pargen flacenc2xdelta
-        pargen2cleanup xdelta2cleanup
-        cleanup2finish""")
+        prompt2pargen flacenc2pargen flacenc2xdelta_sync
+        pargen2cleanup xdelta2cleanup_sync
+        cleanup2finish_sync""")
 
     worklist = []
 
@@ -1728,23 +1728,23 @@ async def run_tasks(args):
         task_flacenc(worklist, Stepper("flacenc",
             sync_across=q.setup2flacenc,
             send_to=q.flacenc2pargen,
-            send_post=q.flacenc2xdelta)),
+            send_post=q.flacenc2xdelta_sync)),
 
         task_pargen(worklist, Stepper("pargen",
             sync_across=[q.prompt2pargen, q.flacenc2pargen],
             send_to=q.pargen2cleanup)),
 
         task_xdelta(worklist, Stepper("xdelta",
-            sync_pre=q.flacenc2xdelta,
-            send_post=q.xdelta2cleanup)),
+            sync_pre=q.flacenc2xdelta_sync,
+            send_post=q.xdelta2cleanup_sync)),
 
         task_cleanup(worklist, Stepper("cleanup",
-            sync_pre=q.xdelta2cleanup,
+            sync_pre=q.xdelta2cleanup_sync,
             sync_across=q.pargen2cleanup,
-            send_post=q.cleanup2finish)),
+            send_post=q.cleanup2finish_sync)),
 
         task_finish(worklist, Stepper("finish",
-            sync_pre=q.cleanup2finish)),
+            sync_pre=q.cleanup2finish_sync)),
     )
 
 
