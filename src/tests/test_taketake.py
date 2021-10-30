@@ -1317,14 +1317,33 @@ class Test6_args(CdTempdirFixture):
                 sources=[source],
                 wavs=[source])
 
-    def test_dir_among_wavs(self):
+    def inject_dir_among_wavs(self, i):
         d = Path("dest_foo")
         d.mkdir()
-        sources = pathlist("wav0 wav1 wav2")
         sdir = Path("sdir")
         sdir.mkdir()
-        self.check_args(f"{sdir} {fmtpaths(sources)} {d}",
-                "When transfering from a whole directory")
+        sources = pathlist("wav0 wav1 wav2")
+        sources.insert(i, sdir)
+        self.check_args(f"{fmtpaths(sources)} {d}",
+                "When transfering from a whole directory,"
+                " no other SOURCE_WAV parameters should be specified. *"
+                r'\n *Found SOURCE_WAV directory: sdir *'
+                r'\n *other SOURCE_WAVs: \[wav0 wav1 wav2\] *')
+
+    def test_dir_among_wavs0(self):
+        self.inject_dir_among_wavs(0)
+
+    def test_dir_among_wavs1(self):
+        self.inject_dir_among_wavs(1)
+
+    def test_dir_among_wavs2(self):
+        self.inject_dir_among_wavs(2)
+
+    def test_dir_among_wavs3(self):
+        self.inject_dir_among_wavs(3)
+
+    def test_dir_among_wavs4(self):
+        self.inject_dir_among_wavs(4)
 
     def test_multiple_missing_wavs(self):
         d = Path("dest_foo")
@@ -1334,7 +1353,6 @@ class Test6_args(CdTempdirFixture):
                 *(f"SOURCE_WAV not found: wav{i}" for i in range(3)))
 
     # TODO - add tests for:
-    # no other SOURCE_WAV parameters should be specified
     # PROGRESS_DIR does not exist! --continue
     # --continue was specified, but so were SOURCE_WAVs
     # --continue was specified, but so was DEST_PATH
