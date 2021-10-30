@@ -1723,7 +1723,7 @@ def validate_args(parser):
     # Set up dest using continue_from or sources
     if args.continue_from:
         if not args.continue_from.is_dir():
-            err("PROGRESS_DIR does not exist! --continue", args.continue_from)
+            err("PROGRESS_DIR does not exist! Got: --continue", args.continue_from)
         if args.sources:
             err("--continue was specified, but so were SOURCE_WAVs:", *args.sources)
         if args.dest:

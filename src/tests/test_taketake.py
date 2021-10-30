@@ -1352,10 +1352,22 @@ class Test6_args(CdTempdirFixture):
         self.check_args(f"{fmtpaths(sources)} {d}",
                 *(f"SOURCE_WAV not found: wav{i}" for i in range(3)))
 
-    # TODO - add tests for:
-    # PROGRESS_DIR does not exist! --continue
-    # --continue was specified, but so were SOURCE_WAVs
-    # --continue was specified, but so was DEST_PATH
+    def test_progress_dir_nodir(self):
+        self.check_args(f"-c nodir",
+                "PROGRESS_DIR does not exist! Got: --continue nodir")
+
+    def test_progress_dir_and_dest_nodir(self):
+        self.check_args(f"a_dest_dir -c nodir",
+                "PROGRESS_DIR does not exist! Got: --continue nodir",
+                "--continue was specified, but so was DEST_PATH: a_dest_dir")
+
+
+    def test_progress_dir_and_source_and_dest_nodir(self):
+        self.check_args(f"foosrc foodest -c nodir",
+                "--continue was specified, but so were SOURCE_WAVs: foosrc",
+                "--continue was specified, but so was DEST_PATH: foodest",
+                "PROGRESS_DIR does not exist! Got: --continue nodir",
+                "temp wavfile exists in progress dir but is not a directory! nodir/foosrc")
 
     @unittest.SkipTest  # Turning on debug is too verbose for a test!
     def test_debug_arg(self):
