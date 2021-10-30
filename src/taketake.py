@@ -1306,8 +1306,6 @@ class Stepper:
         self.end = end
 
         self.value = end # last gotten value
-        self.saw_end = False
-        self.in_step = False
 
         self.pre_sync_met = False
 
@@ -1323,9 +1321,8 @@ class Stepper:
         else:
             raise RuntimeError(f"Invalid queue parameter {qparam!r}")
 
-    def log(self, msg):
-        dbg(f" *Stepper<{self.name}>* : {msg}")
-        pass
+    def log(self, *args, **kwargs):
+        dbg(f" *Stepper<{self.name}>* :", *args, **kwargs)
 
     def fmtqueues(self, queues):
         return ", ".join(q.name for q in queues)
@@ -1369,13 +1366,14 @@ class Stepper:
         """
         await self.pre_sync()
         self.value = await self._get_across(self.sync_across)
-        if self.value == self.end:
-            #dbg(f"Stepper({self.name}).get: saw_end=True")
-            self.saw_end = True
         return self.value
 
 
     async def put(self, token):
+        """Put token into each send_to queue.
+
+        If the token is the end token, put it in the send_post queue.
+        """
         for q in self.send_to:
             await q.put(token)
         if self.send_to:
@@ -1385,29 +1383,28 @@ class Stepper:
             for q in self.send_post:
                 await q.put(token)
             if self.send_post:
-                self.log(f"put({token}) -> enqueues: {self.fmtqueues(self.send_to)}")
+                self.log(f"put({token}) -> end-queues: {self.fmtqueues(self.send_to)}")
 
     async def step(self):
         """Simplify the standard while loop idiom.
 
         Equivalent to:
             while (i := await stepper.get()) is not None:
-                dbg(f"Step({stepper.name}) - {i}")
+                # Do task work
                 await stepper.put(i)
             await stepper.put(None)
         """
-        if self.in_step:
+        if self.value != self.end:
+            # Put the value from the last iteration
             await self.put(self.value)
 
-        if self.saw_end:
-            self.in_step = False
-            return False
-
-        else:
-            self.in_step = True
-            await self.get()
-            dbg(f"Stepper({self.name}).step() -> {self.value}")
-            return True
+        # Wait for the next token before starting this iteration
+        await self.get()
+        done = self.value == self.end
+        if done:
+            await self.put(self.value)
+        self.log(f"step() <-", self.value, "[Done]" if done else "[Executing step]")
+        return not done
 
 
 #============================================================================
@@ -1675,6 +1672,7 @@ async def task_setup(args, worklist, stepper):
 
 async def task_listen(worklist, stepper):
     while await stepper.step():
+        dbg(f"****** Listen Stepper got {stepper.value} *******")
         pass
 
 async def task_prompt(worklist, stepper):
