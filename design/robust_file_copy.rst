@@ -24,19 +24,17 @@ index ready for getting.  After processing the index, the actor puts that
 index into all its outbound queues.  A terminal token is used to indicate that
 there are no more items to process.
 
+0. Verify all unit tests pass and process command line arguments
+
 1. **setup**: *[global]* Determine wavs to process
 
    ``[setup] => listen,flacenc``
 
-   a. Verify unit tests pass
-
-   b. If resuming from a progress directory, skip steps c and d
-
-   c. Create main progress directory::
+   a. Create main progress directory if it doesn't already exist::
 
        mkdir .taketake.20211025-1802-Mon
 
-   d. Create src wav progress directories and symlinks for each wav, e.g. ``audio001.wav``::
+   b. Create src wav progress directories and symlinks that don't already exist for each wav, e.g. ``audio001.wav``::
 
        mkdir .taketake.20211025-1802-Mon/audio001.wav/
        symlink .taketake.20211025-1802-Mon/audio001.wav/.source.wav
@@ -49,12 +47,12 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    ``setup => [listen] => prompt``
 
-   a. Skip steps b and c if ``.filename_guess`` exists,
-      filling in the guess into the TransferInfo
+   **Skip this task if ``.filename_guess`` exists,
+   filling in the guess into the TransferInfo instead.**
 
-   b. Run speech to text, parse timestamp, construct filename guess
+   a. Run speech to text, parse timestamp, construct filename guess
 
-   c. Create filename guess progress file::
+   b. Create filename guess progress file::
 
        echo $filename_guess > .filename_guess
 
@@ -82,9 +80,11 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    ``setup => [flacenc] => pargen``
 
-   a. If ``.in_progress.flac`` exists, remove it
+   a. If ``.in_progress.flac`` exists, rename it to
+      ``.interrupted-abandoned.`` *timestamp* ``.flac``
 
-   b. If ``.encoded.flac`` exists, skip steps c and d
+   b. If ``.encoded.flac`` exists, skip to the final step in the task (decache
+      the wav)
 
    c. Flac encode src wav into dest flac::
 
@@ -102,31 +102,30 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    ``prompt,flacenc => [pargen] => cleanup``
 
-   a. If ``$filename_provided.flac`` exists, skip step b
-
-   b. Symlink from the final filename to the ``.encoded.flac``::
+   a. Unless ``$filename_provided.flac`` already exists,
+      symlink from the final filename to the ``.encoded.flac``::
 
        symlink $filename_provided.flac -> .encoded.flac
 
-   c. If ``$filename_provided.flac.vol*.par2`` exists:
+   b. If ``$filename_provided.flac.vol*.par2`` exists:
 
        * if any of their sizes are 0, delete them::
 
            delete $filename_provided.flac.*par2
 
-       * otherwise, skip step d
+       * otherwise, skip the next step
 
-   d. Create dest flac pars **(if interrupted, 0-sized files will be left)**::
+   c. Create dest flac pars **(if interrupted, 0-sized files will be left)**::
 
        par2 create $filename_provided.flac
 
-   e. Decache the dest flac and par2s::
+   f. Decache the dest flac and par2s::
 
        fadvise DONTNEED .encoded.flac *.par2
 
-   f. Verify ``fincore .encoded.flac`` is 0
+   g. Verify ``fincore .encoded.flac`` is 0
 
-   g. Verify dest flac par2s::
+   h. Verify dest flac par2s::
 
        par2 verify $filename_provided.flac
 
@@ -134,13 +133,12 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    ``All(flacenc) => [xdelta] => cleanup``
 
-   a. If src wav no longer exists or if ``.xdelta`` exists, skip step b
-
-   b. Verify ``fincore src/.wav`` is 0 and diff the src and decoded wav files::
+   a. Unless src wav no longer exists or if ``.xdelta`` exists, verify
+      ``fincore src/.wav`` is 0 and diff the src and decoded wav files::
 
        flac -c -d .encoded.flac | xdelta3 -s src/.wav > .xdelta
 
-   c. Check ``.xdelta`` for actual diffs
+   b. Check ``.xdelta`` for actual diffs
 
 7. **cleanup**: Delete src wav and copy back flac
 
@@ -151,13 +149,14 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
         .source.wav -> /absolute/path/to/source/audio001.wav
         .filename_guess
         .filename_provided
+        [.interrupted-abandoned.timestamp.flac if any]
         .encoded.flac [was .in_progress.flac]
         $filename_provided.flac -> .encoded.flac
         $filename_provided.flac.vol0000+500.par2
         $filename_provided.flac.vol0500+499.par2
         .xdelta
 
-   **Skip to step g if src modification is disabled**
+   **Skip this task if src modification is disabled**
 
    a. Remove the source wav file::
 
@@ -241,10 +240,10 @@ and the only instruction is a copy of the entire file::
       000000 019  CPY_0 22670 @0     
 
 **Note** - The relevant lengths and copy sizes match the filesize.  All the
-following properties should be verified:
+following properties should be verified::
 
-* ``VCDIFF data section length:   0``
-* ``VCDIFF copy window offset:    0``
-* ``VCDIFF copy window length:    22670``
-* ``VCDIFF target window length:  22670``
-* ``000000 019  CPY_0 22670 @0``
+    VCDIFF data section length:   0
+    VCDIFF copy window offset:    0
+    VCDIFF copy window length:    22670
+    VCDIFF target window length:  22670
+    000000 019  CPY_0 22670 @0
