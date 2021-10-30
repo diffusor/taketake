@@ -1299,14 +1299,14 @@ class Stepper:
     building a network of tasks with the same set of data flowing through
     each.
     """
-    def __init__(self, name=None, sync_pre=None, sync_across=None,
-            send_to=None, send_post=None, end=None):
+    def __init__(self, name=None, sync_from=None, pull_from=None,
+            send_to=None, sync_to=None, end=None):
 
         self.name = name
-        self.sync_pre = self._de_nonify(sync_pre)
-        self.sync_across = self._de_nonify(sync_across)
+        self.sync_from = self._de_nonify(sync_from)
+        self.pull_from = self._de_nonify(pull_from)
         self.send_to = self._de_nonify(send_to)
-        self.send_post = self._de_nonify(send_post)
+        self.sync_to = self._de_nonify(sync_to)
         self.end = end
 
         self.value = end # last gotten value
@@ -1357,38 +1357,38 @@ class Stepper:
 
 
     async def pre_sync(self):
-        """Wait for end on all sync_pre Queues.
+        """Wait for end on all sync_from Queues.
 
-        raises Stepper.DesynchronizationError if the sync_pre queues emit
+        raises Stepper.DesynchronizationError if the sync_from queues emit
         mismatching tokens.
 
-        raises Stepper.PreSyncTokenError if the sync_pre queues emit a non-end
+        raises Stepper.PreSyncTokenError if the sync_from queues emit a non-end
         token.
         """
         if not self.pre_sync_met:
-            while (token := await self._get_across(self.sync_pre,
-                    qtype="sync_pre")) != self.end:
+            while (token := await self._get_across(self.sync_from,
+                    qtype="sync_from")) != self.end:
                 raise Stepper.PreSyncTokenError(
-                        f"Got non-end token {token!r} from sync_pre queues"
-                        f" {self.fmtqueues(self.sync_pre)}")
+                        f"Got non-end token {token!r} from sync_from queues"
+                        f" {self.fmtqueues(self.sync_from)}")
             self.pre_sync_met = True
 
 
     async def get(self):
-        """Pre-sync, then wait for all sync_across queues to emit their next token.
+        """Pre-sync, then wait for all pull_from queues to emit their next token.
 
-        Raises Stepper.DesynchronizationError if the sync_across queues don't
+        Raises Stepper.DesynchronizationError if the pull_from queues don't
         all report matching tokens.
         """
         await self.pre_sync()
-        self.value = await self._get_across(self.sync_across, "sync_across")
+        self.value = await self._get_across(self.pull_from, "pull_from")
         return self.value
 
 
     async def put(self, token):
         """Put token into each send_to queue.
 
-        If the token is the end token, put it in the send_post queue.
+        If the token is the end token, put it in the sync_to queue.
         """
         for q in self.send_to:
             await q.put(token)
@@ -1396,10 +1396,10 @@ class Stepper:
             self.log(f"put({token}) -> {self.fmtqueues(self.send_to)}")
 
         if token == self.end:
-            for q in self.send_post:
+            for q in self.sync_to:
                 await q.put(token)
-            if self.send_post:
-                self.log(f"put({token}) -> end-queues: {self.fmtqueues(self.send_post)}")
+            if self.sync_to:
+                self.log(f"put({token}) -> end-queues: {self.fmtqueues(self.sync_to)}")
 
     async def step(self):
         """Simplify the standard while loop idiom.
@@ -1430,7 +1430,7 @@ class Stepper:
         The given args and kwargs are passed through to each invocation of
         coro, along with the following special keyword arguments:
 
-            * token: the last recieved token from the sync_across queues
+            * token: the last recieved token from the pull_from queues
             * stepper: the stepper instance used for the walk
         """
         while await self.step():
@@ -1439,12 +1439,15 @@ class Stepper:
 
 class StepNetwork:
     """Auto-wired DAG of Steppers and their step coroutines"""
-    def __init__(self, name):
+    def __init__(self, name, end=None):
         self.name = name
+        self.end = end
+
         # Coroutine to Stepper instance maps
         self.producers = {}  # coro -> (args, kwargs)
         self.steps = {}      # coro -> (args, kwargs)
         self.consumers = {}  # coro -> (args, kwargs)
+
         # Plan:
         # * Add args, kwargs, step (coro) to Stepper
         # * Remove name from Stepper, use step.__name__
@@ -1455,7 +1458,7 @@ class StepNetwork:
 
         Producer coroutines are not automatically stepped, unlike step
         coroutines.  They define the start of the workunit network pipeline,
-        so they do not have inbound sync_from or get_from queues.
+        so they do not have inbound sync_from or pull_from queues.
         """
         pass
 
@@ -1773,35 +1776,35 @@ async def run_tasks(args):
             send_to=[q.setup2listen, q.setup2flacenc])),
 
         Stepper("listen",
-            sync_across=q.setup2listen,
+            pull_from=q.setup2listen,
             send_to=q.listen2prompt,
         ).walk(task_listen, worklist),
 
         Stepper("prompt",
-            sync_across=q.listen2prompt,
+            pull_from=q.listen2prompt,
             send_to=q.prompt2pargen,
         ).walk(task_prompt, worklist),
 
         Stepper("flacenc",
-            sync_across=q.setup2flacenc,
+            pull_from=q.setup2flacenc,
             send_to=[q.flacenc2pargen, q.flacenc2xdelta],
-            send_post=q.flacenc2xdelta_sync,
+            sync_to=q.flacenc2xdelta_sync,
         ).walk(task_flacenc, worklist),
 
         Stepper("pargen",
-            sync_across=[q.prompt2pargen, q.flacenc2pargen],
+            pull_from=[q.prompt2pargen, q.flacenc2pargen],
             send_to=q.pargen2cleanup,
         ).walk(task_pargen, worklist),
 
         Stepper("xdelta",
-            sync_pre=q.flacenc2xdelta_sync,
-            sync_across=q.flacenc2xdelta,
-            send_post=q.xdelta2cleanup_sync,
+            sync_from=q.flacenc2xdelta_sync,
+            pull_from=q.flacenc2xdelta,
+            sync_to=q.xdelta2cleanup_sync,
         ).walk(task_xdelta, worklist),
 
         Stepper("cleanup",
-            sync_pre=q.xdelta2cleanup_sync,
-            sync_across=q.pargen2cleanup,
+            sync_from=q.xdelta2cleanup_sync,
+            pull_from=q.pargen2cleanup,
         ).walk(task_cleanup, worklist),
     )
 
