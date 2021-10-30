@@ -1646,8 +1646,8 @@ class TransferInfo(types.SimpleNamespace):
     on the wav files that exist and any in-progress transfer directories
     in the destination directory.
 
-    These objects are stored in worklist array, which each task indexes into
-    based on the tokens it gets from its incoming Stepper queues.
+    These objects are stored in the worklist, which each task indexes into
+    based on the tokens it gets from walking its incoming Stepper queues.
     """
 
     source_wav = None
@@ -1667,11 +1667,18 @@ class TransferInfo(types.SimpleNamespace):
 #============================================================================
 
 def act(msg):
+    """Logs the given message according to whether it will be executed or not.
+
+    Returns Config.act
+
+    This should be used to protect any code that modifies the filesystem.
+    """
     if Config.act:
         dbg("Act -", msg)
     else:
         dbg("Skip -", msg)
     return Config.act
+
 
 async def task_setup(args, worklist, stepper):
     if args.continue_from:
@@ -1699,6 +1706,7 @@ async def task_setup(args, worklist, stepper):
         await asyncio.sleep(0) # Let the work begin
 
     await stepper.put(None)
+
 
 async def task_listen(worklist, *, token, stepper):
     dbg(f"****** Listen working on {token} *******")

@@ -1913,7 +1913,7 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture):
     async def test_empty_runtasks(self):
         dest = Path("dest_foo")
         dest.mkdir()
-        await taketake.run_tasks(argparse.Namespace(
+        await taketake.run_tasks(args=argparse.Namespace(
                 continue_from=None,
                 dest=Path("dest_foo"),
                 wavs=pathlist("foo.wav bar.wav"),
