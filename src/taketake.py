@@ -1436,6 +1436,29 @@ class Stepper:
         while await self.step():
             await coro(*args, **kwargs, token=self.value, stepper=self)
 
+
+class StepNetwork:
+    """Auto-wired DAG of Steppers and their step coroutines"""
+    def __init__(self, name):
+        self.name = name
+        # Coroutine to Stepper instance maps
+        self.producers = {}  # coro -> (args, kwargs)
+        self.steps = {}      # coro -> (args, kwargs)
+        self.consumers = {}  # coro -> (args, kwargs)
+        # Plan:
+        # * Add args, kwargs, step (coro) to Stepper
+        # * Remove name from Stepper, use step.__name__
+        # * Fill queue lists from StepNetwork
+
+    def add_producer(self, coro, *args, send_to, sync_to, **kwargs):
+        """Add a producer into the StepNetwork.
+
+        Producer coroutines are not automatically stepped, unlike step
+        coroutines.  They define the start of the workunit network pipeline,
+        so they do not have inbound sync_from or get_from queues.
+        """
+        pass
+
 #============================================================================
 # Phase A: Encode - encode flacs, rename, generate pars
 #============================================================================
