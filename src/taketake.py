@@ -1294,6 +1294,10 @@ class Stepper:
     The end of the sequence should be indicated be the given end token.
     Each sync_ and send_ parameter should be None, an asyncio.Queue with a
     .name attr as returned by make_queues, or a list of such.
+
+    The step() and walk() methods provide high-level interfaces for easily
+    building a network of tasks with the same set of data flowing through
+    each.
     """
     def __init__(self, name=None, sync_pre=None, sync_across=None,
             send_to=None, send_post=None, end=None):
@@ -1420,6 +1424,17 @@ class Stepper:
             self.log(f"[Executing step {self.value!r}]")
         return not done
 
+    async def walk(self, coro, *args, **kwargs):
+        """Repeatedly await the given coro using step().
+
+        The given args and kwargs are passed through to each invocation of
+        coro, along with the following special keyword arguments:
+
+            * token: the last recieved token from the sync_across queues
+            * stepper: the stepper instance used for the walk
+        """
+        while await self.step():
+            await coro(*args, **kwargs, token=self.value, stepper=self)
 
 #============================================================================
 # Phase A: Encode - encode flacs, rename, generate pars
@@ -1681,36 +1696,27 @@ async def task_setup(args, worklist, stepper):
 
         worklist.append(info)
         await stepper.put(len(worklist) - 1)
+        await asyncio.sleep(0) # Let the work begin
 
     await stepper.put(None)
 
-async def task_listen(worklist, stepper):
-    while await stepper.step():
-        dbg(f"****** Listen working on {stepper.value} *******")
-        pass
+async def task_listen(worklist, *, token, stepper):
+    dbg(f"****** Listen working on {token} *******")
 
-async def task_prompt(worklist, stepper):
-    while await stepper.step():
-        pass
+async def task_prompt(worklist, *, token, stepper):
+    pass
 
-async def task_flacenc(worklist, stepper):
-    while await stepper.step():
-        pass
+async def task_flacenc(worklist, *, token, stepper):
+    pass
 
-async def task_pargen(worklist, stepper):
-    while await stepper.step():
-        pass
+async def task_pargen(worklist, *, token, stepper):
+    pass
 
-async def task_xdelta(worklist, stepper):
-    while await stepper.step():
-        pass
+async def task_xdelta(worklist, *, token, stepper):
+    pass
 
-async def task_cleanup(worklist, stepper):
-    while await stepper.step():
-        pass
-
-async def task_finish(worklist, stepper):
-    await stepper.get()
+async def task_cleanup(worklist, *, token, stepper):
+    pass
 
 #============================================================================
 # Main sequence
@@ -1724,7 +1730,7 @@ async def run_tasks(args):
         prompt2pargen flacenc2pargen
         flacenc2xdelta flacenc2xdelta_sync
         pargen2cleanup xdelta2cleanup_sync
-        cleanup2finish_sync""")
+        """)
 
     worklist = []
 
@@ -1732,36 +1738,40 @@ async def run_tasks(args):
         task_setup(args, worklist, Stepper("setup",
             send_to=[q.setup2listen, q.setup2flacenc])),
 
-        task_listen(worklist, Stepper("listen",
+        Stepper("listen",
             sync_across=q.setup2listen,
-            send_to=q.listen2prompt)),
+            send_to=q.listen2prompt,
+        ).walk(task_listen, worklist),
 
-        task_prompt(worklist, Stepper("prompt",
+        Stepper("prompt",
             sync_across=q.listen2prompt,
-            send_to=q.prompt2pargen)),
+            send_to=q.prompt2pargen,
+        ).walk(task_prompt, worklist),
 
-        task_flacenc(worklist, Stepper("flacenc",
+        Stepper("flacenc",
             sync_across=q.setup2flacenc,
             send_to=[q.flacenc2pargen, q.flacenc2xdelta],
-            send_post=q.flacenc2xdelta_sync)),
+            send_post=q.flacenc2xdelta_sync,
+        ).walk(task_flacenc, worklist),
 
-        task_pargen(worklist, Stepper("pargen",
+        Stepper("pargen",
             sync_across=[q.prompt2pargen, q.flacenc2pargen],
-            send_to=q.pargen2cleanup)),
+            send_to=q.pargen2cleanup,
+        ).walk(task_pargen, worklist),
 
-        task_xdelta(worklist, Stepper("xdelta",
+        Stepper("xdelta",
             sync_pre=q.flacenc2xdelta_sync,
             sync_across=q.flacenc2xdelta,
-            send_post=q.xdelta2cleanup_sync)),
+            send_post=q.xdelta2cleanup_sync,
+        ).walk(task_xdelta, worklist),
 
-        task_cleanup(worklist, Stepper("cleanup",
+        Stepper("cleanup",
             sync_pre=q.xdelta2cleanup_sync,
             sync_across=q.pargen2cleanup,
-            send_post=q.cleanup2finish_sync)),
-
-        task_finish(worklist, Stepper("finish",
-            sync_pre=q.cleanup2finish_sync)),
+        ).walk(task_cleanup, worklist),
     )
+    # TODO do finish tasks
+    dbg("run_tasks() done")
 
 
 def run_tests_in_subprocess():
