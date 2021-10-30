@@ -1718,6 +1718,9 @@ async def task_xdelta(worklist, *, token, stepper):
 async def task_cleanup(worklist, *, token, stepper):
     pass
 
+async def task_finish(worklist):
+    dbg("in task_finish()")
+
 #============================================================================
 # Main sequence
 #============================================================================
@@ -1770,9 +1773,8 @@ async def run_tasks(args):
             sync_across=q.pargen2cleanup,
         ).walk(task_cleanup, worklist),
     )
-    # TODO do finish tasks
-    dbg("run_tasks() done")
 
+    await task_finish(worklist)
 
 def run_tests_in_subprocess():
     """Run unittests in test_taketake.py.
