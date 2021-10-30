@@ -851,7 +851,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(d[n].name, n)
 
     async def test_pre_sync(self):
-        d = taketake.make_queues("coms")
+        d = taketake.make_queues("coms coms_sync")
         runlist = []
 
         async def finisher(stepper):
@@ -876,11 +876,14 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
 
         await asyncio.gather(
-                finisher(taketake.Stepper(sync_pre=d.coms)),
-                goer(taketake.Stepper(send_to=d.coms)),
+                finisher(taketake.Stepper("finisher",
+                    sync_pre=d.coms_sync, sync_across=d.coms)),
+                goer(taketake.Stepper("goer",
+                    send_to=d.coms, send_post=d.coms_sync)),
                 )
 
-        self.assertEqual(runlist, ['finisher', 'goer', '-0', '+0', '-1', '+1', '-None', 'done', '+None'])
+        self.assertEqual(runlist,
+                ['finisher', 'goer', '-0', '+0', '-1', '+1', '-None', 'done', '+None'])
 
     async def test_join(self):
         d = taketake.make_queues("q1 q2 q3")
