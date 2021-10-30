@@ -1187,25 +1187,45 @@ class Test6_args(CdTempdirFixture):
             self.base_args.update(kwargs)
             self.assertEqual(args, self.base_args) # got != expected
 
+    def check_args_with_prepended_src(self, cmdline, *args, **kwargs):
+        """Wrap call to check_args but add a src argument.
+
+        This function creates the directory, passes the argument, and fills
+        in the sources and wavs expected args keywords.
+
+        Note - if dest is specified positionally (not with -t), then it must come first on the cmdline passed to this function.
+        """
+
+        src = Path("srcwav")
+        src.touch()
+        self.check_args(f"{src} {cmdline}",
+                *args,
+                sources=[src],
+                wavs=[src],
+                **kwargs)
+
     def test_no_args(self):
         self.check_args("",
-                "No DEST_PATH specified!")
+                "No DEST_PATH specified!",
+                "No SOURCE_WAVs specified to transfer!")
 
     def test_no_args_1c(self):
         p1 = self.mkdir_progress("foo")
         self.check_args("",
-                "No DEST_PATH specified!")
+                "No DEST_PATH specified!",
+                "No SOURCE_WAVs specified to transfer!")
 
     def test_no_args_2c(self):
         self.mkdir_progress("foo")
         self.mkdir_progress("bar")
         self.check_args("",
-                "No DEST_PATH specified!")
+                "No DEST_PATH specified!",
+                "No SOURCE_WAVs specified to transfer!")
 
     def test_dest_in_positionals(self):
         d = Path("dest_foo")
         d.mkdir()
-        self.check_args(f"{d}",
+        self.check_args_with_prepended_src(f"{d}",
                 dest=d)
 
     def test_dest_in_positionals_1c_in_parent(self):
@@ -1213,7 +1233,7 @@ class Test6_args(CdTempdirFixture):
         d = Path("dest_foo")
         d.mkdir()
         p1 = self.mkdir_progress("foo")
-        self.check_args(f"{d}",
+        self.check_args_with_prepended_src(f"{d}",
                 dest=d)
 
     def test_dest_in_positionals_1c_in_dest(self):
@@ -1230,17 +1250,19 @@ class Test6_args(CdTempdirFixture):
         p1 = self.mkdir_progress("foo", d)
         p2 = self.mkdir_progress("bar", d)
         self.check_args(str(d),
-                "Too many progress directories found in DEST_PATH")
+                "Too many progress directories found in DEST_PATH",
+                "No SOURCE_WAVs specified to transfer!")
 
     def test_dest_in_option(self):
         d = Path("dest_foo")
         d.mkdir()
-        self.check_args(f"-t {d}", dest=d)
+        self.check_args_with_prepended_src(f"-t {d}", dest=d)
 
     def test_dest_in_option_nodir(self):
         d = Path("dest_foo")
         self.check_args(f"-t {d}",
-                "Specified DEST_PATH does not exist!")
+                "Specified DEST_PATH does not exist!",
+                "No SOURCE_WAVs specified to transfer!")
 
     def test_two_positionals(self):
         d = Path("dest_foo")
@@ -1373,14 +1395,14 @@ class Test6_args(CdTempdirFixture):
     def test_no_act_arg(self):
         d = Path("dest_foo")
         d.mkdir()
-        self.check_args(f"-n {d}",
+        self.check_args_with_prepended_src(f"{d} -n",
                 no_act=True,
                 dest=d)
 
     def test_debug_arg(self):
         d = Path("dest_foo")
         d.mkdir()
-        self.check_args(f"{d} -d",
+        self.check_args_with_prepended_src(f"{d} -d",
                 debug=True,
                 dest=d)
 

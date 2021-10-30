@@ -1783,9 +1783,8 @@ def validate_args(parser):
             # No progress dir entry
             err("SOURCE_WAV not found:", wav)
 
-    if not args.wavs and not args.continue_from:
-        pass
-        #err("No SOURCE_WAVs specified for transfer!")
+    if not args.sources and not args.continue_from:
+        err("No SOURCE_WAVs specified to transfer!")
 
     dbg("args post-val:", format_args(args))
 
