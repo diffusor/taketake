@@ -1327,10 +1327,13 @@ class Stepper:
     def fmtqueues(self, queues):
         return ", ".join(q.name for q in queues)
 
+    class PreSyncTokenError(RuntimeError):
+        pass
+
     class DesynchronizationError(RuntimeError):
         pass
 
-    async def _get_across(self, q_list, ident=""):
+    async def _get_across(self, q_list, qtype=""):
         last_token = None
         last_queue = None
         # sync across the next token from each stream
@@ -1345,27 +1348,36 @@ class Stepper:
             last_token = token
             last_queue = q
         if q_list:
-            self.log(f"got {last_token} from {len(q_list)} {ident}queues:"
-                    f" {self.fmtqueues(q_list)}")
+            self.log(f"got {last_token} <- {self.fmtqueues(q_list)} [{qtype}]")
         return last_token
 
 
     async def pre_sync(self):
-        """wait for end on all sync_pre Queues"""
+        """Wait for end on all sync_pre Queues.
+
+        raises Stepper.DesynchronizationError if the sync_pre queues emit
+        mismatching tokens.
+
+        raises Stepper.PreSyncTokenError if the sync_pre queues emit a non-end
+        token.
+        """
         if not self.pre_sync_met:
-            while (token := await self._get_across(self.sync_pre, "pre-")) != self.end:
-                pass
+            while (token := await self._get_across(self.sync_pre,
+                    qtype="sync_pre")) != self.end:
+                raise Stepper.PreSyncTokenError(
+                        f"Got non-end token {token!r} from sync_pre queues"
+                        f" {self.fmtqueues(self.sync_pre)}")
             self.pre_sync_met = True
 
 
     async def get(self):
         """Pre-sync, then wait for all sync_across queues to emit their next token.
 
-        Raises Stepper.DesynchronizationError of the sync_across queues don't
+        Raises Stepper.DesynchronizationError if the sync_across queues don't
         all report matching tokens.
         """
         await self.pre_sync()
-        self.value = await self._get_across(self.sync_across)
+        self.value = await self._get_across(self.sync_across, "sync_across")
         return self.value
 
 
@@ -1383,7 +1395,7 @@ class Stepper:
             for q in self.send_post:
                 await q.put(token)
             if self.send_post:
-                self.log(f"put({token}) -> end-queues: {self.fmtqueues(self.send_to)}")
+                self.log(f"put({token}) -> end-queues: {self.fmtqueues(self.send_post)}")
 
     async def step(self):
         """Simplify the standard while loop idiom.
@@ -1402,8 +1414,10 @@ class Stepper:
         await self.get()
         done = self.value == self.end
         if done:
+            self.log("[Task complete.]")
             await self.put(self.value)
-        self.log(f"step() <-", self.value, "[Done]" if done else "[Executing step]")
+        else:
+            self.log(f"[Executing step {self.value!r}]")
         return not done
 
 
@@ -1672,7 +1686,7 @@ async def task_setup(args, worklist, stepper):
 
 async def task_listen(worklist, stepper):
     while await stepper.step():
-        dbg(f"****** Listen Stepper got {stepper.value} *******")
+        dbg(f"****** Listen working on {stepper.value} *******")
         pass
 
 async def task_prompt(worklist, stepper):
