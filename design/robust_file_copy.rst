@@ -24,7 +24,7 @@ index ready for getting.  After processing the index, the actor puts that
 index into all its outbound queues.  A terminal token is used to indicate that
 there are no more items to process.
 
-0. Verify all unit tests pass and process command line arguments
+0. Verify all unit tests pass; process and validate command line arguments
 
 1. **setup**: *[global]* Determine wavs to process
 
@@ -81,7 +81,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
    ``setup => [flacenc] => pargen``
 
    a. If ``.in_progress.flac`` exists, rename it to
-      ``.interrupted-abandoned.`` *timestamp* ``.flac``
+      ``.interrupted-abandoned.$datestamp.flac``
 
    b. If ``.encoded.flac`` exists, skip to the final step in the task (decache
       the wav)
@@ -149,7 +149,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
         .source.wav -> /absolute/path/to/source/audio001.wav
         .filename_guess
         .filename_provided
-        [.interrupted-abandoned.timestamp.flac if any]
+        [.interrupted-abandoned.$datestamp.flac if any]
         .encoded.flac [was .in_progress.flac]
         $filename_provided.flac -> .encoded.flac
         $filename_provided.flac.vol0000+500.par2

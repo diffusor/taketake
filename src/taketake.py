@@ -106,13 +106,17 @@ class Config:
     par2_base_blocksize = 4096      # A multiple of this is used to avoid the 32K limit
     par2_max_num_blocks = 10000     # par2 doesn't support more than 32K num blocks, but gets unweildy with a lot of blocks anyway, so limit things a bit
 
-    wav_extensions = "wav WAV".split()
-    progress_dir_fmt = ".taketake.{0}.tmp"
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
 
+    wav_extensions = "wav WAV"
+    progress_dir_fmt = ".taketake.{}.tmp"
     source_wav_linkname = ".source.wav"
-
+    interrupted_flac_fmt = ".interrupted-abandoned.{}.flac"
+    guess_fname = ".filename_guess"
+    provided_fname = ".filename_provided"
+    dest_fname_fmt = "{prefix}.{datestamp}.{notes}{duration}.{orig_fname}"
+    xdelta_fname = ".xdelta"
 
 @dataclass
 class TimeRange:
@@ -717,12 +721,38 @@ def flush_fs_caches(*files):
         if ret != 0:
             raise RuntimeError("fadvise failed, could not flush file from cache: " + f)
 
+def get_wavs_in(source, other_wavs=None):
+    """Search the given source pathlib.Path instance for wav files.
+
+    Do a set-union across the found wavs and those in other_wavs.
+    Uses Config.wav_extensions as the pattern.
+    Return a sorted list of resulting pathlib.Path instances.
+    """
+
+    # The globs may match the same file multiple times,
+    # so make sure they are unique
+    if other_wavs is None:
+        other_wavs = set()
+    for ext in Config.wav_extensions.split():
+        other_wavs |= set(source.glob(f"*.{ext}"))
+    return sorted(other_wavs)
 
 def set_mtime(f, dt):
     """Update the timestamp of the given file f to the given datetime dt"""
     seconds = dt.timestamp()
     os.utime(f, (seconds,)*2)
 
+def inject_timestamp(fmt, when=None):
+    """Format the time into the given fmt string.
+
+    fmt must contain a single {} which indicates where the timestamp goes.
+    Config.timestamp_fmt_with_seconds is used to format the time.
+    If when is None, the current time is encoded.
+    Otherwise, when should be an object for which strftime is defined.
+    """
+    if when is None:
+        when = datetime.datetime.now()
+    return fmt.format(when.strftime(Config.timestamp_fmt_with_seconds))
 
 #============================================================================
 # Audio file processing
@@ -1216,7 +1246,9 @@ async def process_file_speech(finfo):
         else:
             notes = ""
 
-        finfo.suggested_filename = f"{finfo.instrument}.{tstr}.{notes}{dstr}.{finfo.orig_filename}"
+        finfo.suggested_filename = Config.dest_fname_fmt.format(
+                prefix=finfo.instrument, datestamp=tstr,
+                notes=notes, duration=dstr, orig_fname=finfo.orig_filename)
         print(f"Speechinizer: {finfo.orig_filename!r} - {finfo.orig_speech!r} -> {finfo.suggested_filename!r}")
 
     except (NoSuitableAudioSpan, TimestampGrokError) as e:
@@ -1553,7 +1585,7 @@ class TransferInfo(types.SimpleNamespace):
 
     src_fpath = None
     dest_dir = None
-    progress_dir = None
+    wav_progress_dir = None # per-wav
 
     fname_guess = None
     fname_prompted = None
@@ -1566,6 +1598,14 @@ class TransferInfo(types.SimpleNamespace):
 #============================================================================
 
 async def task_setup(args, worklist, stepper):
+    if args.continue_from:
+        progress_dir = args.continue_from
+    else:
+        progress_dir = args.dest / inject_timestamp(Config.progress_dir_fmt)
+
+    # Gather wavs to transfer from args.wav and progress_dir
+    wavs = get_wavs_in(progress_dir, args.wavs)
+
     await stepper.put(None)
 
 async def task_listen(worklist, stepper):
@@ -1715,12 +1755,7 @@ def validate_args(parser):
                     "\n    other SOURCE_WAVs:",
                     f"[{' '.join(str(d) for d in others)}]")
 
-            # The globs may match the same file multiple times,
-            # so make sure they are unique
-            new_wavs = set()
-            for ext in Config.wav_extensions:
-                new_wavs |= set(source.glob(f"*.{ext}"))
-            args.wavs = sorted(new_wavs)
+            args.wavs = get_wavs_in(source)
             break
 
         else:
@@ -1750,7 +1785,8 @@ def validate_args(parser):
 
     elif not args.continue_from:
         # Check for interrupted progress directories in dest
-        progress_dirs = sorted(Path(args.dest).glob(Config.progress_dir_fmt.format("*")))
+        progress_dirs = sorted(Path(args.dest).glob(
+            Config.progress_dir_fmt.format("*")))
         if len(progress_dirs) > 1:
             sep = "\n      "
             err("Too many progress directories found in DEST_PATH:", args.dest,
@@ -1785,6 +1821,8 @@ def validate_args(parser):
 
     if not args.sources and not args.continue_from:
         err("No SOURCE_WAVs specified to transfer!")
+
+    # FIXME all wavs should come from the same directory!
 
     dbg("args post-val:", format_args(args))
 
