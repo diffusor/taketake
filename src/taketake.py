@@ -1786,8 +1786,8 @@ def process_args(argv=None):
             formatter_class=argparse.RawDescriptionHelpFormatter)
     arg = parser.add_argument
 
-    #arg('-n', '--no-act', action='store_true',
-    #    help="Do not do anything, just summarize what would be done")
+    arg('-n', '--no-act', action='store_true',
+        help="Do everything but modify filesystems or prompt the user")
 
     arg('-d', '--debug', action='store_true',
         help="Show debug output, including tracebacks from exceptions")

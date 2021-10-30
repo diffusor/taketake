@@ -1135,6 +1135,7 @@ class Test6_args(CdTempdirFixture):
         self.base_args = dict(
                 _dest=None,
                 debug=False,
+                no_act=False,
                 prefix=None,
                 keep_wavs=False,
                 skip_copyback=False,
@@ -1368,6 +1369,13 @@ class Test6_args(CdTempdirFixture):
                 "--continue was specified, but so was DEST_PATH: foodest",
                 "PROGRESS_DIR does not exist! Got: --continue nodir",
                 "temp wavfile exists in progress dir but is not a directory! nodir/foosrc")
+
+    def test_no_act_arg(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        self.check_args(f"-n {d}",
+                no_act=True,
+                dest=d)
 
     @unittest.SkipTest  # Turning on debug is too verbose for a test!
     def test_debug_arg(self):
