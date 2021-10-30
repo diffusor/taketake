@@ -1646,11 +1646,17 @@ async def run_tasks(args):
 
 
 def run_tests_in_subprocess():
+    """Run unittests in test_taketake.py.
+
+    Use a subprocess so the tests won't be affected by or use the current Config.
+    Also buffer the stdout/stderr to keep noisy tests quiet.
+    """
+
     file_dir = Path(__file__).resolve().parent
     test_script = str(file_dir / 'tests' / 'test_taketake.py')
 
     print("Ensuring taketake ecosystem integrity - running", test_script)
-    p = subprocess.run([test_script])
+    p = subprocess.run([test_script, "-b"])
     if p.returncode != 0:
         print("taketake pre-testing failed!  Aborting.")
         sys.exit(1)
@@ -1776,6 +1782,10 @@ def validate_args(parser):
         elif not wav.is_file():
             # No progress dir entry
             err("SOURCE_WAV not found:", wav)
+
+    if not args.wavs and not args.continue_from:
+        pass
+        #err("No SOURCE_WAVs specified for transfer!")
 
     dbg("args post-val:", format_args(args))
 

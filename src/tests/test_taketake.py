@@ -1377,9 +1377,12 @@ class Test6_args(CdTempdirFixture):
                 no_act=True,
                 dest=d)
 
-    @unittest.SkipTest  # Turning on debug is too verbose for a test!
     def test_debug_arg(self):
-        self.check_args("-d", debug=True)
+        d = Path("dest_foo")
+        d.mkdir()
+        self.check_args(f"{d} -d",
+                debug=True,
+                dest=d)
 
 
 class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
