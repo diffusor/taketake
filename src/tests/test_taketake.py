@@ -1320,16 +1320,32 @@ class Test6_args(CdTempdirFixture):
         source = Path("wav_foo")
         path_to_source = d / p1 / source
         path_to_source.mkdir()
+
+        wrongsource = Path("foo")
+        wrongsource.touch()
+        linkback = path_to_source / taketake.Config.source_wav_linkname
+        linkback.symlink_to(wrongsource.resolve())
+        self.check_args(f"{source} {d}",
+                f"wav progress symlink resolves to a different file than the specified SOURCE_WAV file!")
+
+    def test_progress_wav_src_link_to_wrong_file_wavext(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        p1 = self.mkdir_progress("foo", d)
+        source = Path("wav_foo.wav")
+        path_to_source = d / p1 / source
+        path_to_source.mkdir()
         linkback = path_to_source / taketake.Config.source_wav_linkname
         linkback.symlink_to("foo")
         self.check_args(f"{source} {d}",
-                f"temp symlink tracker doesn't link back to the specified wav file!")
+                f"wav progress symlink resolves to a different file than the specified SOURCE_WAV file!")
 
     def test_progress_wav_src_link_to_correct_file(self):
         d = Path("dest_foo")
         d.mkdir()
         p1 = self.mkdir_progress("foo", d)
         source = Path("wav_foo")
+        source.touch()
         path_to_source = d / p1 / source
         path_to_source.mkdir()
         linkback = path_to_source / taketake.Config.source_wav_linkname
@@ -1339,6 +1355,53 @@ class Test6_args(CdTempdirFixture):
                 dest=d,
                 sources=[source],
                 wavs=[source])
+
+    def test_progress_wav_src_link_to_correct_file_wavext(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        p1 = self.mkdir_progress("foo", d)
+        source = Path("wav_foo.wav")
+        source.touch()
+        path_to_source = d / p1 / source
+        path_to_source.mkdir()
+        linkback = path_to_source / taketake.Config.source_wav_linkname
+        linkback.symlink_to(source.resolve())
+        self.check_args(f"{source} {d}",
+                continue_from=d/p1,
+                dest=d,
+                sources=[source],
+                wavs=[source])
+
+    def test_progress_wav_only_good(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        p1 = self.mkdir_progress("foo", d)
+        source = Path("wav_foo.wav")
+        source.touch()
+        path_to_source = d / p1 / source
+        path_to_source.mkdir()
+        linkback = path_to_source / taketake.Config.source_wav_linkname
+        linkback.symlink_to(source.resolve())
+        self.check_args(f"-c {d/p1}",
+                continue_from=d/p1,
+                dest=d,
+                sources=[],
+                wavs=[source.resolve()])
+
+    def test_progress_wav_noexist(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        p1 = self.mkdir_progress("foo", d)
+        source = Path("wav_foo.wav")
+        path_to_source = d / p1 / source
+        path_to_source.mkdir()
+        linkback = path_to_source / taketake.Config.source_wav_linkname
+        linkback.symlink_to(source.resolve())
+        self.check_args(f"-c {d/p1}",
+                continue_from=d/p1,
+                dest=d,
+                sources=[],
+                wavs=[source.resolve()])
 
     def inject_dir_among_wavs(self, i):
         d = Path("dest_foo")
@@ -1391,6 +1454,15 @@ class Test6_args(CdTempdirFixture):
                 "--continue was specified, but so was DEST_PATH: foodest",
                 "PROGRESS_DIR does not exist! Got: --continue nodir",
                 "temp wavfile exists in progress dir but is not a directory! nodir/foosrc")
+
+    def test_duplicate_wavnames(self):
+        self.check_args(f"a/1.wav b/1.wav c/2.wav c/2.wav dest",
+                "Specified DEST_PATH does not exist!",
+                *(["SOURCE_WAV not found"] * 3),
+                r"Duplicate wavfiles names specified!"
+                r" *\n *1.wav -> a/1.wav, b/1.wav"
+                r" *\n *2.wav -> c/2.wav, c/2.wav",
+                )
 
     def test_no_act_arg(self):
         d = Path("dest_foo")
@@ -1833,10 +1905,16 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
 # File processing integration tests
 #===========================================================================
 
-class Test8_tasks(unittest.IsolatedAsyncioTestCase):
+class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture):
     """Test task processing in taketake"""
     async def test_empty_runtasks(self):
-        await taketake.run_tasks(None)
+        dest = Path("dest_foo")
+        dest.mkdir()
+        await taketake.run_tasks(argparse.Namespace(
+                continue_from=None,
+                dest=Path("dest_foo"),
+                wavs=pathlist("foo.wav bar.wav"),
+            ))
 
 if __name__ == '__main__':
     unittest.main()

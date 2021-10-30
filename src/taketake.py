@@ -91,6 +91,7 @@ from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.key_binding import KeyBindings
 
 class Config:
+    act = True
     debug = False
     dbg_prog = "taketake"
     prog = sys.argv[0]
@@ -737,6 +738,17 @@ def get_wavs_in(source, other_wavs=None):
         other_wavs |= set(source.glob(f"*.{ext}"))
     return sorted(other_wavs)
 
+def find_duplicate_basenames(paths):
+    """Return a dict mapping duplicate basenames to their full paths."""
+    pathmap = collections.defaultdict(list)
+    for p in paths:
+        pathmap[p.name].append(p)
+    # Remove any entries that only have one item in their associated list
+    for name in list(pathmap):
+        if len(pathmap[name]) == 1:
+            del pathmap[name]
+    return pathmap
+
 def set_mtime(f, dt):
     """Update the timestamp of the given file f to the given datetime dt"""
     seconds = dt.timestamp()
@@ -1293,6 +1305,10 @@ class Stepper:
         self.send_post = self._de_nonify(send_post)
         self.end = end
 
+        self.value = end # last gotten value
+        self.saw_end = False
+        self.in_step = False
+
         self.pre_sync_met = False
 
     def _de_nonify(self, qparam):
@@ -1308,7 +1324,7 @@ class Stepper:
             raise RuntimeError(f"Invalid queue parameter {qparam!r}")
 
     def log(self, msg):
-        #print(f" *Stepper<{self.name}>* : {msg}")
+        dbg(f" *Stepper<{self.name}>* : {msg}")
         pass
 
     def fmtqueues(self, queues):
@@ -1352,22 +1368,47 @@ class Stepper:
         all report matching tokens.
         """
         await self.pre_sync()
-        return await self._get_across(self.sync_across)
+        self.value = await self._get_across(self.sync_across)
+        if self.value == self.end:
+            #dbg(f"Stepper({self.name}).get: saw_end=True")
+            self.saw_end = True
+        return self.value
 
 
     async def put(self, token):
         for q in self.send_to:
             await q.put(token)
         if self.send_to:
-            self.log(f"sent {token} to {len(self.send_to)} queues:"
-                    f" {self.fmtqueues(self.send_to)}")
+            self.log(f"put({token}) -> {self.fmtqueues(self.send_to)}")
 
         if token == self.end:
             for q in self.send_post:
                 await q.put(token)
             if self.send_post:
-                self.log(f"sent {token} to {len(self.send_post)} endqueues:"
-                        f" {self.fmtqueues(self.send_post)}")
+                self.log(f"put({token}) -> enqueues: {self.fmtqueues(self.send_to)}")
+
+    async def step(self):
+        """Simplify the standard while loop idiom.
+
+        Equivalent to:
+            while (i := await stepper.get()) is not None:
+                dbg(f"Step({stepper.name}) - {i}")
+                await stepper.put(i)
+            await stepper.put(None)
+        """
+        if self.in_step:
+            await self.put(self.value)
+
+        if self.saw_end:
+            self.in_step = False
+            return False
+
+        else:
+            self.in_step = True
+            await self.get()
+            dbg(f"Stepper({self.name}).step() -> {self.value}")
+            return True
+
 
 #============================================================================
 # Phase A: Encode - encode flacs, rename, generate pars
@@ -1583,9 +1624,11 @@ class TransferInfo(types.SimpleNamespace):
     based on the tokens it gets from its incoming Stepper queues.
     """
 
-    src_fpath = None
+    source_wav = None
+    wav_abspath = None
     dest_dir = None
-    wav_progress_dir = None # per-wav
+    wav_progress_dir = None
+    source_link = None
 
     fname_guess = None
     fname_prompted = None
@@ -1597,40 +1640,62 @@ class TransferInfo(types.SimpleNamespace):
 # Tasks
 #============================================================================
 
+def act(msg):
+    if Config.act:
+        dbg("Act -", msg)
+    else:
+        dbg("Skip -", msg)
+    return Config.act
+
 async def task_setup(args, worklist, stepper):
     if args.continue_from:
         progress_dir = args.continue_from
     else:
         progress_dir = args.dest / inject_timestamp(Config.progress_dir_fmt)
+        if act(f"create main progress dir {progress_dir}"):
+            progress_dir.mkdir()
 
-    # Gather wavs to transfer from args.wav and progress_dir
-    wavs = get_wavs_in(progress_dir, args.wavs)
+    for wav in args.wavs:
+        info = TransferInfo(
+                source_wav=wav,
+                wav_abspath=os.path.abspath(wav),
+                dest_dir=args.dest,
+                wav_progress_dir=progress_dir / wav.name,
+                source_link=progress_dir / wav.name / Config.source_wav_linkname,
+            )
+
+        if act(f"create wav progress dir {wav.name} and symlink to {info.wav_abspath}"):
+            info.wav_progress_dir.mkdir()
+            info.source_link.symlink_to(info.wav_abspath)
+
+        worklist.append(info)
+        await stepper.put(len(worklist) - 1)
 
     await stepper.put(None)
 
 async def task_listen(worklist, stepper):
-    await stepper.get()
-    await stepper.put(None)
+    while await stepper.step():
+        pass
 
 async def task_prompt(worklist, stepper):
-    await stepper.get()
-    await stepper.put(None)
+    while await stepper.step():
+        pass
 
 async def task_flacenc(worklist, stepper):
-    await stepper.get()
-    await stepper.put(None)
+    while await stepper.step():
+        pass
 
 async def task_pargen(worklist, stepper):
-    await stepper.get()
-    await stepper.put(None)
+    while await stepper.step():
+        pass
 
 async def task_xdelta(worklist, stepper):
-    await stepper.get()
-    await stepper.put(None)
+    while await stepper.step():
+        pass
 
 async def task_cleanup(worklist, stepper):
-    await stepper.get()
-    await stepper.put(None)
+    while await stepper.step():
+        pass
 
 async def task_finish(worklist, stepper):
     await stepper.get()
@@ -1723,6 +1788,14 @@ def format_args(args):
 def validate_args(parser):
     """Validates arguments processed by the parser and set in parser.args.
 
+    If --target wasn't specified, removes the last item from args.sources
+    and sets it as the dest arg.
+
+    If args.continue_from isn't set, sets it to the progress dir in dest if it
+    exists.
+
+    Builds args.wavs from the remaining args.sources and the args.progress_dir.
+
     Sets parser.args.dest and check for consistency, including dir existance.
     Sets parser.errors, which is a list of errors encountered during parsing.
     """
@@ -1735,6 +1808,9 @@ def validate_args(parser):
     # debug must be set prior to the first call to dbg()
     if args.debug:
         Config.debug = True
+
+    if args.no_act:
+        Config.act = False
 
     dbg("args pre-val: ", format_args(args))
 
@@ -1772,8 +1848,10 @@ def validate_args(parser):
 
         # Override dest when continuing from a progress dir
         p = args.continue_from
-        # Try to stay relative and with symlinks unresolved.
+        # Try to stay relative and with symlinks unresolved,
         if p.name == "." or p.name == "..":
+            # But if the continue_from is relative via . or ..,
+            # we have to resolve it.
             p = p.resolve()
         args.dest = p.parent
 
@@ -1811,10 +1889,10 @@ def validate_args(parser):
             elif not srclink.is_symlink():
                 err("temp wavfile tracker is not a symlink!", srclink)
             elif wav.resolve() != srclink.resolve():
-                err("temp symlink tracker doesn't link back to the "
-                    "specified wav file!"
-                    f"\n    SOURCE_WAV: {wav} -> {wav.resolve()}"
-                    f"\n    Symlink:    {srclink} -> {srclink.resolve()}")
+                err("wav progress symlink resolves to a different file than the "
+                    "specified SOURCE_WAV file!"
+                    f"\n    progress:   {srclink} -> {srclink.resolve()}"
+                    f"\n    SOURCE_WAV: {wav} -> {wav.resolve()}")
         elif not wav.is_file():
             # No progress dir entry
             err("SOURCE_WAV not found:", wav)
@@ -1822,7 +1900,31 @@ def validate_args(parser):
     if not args.sources and not args.continue_from:
         err("No SOURCE_WAVs specified to transfer!")
 
-    # FIXME all wavs should come from the same directory!
+    # Ensure args.wavs have unique basenames
+    dups = find_duplicate_basenames(args.wavs)
+    if dups:
+        sep = "\n      "
+        err("Duplicate wavfiles names specified!",
+            *[f"\n      {n} -> {', '.join(str(p) for p in paths)}"
+                for n, paths in dups.items()])
+
+    # inject wavs from args.continue_from into args.wavs
+    if args.continue_from:
+        # map basename to fullname
+        src_wavs_dict = {w.name: w for w in args.wavs}
+        for wav in args.continue_from.glob("*"):
+            if wav.is_dir():
+                wavlink = wav / Config.source_wav_linkname
+                if wav.name not in src_wavs_dict:
+                    # Need the link target so we can copy-back the flac
+                    # to the right place.
+                    args.wavs.append(wavlink.readlink())
+                # Can't check this since we use this symlink to point back to
+                # the original wav dir for flac copy-back
+                #if not wavlink.exists():
+                #    err(f"Broken progress dir symlink:"
+                #        f"\n       {wavlink}"
+                #        f"\n    -> {wavlink.resolve()}")
 
     dbg("args post-val:", format_args(args))
 
