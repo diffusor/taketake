@@ -1541,7 +1541,7 @@ class StepNetwork:
             f"Already added {side} side of {link}:" \
             f"\n  {q}" \
             f"\n  in {qdict}"
-        setattr(q, side, True)
+        setattr(q, side, getattr(link, side).__name__)
         return q
 
     def _add_link_queues(self, stepper_qlist, qdict, src, dest):
@@ -1607,7 +1607,7 @@ class StepNetwork:
                 assert getattr(q, side), \
                     f"{getattr(link, side).__name__} missing " \
                     f"{self.side_q_names[(other_side, qdict.name)]} queue link " \
-                    f"to {getattr(link, other_side).__name__} in {link}"
+                    f"to {getattr(link, other_side).__name__} in {q}"
 
     def check_queues(self):
         """Ensure all queues are wired up properly, assert if not."""
@@ -1880,54 +1880,55 @@ def act(msg):
     return Config.act
 
 
-async def task_setup(cmdargs, worklist, stepper):
-    if cmdargs.continue_from:
-        progress_dir = cmdargs.continue_from
-    else:
-        progress_dir = cmdargs.dest / inject_timestamp(Config.progress_dir_fmt)
-        if act(f"create main progress dir {progress_dir}"):
-            progress_dir.mkdir()
+class Step:
+    async def setup(cmdargs, worklist, stepper):
+        if cmdargs.continue_from:
+            progress_dir = cmdargs.continue_from
+        else:
+            progress_dir = cmdargs.dest / inject_timestamp(Config.progress_dir_fmt)
+            if act(f"create main progress dir {progress_dir}"):
+                progress_dir.mkdir()
 
-    for wav in cmdargs.wavs:
-        info = TransferInfo(
-                source_wav=wav,
-                wav_abspath=os.path.abspath(wav),
-                dest_dir=cmdargs.dest,
-                wav_progress_dir=progress_dir / wav.name,
-                source_link=progress_dir / wav.name / Config.source_wav_linkname,
-            )
+        for wav in cmdargs.wavs:
+            info = TransferInfo(
+                    source_wav=wav,
+                    wav_abspath=os.path.abspath(wav),
+                    dest_dir=cmdargs.dest,
+                    wav_progress_dir=progress_dir / wav.name,
+                    source_link=progress_dir / wav.name / Config.source_wav_linkname,
+                )
 
-        if act(f"create wav progress dir {wav.name} and symlink to {info.wav_abspath}"):
-            info.wav_progress_dir.mkdir()
-            info.source_link.symlink_to(info.wav_abspath)
+            if act(f"create wav progress dir {wav.name} and symlink to {info.wav_abspath}"):
+                info.wav_progress_dir.mkdir()
+                info.source_link.symlink_to(info.wav_abspath)
 
-        worklist.append(info)
-        await stepper.put(len(worklist) - 1)
-        await asyncio.sleep(0) # Let the work begin
+            worklist.append(info)
+            await stepper.put(len(worklist) - 1)
+            await asyncio.sleep(0) # Let the work begin
 
-    await stepper.put(None)
+        await stepper.put(None)
 
 
-async def task_listen(cmdargs, worklist, *, token, stepper):
-    dbg(f"****** Listen working on {token} *******")
+    async def listen(cmdargs, worklist, *, token, stepper):
+        dbg(f"****** {stepper.name} working on {token} *******")
 
-async def task_prompt(cmdargs, worklist, *, token, stepper):
-    pass
+    async def prompt(cmdargs, worklist, *, token, stepper):
+        pass
 
-async def task_flacenc(cmdargs, worklist, *, token, stepper):
-    pass
+    async def flacenc(cmdargs, worklist, *, token, stepper):
+        pass
 
-async def task_pargen(cmdargs, worklist, *, token, stepper):
-    pass
+    async def pargen(cmdargs, worklist, *, token, stepper):
+        pass
 
-async def task_xdelta(cmdargs, worklist, *, token, stepper):
-    pass
+    async def xdelta(cmdargs, worklist, *, token, stepper):
+        pass
 
-async def task_cleanup(cmdargs, worklist, *, token, stepper):
-    pass
+    async def cleanup(cmdargs, worklist, *, token, stepper):
+        pass
 
-async def task_finish(worklist):
-    dbg("in task_finish()")
+    async def finish(worklist):
+        dbg("in finish()")
 
 #============================================================================
 # Main sequence
@@ -1940,37 +1941,37 @@ async def run_tasks(args):
     network = StepNetwork("wavflacer")
     network.update_common_kwargs(cmdargs=args, worklist=worklist)
 
-    network.add_producer(task_setup,
-            send_to=[task_listen, task_flacenc])
+    network.add_producer(Step.setup,
+            send_to=[Step.listen, Step.flacenc])
 
-    network.add_step(task_listen,
-            pull_from=task_setup,
-            send_to=task_prompt)
+    network.add_step(Step.listen,
+            pull_from=Step.setup,
+            send_to=Step.prompt)
 
-    network.add_step(task_prompt,
-            pull_from=task_listen,
-            send_to=task_pargen)
+    network.add_step(Step.prompt,
+            pull_from=Step.listen,
+            send_to=Step.pargen)
 
-    network.add_step(task_flacenc,
-            pull_from=task_setup,
-            send_to=[task_pargen, task_xdelta],
-            sync_to=task_xdelta)
+    network.add_step(Step.flacenc,
+            pull_from=Step.setup,
+            send_to=[Step.pargen, Step.xdelta],
+            sync_to=Step.xdelta)
 
-    network.add_step(task_pargen,
-            pull_from=[task_prompt, task_flacenc],
-            send_to=task_cleanup)
+    network.add_step(Step.pargen,
+            pull_from=[Step.prompt, Step.flacenc],
+            send_to=Step.cleanup)
 
-    network.add_step(task_xdelta,
-            sync_from=task_flacenc,
-            pull_from=task_flacenc,
-            sync_to=task_cleanup)
+    network.add_step(Step.xdelta,
+            sync_from=Step.flacenc,
+            pull_from=Step.flacenc,
+            sync_to=Step.cleanup)
 
-    network.add_step(task_cleanup,
-            sync_from=task_xdelta,
-            pull_from=task_pargen)
+    network.add_step(Step.cleanup,
+            sync_from=Step.xdelta,
+            pull_from=Step.pargen)
 
     await network.execute()
-    await task_finish(worklist)
+    await Step.finish(worklist)
 
 
 def run_tests_in_subprocess():
