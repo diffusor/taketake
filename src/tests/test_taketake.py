@@ -2035,5 +2035,15 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture):
                 wavs=pathlist("foo.wav bar.wav"),
             ))
 
+    def test_process_speech(self):
+        for start, duration, expect in [
+                (1, 3.2, 'twenty twenty monday march eight'),
+                (2, 5.5, 'a twenty monday march eighteenth two thousand twenty one'),
+                ]:
+            r = taketake.TimeRange(start, duration)
+            with self.subTest(r=r):
+                s = taketake.process_speech(testflacpath, r)
+                self.assertEqual(s, expect)
+
 if __name__ == '__main__':
     unittest.main()

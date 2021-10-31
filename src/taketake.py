@@ -817,7 +817,7 @@ async def find_likely_audio_span(finfo, file_scan_duration_s):
 # Speech recognition and parsing
 #============================================================================
 
-def process_speech(finfo):
+def process_speech(fpath: Path, speech_range: TimeRange) -> str:
     """Uses the PocketSphinx speech recognizer to decode the spoken timestamp
     and any notes.
 
@@ -827,12 +827,18 @@ def process_speech(finfo):
     """
     recognizer = speech_recognition.Recognizer()
 
-    with speech_recognition.AudioFile(finfo.fpath) as audio_file:
+    with speech_recognition.AudioFile(fpath) as audio_file:
         speech_recording = recognizer.record(audio_file,
-                                             offset=finfo.speech_range.start,
-                                             duration=finfo.speech_range.duration)
+                                             offset=speech_range.start,
+                                             duration=speech_range.duration)
     try:
-        finfo.orig_speech = recognizer.recognize_sphinx(speech_recording)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore",
+                    message="the imp module is deprecated",
+                    #module="ad_pulse",
+                    category=DeprecationWarning)
+            return recognizer.recognize_sphinx(speech_recording)
     except speech_recognition.UnknownValueError as e:
         pass
 
@@ -1187,7 +1193,8 @@ async def process_timestamp_from_audio(finfo):
     await find_likely_audio_span(finfo, scan_duration)
     print(f"Speechinizer: {finfo.orig_filename!r} - processing {finfo.speech_range.duration:.2f}s "
           f"of audio starting at offset {finfo.speech_range.start:.2f}s")
-    await asyncio.to_thread(process_speech, finfo)
+    finfo.orig_speech = await asyncio.to_thread(process_speech,
+            finfo.fpath, finfo.speech_range)
     finfo.parsed_timestamp, finfo.extra_speech = words_to_timestamp(finfo.orig_speech)
 
 
@@ -1807,7 +1814,7 @@ class TransferInfo:
     #  process_file_speech - coroutine
     #    process_timestamp_from_audio - coroutine
     #      find_likely_audio_span - coroutine
-    #      process_speech - async thread-launched, runs the speech recognizer
+    #      X process_speech - async thread-launched, runs the speech recognizer
     #  prompt_for_filename
     #    play_media_file
 
