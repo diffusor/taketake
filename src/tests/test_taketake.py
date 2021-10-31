@@ -877,9 +877,9 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
         await asyncio.gather(
                 finisher(taketake.Stepper("finisher",
-                    sync_pre=d.coms_sync, sync_across=d.coms)),
+                    sync_from=d.coms_sync, pull_from=d.coms)),
                 goer(taketake.Stepper("goer",
-                    send_to=d.coms, send_post=d.coms_sync)),
+                    send_to=d.coms, sync_to=d.coms_sync)),
                 )
 
         self.assertEqual(runlist,
@@ -906,7 +906,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             senders.append(sender(f"s{i}", taketake.Stepper(send_to=q)))
 
         r = await asyncio.gather(
-                joiner(taketake.Stepper(sync_across=d.values())),
+                joiner(taketake.Stepper(pull_from=d.values())),
                 *senders)
 
         self.assertEqual(r, ['012'] + [num_tokens-1] * len(d))
@@ -930,7 +930,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
                 taketake.Stepper.DesynchronizationError,
                 "Mismatching tokens between queues!"):
             await asyncio.gather(
-                    joiner(taketake.Stepper(sync_across=d.values())),
+                    joiner(taketake.Stepper(pull_from=d.values())),
                     *senders)
 
     async def test_send_post(self):
@@ -966,10 +966,10 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             log(f"+{name}")
 
         r = await asyncio.gather(
-                finisher(taketake.Stepper(sync_pre=d.end)),
+                finisher(taketake.Stepper(sync_from=d.end)),
                 joiner(taketake.Stepper(
-                    sync_across=[d.q1, d.q2],
-                    send_post=d.end,
+                    pull_from=[d.q1, d.q2],
+                    sync_to=d.end,
                     )),
                 sender("q1", taketake.Stepper(send_to=d.q1)),
                 sender("q2", taketake.Stepper(send_to=d.q2)))
