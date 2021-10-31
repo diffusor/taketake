@@ -1024,6 +1024,88 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(" ".join(runlist),
         "src1:a src1:b src2:a src2:b w1:a w1:b w2:a w2:b w3:a w3:b w4:a w4:b")
 
+    async def test_add_producer_with_sync_from(self):
+        async def src(stepper): pass
+        async def s(stepper): pass
+        network = taketake.StepNetwork("net")
+        with self.assertRaisesRegex(AssertionError,
+                "Producer src can't have sync_from source.s.: s$"):
+            network.add_producer(src, sync_from=s)
+
+    async def test_add_producer_with_sync_from2(self):
+        async def src(stepper): pass
+        async def s1(stepper): pass
+        async def s2(stepper): pass
+        network = taketake.StepNetwork("net")
+        with self.assertRaisesRegex(AssertionError,
+                "Producer src can't have sync_from source.s.: s1, s2$"):
+            network.add_producer(src, sync_from=[s1, s2])
+
+    async def test_add_producer_with_pull_from(self):
+        async def src(stepper): pass
+        async def s(stepper): pass
+        network = taketake.StepNetwork("net")
+        with self.assertRaisesRegex(AssertionError,
+                "Producer src can't have pull_from source.s.: s$"):
+            network.add_producer(src, pull_from=s)
+
+    async def test_add_producer_with_pull_from2(self):
+        async def src(stepper): pass
+        async def s1(stepper): pass
+        async def s2(stepper): pass
+        network = taketake.StepNetwork("net")
+        with self.assertRaisesRegex(AssertionError,
+                "Producer src can't have pull_from source.s.: s1, s2$"):
+            network.add_producer(src, pull_from=[s1, s2])
+
+    async def test_add_step_with_no_source(self):
+        async def s(): pass
+        network = taketake.StepNetwork("net")
+        with self.assertRaisesRegex(AssertionError,
+                "Non-producer s needs a pull_from source$"):
+            network.add_step(s)
+
+    async def test_add_step_with_sync_but_no_source(self):
+        async def s(): pass
+        async def s2(): pass
+        network = taketake.StepNetwork("net")
+        with self.assertRaisesRegex(AssertionError,
+                "Non-producer s needs a pull_from source$"):
+            network.add_step(s, sync_from=s2)
+
+    async def test_add_step_identical_sources(self):
+        async def s(): pass
+        async def s2(): pass
+        network = taketake.StepNetwork("net")
+        with self.assertRaisesRegex(AssertionError,
+                "Already added dest side of Link\(s2->s\):"):
+            network.add_step(s, pull_from=[s2, s2])
+
+    async def test_add_step_missing_source(self):
+        async def p(): pass
+        async def s1(): pass
+        async def s2(): pass
+
+        network = taketake.StepNetwork("net")
+        network.add_producer(p, send_to=s1)
+        with self.assertRaisesRegex(AssertionError,
+                "p missing send_to queue link to s2 in Link\(p->s2\)$"):
+            network.add_step(s2, pull_from=p)
+
+    async def test_execute_missing_source(self):
+        async def p(): pass
+        async def s1(): pass
+        async def s2(): pass
+
+        network = taketake.StepNetwork("net")
+        network.add_producer(p, send_to=[s1, s2])
+        network.add_step(s1, pull_from=p)
+        with self.assertRaisesRegex(AssertionError,
+                "s2 missing pull_from queue link to p in StepperQueue\(token:p->s2, src=p, dest=False\)$"):
+            await network.execute()
+
+    # TODO test cycles - should we add a cycle finder?
+
 #===========================================================================
 # ExtCmd external command component tests
 #===========================================================================

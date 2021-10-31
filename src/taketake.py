@@ -1300,6 +1300,10 @@ def listify(arg):
     else:
         return [arg]
 
+def format_steps(steps):
+    steplist = listify(steps)
+    return ", ".join(step.__name__ for step in steplist)
+
 class Stepper:
     """Manage a set of asyncio.Queues for coordinating stepping a sequence.
 
@@ -1584,6 +1588,19 @@ class StepNetwork:
         stepper.args = args
         stepper.kwargs = kwargs
 
+        if is_producer:
+            assert sync_from is None, \
+                    f"Producer {stepper.name} can't have sync_from source(s): " \
+                    f"{format_steps(sync_from)}"
+            assert pull_from is None, \
+                    f"Producer {stepper.name} can't have pull_from source(s): " \
+                    f"{format_steps(pull_from)}"
+            self.producers[coro] = stepper
+        else:
+            assert pull_from is not None, \
+                    f"Non-producer {stepper.name} needs a pull_from source"
+            self.steps[coro] = stepper
+
         self._add_link_queues(stepper.sync_from, self.sync_queues,
                 src=listify(sync_from), dest=coro)
 
@@ -1595,17 +1612,6 @@ class StepNetwork:
 
         self._add_link_queues(stepper.sync_to, self.sync_queues,
                 src=coro, dest=listify(sync_to))
-
-        if is_producer:
-            assert sync_from is None, \
-                    f"Producer {stepper.name} can't have a sync_from source"
-            assert pull_from is None, \
-                    f"Producer {stepper.name} can't have a pull_from source"
-            self.producers[coro] = stepper
-        else:
-            assert pull_from is not None, \
-                    f"Non-producer {stepper.name} needs a pull_from source"
-            self.steps[coro] = stepper
 
     def check_queue_wiring(self, qdict):
         for link, q in qdict.items():
