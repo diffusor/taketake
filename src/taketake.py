@@ -598,20 +598,12 @@ async def check_xdelta(xdelta_file, expected_size, target_size):
         # 'RuntimeError: Event loop is closed'
         if p.returncode is None:
             pwait_task = asyncio.create_task(p.wait())
-            done, pending = await asyncio.wait({pwait_task}, timeout=0.01)
+            done, pending = await asyncio.wait({pwait_task}, timeout=0.002)
             if not done:
+                #print("forcing a terminate")
                 p.terminate()
+        # Wait even if we called terminate(), in order to clean up resources
         await p.wait()
-
-        # Note we must wait for termination - otherwise we trigger resource warnings:
-        #/usr/lib/python3.9/asyncio/base_subprocess.py:125: ResourceWarning: unclosed transport <_UnixSubprocessTransport pid=118443 running stdout=<_UnixReadPipeTransport closed fd=6 closed>>
-        #  _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
-        #Object allocated at (most recent call last):
-        #  File "/usr/lib/python3.9/asyncio/unix_events.py", lineno 197
-        #    transp = _UnixSubprocessTransport(self, protocol, args, shell,
-        #
-        # This may be related to https://bugs.python.org/issue41320
-        #Loop <_UnixSelectorEventLoop running=False closed=True debug=False> that handles pid 115696 is closed
 
 
 def get_nearest_n(x, n):
