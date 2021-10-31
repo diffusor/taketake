@@ -1024,40 +1024,6 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(" ".join(runlist),
         "src1:a src1:b src2:a src2:b w1:a w1:b w2:a w2:b w3:a w3:b w4:a w4:b")
 
-    async def test_add_producer_with_sync_from(self):
-        async def src(stepper): pass
-        async def s(stepper): pass
-        network = taketake.StepNetwork("net")
-        with self.assertRaisesRegex(AssertionError,
-                "Producer src can't have sync_from source.s.: s$"):
-            network.add_producer(src, sync_from=s)
-
-    async def test_add_producer_with_sync_from2(self):
-        async def src(stepper): pass
-        async def s1(stepper): pass
-        async def s2(stepper): pass
-        network = taketake.StepNetwork("net")
-        with self.assertRaisesRegex(AssertionError,
-                "Producer src can't have sync_from source.s.: s1, s2$"):
-            network.add_producer(src, sync_from=[s1, s2])
-
-    async def test_add_producer_with_pull_from(self):
-        async def src(stepper): pass
-        async def s(stepper): pass
-        network = taketake.StepNetwork("net")
-        with self.assertRaisesRegex(AssertionError,
-                "Producer src can't have pull_from source.s.: s$"):
-            network.add_producer(src, pull_from=s)
-
-    async def test_add_producer_with_pull_from2(self):
-        async def src(stepper): pass
-        async def s1(stepper): pass
-        async def s2(stepper): pass
-        network = taketake.StepNetwork("net")
-        with self.assertRaisesRegex(AssertionError,
-                "Producer src can't have pull_from source.s.: s1, s2$"):
-            network.add_producer(src, pull_from=[s1, s2])
-
     async def test_add_step_with_no_source(self):
         async def s(): pass
         network = taketake.StepNetwork("net")
@@ -1125,8 +1091,8 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
         network.add_step(s2, pull_from=s1, send_to=s3)
         network.add_step(s3, pull_from=s2, sync_to=s1)
 
-        #taketake.Config.debug=True #XX
-        with self.assertRaisesRegex(AssertionError, "found backedge s3->s1"):
+        with self.assertRaisesRegex(taketake.StepNetwork.HasCycle,
+                "found backedge s3->s1:s1->s2->s3"):
             await network.execute()
 
 #===========================================================================

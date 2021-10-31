@@ -1300,9 +1300,9 @@ def listify(arg):
     else:
         return [arg]
 
-def format_steps(steps):
+def format_steps(steps, sep=", "):
     steplist = listify(steps)
-    return ", ".join(step.__name__ for step in steplist)
+    return sep.join(step.__name__ for step in steplist)
 
 class Stepper:
     """Manage a set of asyncio.Queues for coordinating stepping a sequence.
@@ -1607,12 +1607,6 @@ class StepNetwork:
         stepper.kwargs = kwargs
 
         if is_producer:
-            assert sync_from is None, \
-                    f"Producer {stepper.name} can't have sync_from source(s): " \
-                    f"{format_steps(sync_from)}"
-            assert pull_from is None, \
-                    f"Producer {stepper.name} can't have pull_from source(s): " \
-                    f"{format_steps(pull_from)}"
             self.producers[coro] = stepper
         else:
             assert pull_from is not None, \
@@ -1639,12 +1633,22 @@ class StepNetwork:
                 assert getattr(q, side), \
                     f"missing {self.fmt_linkerr(link, side, qdict)}"
 
+    class HasCycle(Exception):
+        def __init__(self, msg, gray_vertex):
+            super().__init__(msg)
+            self.gray_vertex = gray_vertex
+            self.start_found = False
+            self.path = []
+
+        def __str__(self):
+            return f"{super().__str__()}:{format_steps(reversed(self.path), sep='->')}"
+
     def check_for_cycles(self):
-        for v in itertools.chain(self.producers.keys(), self.steps.keys()):
+        def fake(): pass
+        fake.targets = [*self.producers.keys(), *self.steps.keys()]
+        for v in fake.targets:
             v.color = "white"
-        for v in itertools.chain(self.producers.keys(), self.steps.keys()):
-            if v.color == "white":
-                self.depth_first_visit(v)
+        self.depth_first_visit(fake)
 
     def depth_first_visit(self, u):
         u.color = "gray"
@@ -1652,9 +1656,17 @@ class StepNetwork:
         for v in u.targets:
             dbg(f"{u.__name__}({u.color}) -> {v.__name__}({v.color})")
             if v.color == "white":
-                self.depth_first_visit(v)
+                try:
+                    self.depth_first_visit(v)
+                except StepNetwork.HasCycle as e:
+                    if not e.start_found:
+                        e.path.append(v)
+                    if v == e.gray_vertex:
+                        e.start_found = True
+                    raise
             elif v.color == "gray":
-                assert False, f"found backedge {u.__name__}->{v.__name__}"
+                raise StepNetwork.HasCycle(
+                    f"found backedge {u.__name__}->{v.__name__}", v)
         u.color = "black"
         dbg(f"Set color {u.__name__}({u.color})")
 
