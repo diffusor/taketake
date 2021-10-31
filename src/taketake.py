@@ -90,6 +90,7 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.key_binding import KeyBindings
 
+# TODO make Config a @dataclass
 class Config:
     act = True
     debug = False
@@ -1810,8 +1811,9 @@ class TransferInfo:
     #  prompt_for_filename
     #    play_media_file
 
+
 #============================================================================
-# Tasks
+# step coroutines for the StepNetwork
 #============================================================================
 
 def act(msg):
@@ -1860,8 +1862,15 @@ class Step:
         from the results.
         """
         stepper.log(f"****** working on {token} *******")
-        # TODO merge FileInfo with TransferInfo
+        # TODO merge needed cross-step bits of FileInfo into TransferInfo
+        #  - But we should keep the information only needed within the listen
+        #  step confined to a separate data structure, or pass parameters.
         #await process_file_speech(finfo)
+        # TODO fall back to the file mtime if needed.  Add a cmdline arg?
+        # --timestamp speech, now, mtime, atime, ctime, none
+        # (If we allow arbitrary strings, things get silly - would need to prompt)
+        # Any other value that speech would avoid the speech recognition.
+        # --no-prompt would skip the prompt process
 
     async def prompt(cmdargs, worklist, *, token, stepper):
         """The Prompter asks the user for corrections on the guesses from listen.
@@ -1888,7 +1897,7 @@ class Step:
         dbg("in finish()")
 
 #============================================================================
-# Main sequence
+# StepNetwork construction
 #============================================================================
 
 async def run_tasks(args):
@@ -1953,6 +1962,10 @@ def dbg(*args, depth=0, **kwargs):
         print(f"*{Config.dbg_prog}* -",
               *args, f"({sys._getframe(1+depth).f_code.co_name})", **kwargs)
 
+
+#============================================================================
+# Command line argument processing
+#============================================================================
 
 def format_args(args):
     arglist=[]

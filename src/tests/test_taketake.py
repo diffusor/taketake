@@ -1212,13 +1212,19 @@ class TempdirFixture(unittest.TestCase):
         return os.path.join(self.tempdir, fname)
 
 class CdTempdirFixture(TempdirFixture):
-    """Changes dirictory into the tempdir for execution of each test."""
+    """Changes dirictory into the tempdir for execution of each test.
+    Also store the Config so we don't get carried config state between tests.
+    """
     def setUp(self):
         super().setUp()
         self.origdir = os.getcwd()
         os.chdir(self.tempdir)
+        self.saved_config = dict(**taketake.Config.__dict__)
 
     def tearDown(self):
+        for k, v in self.saved_config.items():
+            if not k.startswith('_'):
+                setattr(taketake.Config, k, v)
         os.chdir(self.origdir)
         super().tearDown()
 
@@ -1252,7 +1258,6 @@ def fmtpaths(paths):
 class Test6_args(CdTempdirFixture):
     def setUp(self):
         super().setUp()
-        self.saved_config = dict(**taketake.Config.__dict__)
         self.base_args = dict(
                 _dest=None,
                 debug=False,
@@ -1265,14 +1270,6 @@ class Test6_args(CdTempdirFixture):
                 dest=Path(),
                 sources=[],
                 wavs=[])
-
-    def tearDown(self):
-        # Make sure we restore any config settings adjusted by the processed
-        # arguments, such as Config.debug
-        for k, v in self.saved_config.items():
-            if not k.startswith('_'):
-                setattr(taketake.Config, k, v)
-        super().tearDown()
 
     def mkdir_progress(self, tag, subdir="."):
         name = Path(taketake.Config.progress_dir_fmt.format(tag))
@@ -2029,6 +2026,7 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
 class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture):
     """Test task processing in taketake"""
     async def test_empty_runtasks(self):
+        taketake.Config.act = False
         dest = Path("dest_foo")
         dest.mkdir()
         await taketake.run_tasks(args=argparse.Namespace(
