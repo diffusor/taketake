@@ -247,3 +247,11 @@ following properties should be verified::
     VCDIFF copy window length:    22670
     VCDIFF target window length:  22670
     000000 019  CPY_0 22670 @0
+
+StepNetwork - TODO
+:::::::::::
+
+* Build neighbor set at point of add link, inject into coro
+* Change add_producer -> add_task
+* Remove restrictions on add_task
+* This allows token-type changes in subnetwork parts, phase changes

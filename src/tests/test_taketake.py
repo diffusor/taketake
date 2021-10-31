@@ -1089,7 +1089,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
         network = taketake.StepNetwork("net")
         network.add_producer(p, send_to=s1)
         with self.assertRaisesRegex(AssertionError,
-                "p missing send_to queue link to s2 in Link\(p->s2\)$"):
+                r"Already added p, but it was missing p:send_to=s2 for token-type Link\(p->s2\) in StepNetwork\(net\)$"):
             network.add_step(s2, pull_from=p)
 
     async def test_execute_missing_source(self):
@@ -1101,9 +1101,20 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
         network.add_producer(p, send_to=[s1, s2])
         network.add_step(s1, pull_from=p)
         with self.assertRaisesRegex(AssertionError,
-                "s2 missing pull_from queue link to p in StepperQueue\(token:p->s2, src=p, dest=False\)$"):
+                "missing s2:pull_from=p for token-type Link\(p->s2\) in StepNetwork\(net\)$"):
             await network.execute()
 
+    async def test_execute_selfloop_src(self):
+        async def p(): pass
+        async def s(): pass
+        network = taketake.StepNetwork("net")
+        network.add_producer(p, send_to=s)
+        with self.assertRaisesRegex(AssertionError,
+                r"Self-loops are disallowed: s:send_to=s for token-type Link\(s->s\) in StepNetwork\(net\)$"):
+            network.add_step(s, pull_from=p, send_to=s)
+
+    async def test_execute_cycle(self):
+        pass
     # TODO test cycles - should we add a cycle finder?
 
 #===========================================================================

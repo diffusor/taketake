@@ -1451,6 +1451,12 @@ class Link(collections.namedtuple('Link', 'src dest')):
     def __str__(self):
         return f"Link({self.shortname()})"
 
+    def name(self, side):
+        return getattr(self, side).__name__
+
+    def other_name(self, side):
+        return getattr(self, self.other(side)).__name__
+
     @classmethod
     def other(cls, side):
         return "src" if side == "dest" else "dest"
@@ -1498,7 +1504,7 @@ class StepNetwork:
 
         self.seen_coroutines = set()
 
-        # Link -> asyncio.Queue mapping dicts
+        # Link(src, dest) -> StepperQueue mapping dicts
         self.sync_queues = LinkQDict("sync")
         self.token_queues = LinkQDict("token")
 
@@ -1526,6 +1532,12 @@ class StepNetwork:
         """
         self.add_step(*args, is_producer=True, **kwargs)
 
+    def fmt_linkerr(self, link: Link, side: str, qdict: LinkQDict) -> str:
+        return \
+            f"{link.name(side)}:{self.side_q_names[(link.other(side), qdict.name)]}=" \
+            f"{link.other_name(side)} for {qdict.name}-type {link} " \
+            f"in StepNetwork({self.name})"
+
     def _map_link_to_queue(self, link, qdict, side):
         """Creates a queue for the link and maps it in qdict if no mapping exists.
 
@@ -1534,13 +1546,18 @@ class StepNetwork:
 
         Returns the queue associated with the link.
         """
+        assert link.src != link.dest, \
+                f"Self-loops are disallowed: {self.fmt_linkerr(link, side, qdict)}"
+
         if link not in qdict:
             other_side = Link.other(side)
             other_coro = getattr(link, other_side)
+            # If we already added the other side of the link to the
+            # StepNetwork (according to seen_coroutines), then that other
+            # coroutine should have already added the link to the qdict.
             assert other_coro not in self.seen_coroutines, \
-                f"{other_coro.__name__} missing " \
-                f"{self.side_q_names[(side, qdict.name)]} queue link " \
-                f"to {getattr(link, side).__name__} in {link}"
+                f"Already added {other_coro.__name__}, but it was missing " \
+                f"{self.fmt_linkerr(link, other_side, qdict)}"
             qdict[link] = StepperQueue(link.shortname(), qdict.name)
 
         q = qdict[link]
@@ -1553,13 +1570,14 @@ class StepNetwork:
 
     def _add_link_queues(self, stepper_qlist, qdict, src, dest):
         if isinstance(src, types.FunctionType):
-            for item in listify(dest):
+            src.targets = dest
+            for item in dest:
                 link = Link(src, item)
                 q = self._map_link_to_queue(link, qdict, "src")
                 stepper_qlist.append(q)
 
         elif isinstance(dest, types.FunctionType):
-            for item in listify(src):
+            for item in src:
                 link = Link(item, dest)
                 q = self._map_link_to_queue(link, qdict, "dest")
                 stepper_qlist.append(q)
@@ -1616,16 +1634,34 @@ class StepNetwork:
     def check_queue_wiring(self, qdict):
         for link, q in qdict.items():
             for side in link._fields:
-                other_side = Link.other(side)
                 assert getattr(q, side), \
-                    f"{getattr(link, side).__name__} missing " \
-                    f"{self.side_q_names[(other_side, qdict.name)]} queue link " \
-                    f"to {getattr(link, other_side).__name__} in {q}"
+                    f"missing {self.fmt_linkerr(link, side, qdict)}"
+
+    # TODO - how to even get at the edges in this graph...
+    def check_for_cycles(self):
+        for v in itertools.chain(self.producers.keys(), self.steps.keys()):
+            v.color = "white"
+        for v in itertools.chain(self.producers.keys(), self.steps.keys()):
+            if v.color == "white":
+                self.depth_first_visit(v)
+
+    def depth_first_visit(self, u):
+        u.color = "gray"
+        for v in u.targets:
+            if v.color == "white":
+                self.depth_first_visit(v)
+            elif v.color == "gray":
+                assert false, "found backedge"
+        u.color = "black"
 
     def check_queues(self):
         """Ensure all queues are wired up properly, assert if not."""
+        # Ensure we have symmetrical from/to wirings
         self.check_queue_wiring(self.sync_queues)
         self.check_queue_wiring(self.token_queues)
+
+        # Ensure there are no cycles using depth-first search
+        self.check_for_cycles()
 
     async def execute(self):
         """Run asyncio.gather on the producer and step coroutines.
