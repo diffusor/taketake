@@ -1325,7 +1325,7 @@ class Stepper:
         self.pre_sync_met = False
 
     def log(self, *args, **kwargs):
-        dbg(f" *Stepper<{self.name}>* :", *args, **kwargs)
+        dbg(f"Stepper<{self.name}> :", *args, depth=1, **kwargs)
 
     def fmtqueues(self, queues):
         return ", ".join(q.name for q in queues)
@@ -1876,10 +1876,7 @@ def act(msg):
 
     This should be used to protect any code that modifies the filesystem.
     """
-    if Config.act:
-        dbg("Act -", msg)
-    else:
-        dbg("Skip -", msg)
+    dbg(f"{'Running' if Config.act else 'Skip (noact)'} :", msg, depth=1)
     return Config.act
 
 
@@ -1889,7 +1886,7 @@ class Step:
             progress_dir = cmdargs.continue_from
         else:
             progress_dir = cmdargs.dest / inject_timestamp(Config.progress_dir_fmt)
-            if act(f"setup: create main progress dir {progress_dir}"):
+            if act(f"create main progress dir {progress_dir}"):
                 progress_dir.mkdir()
 
         for wav in cmdargs.wavs:
@@ -1901,7 +1898,7 @@ class Step:
                     source_link=progress_dir / wav.name / Config.source_wav_linkname,
                 )
 
-            if act(f"setup: create wav progress dir {wav.name} and symlink to {info.wav_abspath}"):
+            if act(f"create wav progress dir {wav.name} and symlink to {info.wav_abspath}"):
                 info.wav_progress_dir.mkdir()
                 info.source_link.symlink_to(info.wav_abspath)
 
@@ -1994,9 +1991,10 @@ def run_tests_in_subprocess():
         sys.exit(1)
 
 
-def dbg(*args, **kwargs):
+def dbg(*args, depth=0, **kwargs):
     if Config.debug:
-        print(f"*{Config.dbg_prog}* -", *args, **kwargs)
+        print(f"*{Config.dbg_prog}* -",
+              *args, f"({sys._getframe(1+depth).f_code.co_name})", **kwargs)
 
 
 def format_args(args):
