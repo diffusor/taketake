@@ -25,7 +25,8 @@ import functools
 from pathlib import Path
 import dataclasses
 
-keeptemp = os.environ.get("TEST_TAKETAKE_KEEPTEMP", None)
+keeptemp = int(os.environ.get("TEST_TAKETAKE_KEEPTEMP", "0"))
+dontskip = int(os.environ.get("TEST_TAKETAKE_DONTSKIP", "0"))
 min_xdelta_target_size_for_match = 19
 testflac = "testdata/audio.20210318-2020-Thu.timestamp-wrong-weekday-Monday.flac"
 testpath = os.path.dirname(os.path.abspath(__file__))
@@ -2036,6 +2037,7 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture):
                 wavs=pathlist("foo.wav bar.wav"),
             ))
 
+    @unittest.skipUnless(dontskip, "Takes 0.75s per subtest")
     def test_process_speech(self):
         for start, duration, expect in [
                 (1, 3.2, 'twenty twenty monday march eight'),
