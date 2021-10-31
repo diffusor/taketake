@@ -1570,7 +1570,7 @@ class StepNetwork:
 
     def _add_link_queues(self, stepper_qlist, qdict, src, dest):
         if isinstance(src, types.FunctionType):
-            src.targets = dest
+            src.targets |= set(dest)
             for item in dest:
                 link = Link(src, item)
                 q = self._map_link_to_queue(link, qdict, "src")
@@ -1619,6 +1619,8 @@ class StepNetwork:
                     f"Non-producer {stepper.name} needs a pull_from source"
             self.steps[coro] = stepper
 
+        coro.targets = set() # Build out the graph for cycle detection
+
         self._add_link_queues(stepper.sync_from, self.sync_queues,
                 src=listify(sync_from), dest=coro)
 
@@ -1637,7 +1639,6 @@ class StepNetwork:
                 assert getattr(q, side), \
                     f"missing {self.fmt_linkerr(link, side, qdict)}"
 
-    # TODO - how to even get at the edges in this graph...
     def check_for_cycles(self):
         for v in itertools.chain(self.producers.keys(), self.steps.keys()):
             v.color = "white"
@@ -1647,12 +1648,15 @@ class StepNetwork:
 
     def depth_first_visit(self, u):
         u.color = "gray"
+        dbg(f"Set color {u.__name__}({u.color}) -> [{format_steps(u.targets)}]")
         for v in u.targets:
+            dbg(f"{u.__name__}({u.color}) -> {v.__name__}({v.color})")
             if v.color == "white":
                 self.depth_first_visit(v)
             elif v.color == "gray":
-                assert false, "found backedge"
+                assert False, f"found backedge {u.__name__}->{v.__name__}"
         u.color = "black"
+        dbg(f"Set color {u.__name__}({u.color})")
 
     def check_queues(self):
         """Ensure all queues are wired up properly, assert if not."""

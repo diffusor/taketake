@@ -1114,8 +1114,20 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             network.add_step(s, pull_from=p, send_to=s)
 
     async def test_execute_cycle(self):
-        pass
-    # TODO test cycles - should we add a cycle finder?
+        async def p(): pass
+        async def s1(): pass
+        async def s2(): pass
+        async def s3(): pass
+
+        network = taketake.StepNetwork("net")
+        network.add_producer(p, send_to=s1)
+        network.add_step(s1, pull_from=p, sync_from=s3, send_to=s2)
+        network.add_step(s2, pull_from=s1, send_to=s3)
+        network.add_step(s3, pull_from=s2, sync_to=s1)
+
+        #taketake.Config.debug=True #XX
+        with self.assertRaisesRegex(AssertionError, "found backedge s3->s1"):
+            await network.execute()
 
 #===========================================================================
 # ExtCmd external command component tests
