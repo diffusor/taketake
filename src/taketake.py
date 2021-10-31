@@ -1291,6 +1291,8 @@ def make_queues(s):
 def listify(arg):
     if arg is None:
         return []
+    elif isinstance(arg, str) or isinstance(arg, bytes):
+        return[arg]
     elif isinstance(arg, collections.abc.Sequence):
         return arg
     elif isinstance(arg, collections.abc.Iterable):
@@ -1320,7 +1322,6 @@ class Stepper:
         self.end = end
 
         self.value = end # last gotten value
-
         self.pre_sync_met = False
 
     def log(self, *args, **kwargs):
@@ -1434,23 +1435,76 @@ class Stepper:
         while await self.step():
             await coro(*args, **kwargs, token=self.value, stepper=self)
 
+class Link(collections.namedtuple('Link', 'src dest')):
+    __slots__ = ()
+
+    def shortname(self):
+        return f"{self.src.__name__}->{self.dest.__name__}"
+
+    def __str__(self):
+        return f"Link({self.shortname()})"
+
+    @classmethod
+    def other(cls, side):
+        return "src" if side == "dest" else "dest"
+
+class LinkQDict(collections.UserDict):
+    def __init__(self, name):
+        self.name = name
+        super().__init__()
+
+    def fmtdata(self):
+        return "\n      ".join(f"{k}: {q}" for k, q in self.data.items())
+
+    def __str__(self):
+        return f"LinkQDict({self.name}):\n      {self.fmtdata()}"
+
+class StepperQueue(asyncio.Queue):
+    def __init__(self, name, qtype):
+        self.name = name
+        self.qtype = qtype
+        self.src = False
+        self.dest = False
+        super().__init__()
+
+    def __str__(self):
+        return f"StepperQueue({self.qtype}:{self.name}, " \
+                f"src={self.src}, dest={self.dest})"
 
 class StepNetwork:
     """Auto-wired DAG of Steppers and their step coroutines"""
+    side_q_names = {
+            ("dest", "sync"): "sync_to",
+            ("dest", "token"): "send_to",
+            ("src", "token"): "pull_from",
+            ("src", "sync"): "sync_from",
+        }
+
     def __init__(self, name, end=None):
         self.name = name
         self.end = end
+        self.common_kwargs = {}
 
         # Coroutine to Stepper instance maps
-        self.producers = {}  # coro -> (args, kwargs)
-        self.steps = {}      # coro -> (args, kwargs)
+        self.producers = {}
+        self.steps = {}
+
+        self.seen_coroutines = set()
+
+        # Link -> asyncio.Queue mapping dicts
+        self.sync_queues = LinkQDict("sync")
+        self.token_queues = LinkQDict("token")
 
         # Plan:
         # * Add args, kwargs, step (coro) to Stepper
         # * Remove name from Stepper, use step.__name__
         # * Fill queue lists from StepNetwork
 
-    def add_producer(self, coro, *args, send_to=None, sync_to=None, **kwargs):
+    def update_common_kwargs(self, **kwargs):
+        """Pass the given keyword arguments to each producer/step coroutine."""
+        self.common_kwargs |= kwargs
+
+    def add_producer(self, *args, **kwargs):
         """Add a producer into the StepNetwork.
 
         Producer coroutines are not automatically stepped, unlike step
@@ -1463,9 +1517,52 @@ class StepNetwork:
         The given coro must use stepper.put() to feed its send_to and sync_to
         queues.
         """
-        pass
+        self.add_step(*args, is_producer=True, **kwargs)
 
-    def add_step(self, coro, *args, sync_from=None, pull_from=None,
+    def _map_link_to_queue(self, link, qdict, side):
+        """Creates a queue for the link and maps it in qdict if no mapping exists.
+
+        The side parameter allows tracking of which ends of the queue have
+        been wired up in the network.
+
+        Returns the queue associated with the link.
+        """
+        if link not in qdict:
+            other_side = Link.other(side)
+            other_coro = getattr(link, other_side)
+            assert other_coro not in self.seen_coroutines, \
+                f"{other_coro.__name__} missing " \
+                f"{self.side_q_names[(side, qdict.name)]} queue link " \
+                f"to {getattr(link, side).__name__} in {link}"
+            qdict[link] = StepperQueue(link.shortname(), qdict.name)
+
+        q = qdict[link]
+        assert not getattr(q, side), \
+            f"Already added {side} side of {link}:" \
+            f"\n  {q}" \
+            f"\n  in {qdict}"
+        setattr(q, side, True)
+        return q
+
+    def _add_link_queues(self, stepper_qlist, qdict, src, dest):
+        if isinstance(src, types.FunctionType):
+            for item in listify(dest):
+                link = Link(src, item)
+                q = self._map_link_to_queue(link, qdict, "src")
+                stepper_qlist.append(q)
+
+        elif isinstance(dest, types.FunctionType):
+            for item in listify(src):
+                link = Link(item, dest)
+                q = self._map_link_to_queue(link, qdict, "dest")
+                stepper_qlist.append(q)
+
+        else:
+            assert False, f"Niether {src} nor {dest} are functions!" \
+                    f"\n  {qdict}"
+
+    def add_step(self, coro, *args, is_producer=False,
+                 sync_from=None, pull_from=None,
                  send_to=None, sync_to=None, **kwargs):
         """Add a step to the StepNetwork.
 
@@ -1478,14 +1575,66 @@ class StepNetwork:
         When execute() is called, the queues will be created and hooked into
         the Steppers.
         """
+        self.seen_coroutines.add(coro)
 
-    def execute():
-        """Wire up the queues and run asyncio.gather.
+        stepper = Stepper(name=coro.__name__, end=self.end)
+        stepper.args = args
+        stepper.kwargs = kwargs
+
+        self._add_link_queues(stepper.sync_from, self.sync_queues,
+                src=listify(sync_from), dest=coro)
+
+        self._add_link_queues(stepper.pull_from, self.token_queues,
+                src=listify(pull_from), dest=coro)
+
+        self._add_link_queues(stepper.send_to, self.token_queues,
+                src=coro, dest=listify(send_to))
+
+        self._add_link_queues(stepper.sync_to, self.sync_queues,
+                src=coro, dest=listify(sync_to))
+
+        if is_producer:
+            assert sync_from is None
+            assert pull_from is None
+            self.producers[coro] = stepper
+        else:
+            self.steps[coro] = stepper
+
+    def check_queue_wiring(self, qdict):
+        for link, q in qdict.items():
+            for side in link._fields:
+                other_side = Link.other(side)
+                assert getattr(q, side), \
+                    f"{getattr(link, side).__name__} missing " \
+                    f"{self.side_q_names[(other_side, qdict.name)]} queue link " \
+                    f"to {getattr(link, other_side).__name__} in {link}"
+
+    def check_queues(self):
+        """Ensure all queues are wired up properly, assert if not."""
+        self.check_queue_wiring(self.sync_queues)
+        self.check_queue_wiring(self.token_queues)
+
+    async def execute(self):
+        """Run asyncio.gather on the producer and step coroutines.
 
         execute matches the send/pull/sync queues across the Steppers in
         the network, and then gathers across the added producer coroutines
         and the Stepper.walk() coroutine for each step.
         """
+        self.check_queues()
+
+        tasks = []
+        for coro, stepper in self.producers.items():
+            tasks.append(coro(*stepper.args, stepper=stepper,
+                              **stepper.kwargs,
+                              **self.common_kwargs))
+
+        for step_coro, stepper in self.steps.items():
+            tasks.append(stepper.walk(step_coro, *stepper.args,
+                                      **stepper.kwargs,
+                                      **self.common_kwargs))
+
+        await asyncio.gather(*tasks)
 
 #============================================================================
 # Phase A: Encode - encode flacs, rename, generate pars
@@ -1731,19 +1880,19 @@ def act(msg):
     return Config.act
 
 
-async def task_setup(args, worklist, stepper):
-    if args.continue_from:
-        progress_dir = args.continue_from
+async def task_setup(cmdargs, worklist, stepper):
+    if cmdargs.continue_from:
+        progress_dir = cmdargs.continue_from
     else:
-        progress_dir = args.dest / inject_timestamp(Config.progress_dir_fmt)
+        progress_dir = cmdargs.dest / inject_timestamp(Config.progress_dir_fmt)
         if act(f"create main progress dir {progress_dir}"):
             progress_dir.mkdir()
 
-    for wav in args.wavs:
+    for wav in cmdargs.wavs:
         info = TransferInfo(
                 source_wav=wav,
                 wav_abspath=os.path.abspath(wav),
-                dest_dir=args.dest,
+                dest_dir=cmdargs.dest,
                 wav_progress_dir=progress_dir / wav.name,
                 source_link=progress_dir / wav.name / Config.source_wav_linkname,
             )
@@ -1759,22 +1908,22 @@ async def task_setup(args, worklist, stepper):
     await stepper.put(None)
 
 
-async def task_listen(worklist, *, token, stepper):
+async def task_listen(cmdargs, worklist, *, token, stepper):
     dbg(f"****** Listen working on {token} *******")
 
-async def task_prompt(worklist, *, token, stepper):
+async def task_prompt(cmdargs, worklist, *, token, stepper):
     pass
 
-async def task_flacenc(worklist, *, token, stepper):
+async def task_flacenc(cmdargs, worklist, *, token, stepper):
     pass
 
-async def task_pargen(worklist, *, token, stepper):
+async def task_pargen(cmdargs, worklist, *, token, stepper):
     pass
 
-async def task_xdelta(worklist, *, token, stepper):
+async def task_xdelta(cmdargs, worklist, *, token, stepper):
     pass
 
-async def task_cleanup(worklist, *, token, stepper):
+async def task_cleanup(cmdargs, worklist, *, token, stepper):
     pass
 
 async def task_finish(worklist):
@@ -1789,56 +1938,40 @@ async def run_tasks(args):
     worklist = []
 
     network = StepNetwork("wavflacer")
+    network.update_common_kwargs(cmdargs=args, worklist=worklist)
 
-    network.add_producer(task_setup, args, worklist,
+    network.add_producer(task_setup,
             send_to=[task_listen, task_flacenc])
 
-    q = make_queues("""
-        setup2listen setup2flacenc
-        listen2prompt
-        prompt2pargen flacenc2pargen
-        flacenc2xdelta flacenc2xdelta_sync
-        pargen2cleanup xdelta2cleanup_sync
-        """)
+    network.add_step(task_listen,
+            pull_from=task_setup,
+            send_to=task_prompt)
 
-    await asyncio.gather(
-        task_setup(args, worklist, Stepper("setup",
-            send_to=[q.setup2listen, q.setup2flacenc])),
+    network.add_step(task_prompt,
+            pull_from=task_listen,
+            send_to=task_pargen)
 
-        Stepper("listen",
-            pull_from=q.setup2listen,
-            send_to=q.listen2prompt,
-        ).walk(task_listen, worklist),
+    network.add_step(task_flacenc,
+            pull_from=task_setup,
+            send_to=[task_pargen, task_xdelta],
+            sync_to=task_xdelta)
 
-        Stepper("prompt",
-            pull_from=q.listen2prompt,
-            send_to=q.prompt2pargen,
-        ).walk(task_prompt, worklist),
+    network.add_step(task_pargen,
+            pull_from=[task_prompt, task_flacenc],
+            send_to=task_cleanup)
 
-        Stepper("flacenc",
-            pull_from=q.setup2flacenc,
-            send_to=[q.flacenc2pargen, q.flacenc2xdelta],
-            sync_to=q.flacenc2xdelta_sync,
-        ).walk(task_flacenc, worklist),
+    network.add_step(task_xdelta,
+            sync_from=task_flacenc,
+            pull_from=task_flacenc,
+            sync_to=task_cleanup)
 
-        Stepper("pargen",
-            pull_from=[q.prompt2pargen, q.flacenc2pargen],
-            send_to=q.pargen2cleanup,
-        ).walk(task_pargen, worklist),
+    network.add_step(task_cleanup,
+            sync_from=task_xdelta,
+            pull_from=task_pargen)
 
-        Stepper("xdelta",
-            sync_from=q.flacenc2xdelta_sync,
-            pull_from=q.flacenc2xdelta,
-            sync_to=q.xdelta2cleanup_sync,
-        ).walk(task_xdelta, worklist),
-
-        Stepper("cleanup",
-            sync_from=q.xdelta2cleanup_sync,
-            pull_from=q.pargen2cleanup,
-        ).walk(task_cleanup, worklist),
-    )
-
+    await network.execute()
     await task_finish(worklist)
+
 
 def run_tests_in_subprocess():
     """Run unittests in test_taketake.py.
