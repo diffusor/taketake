@@ -1188,7 +1188,7 @@ async def process_timestamp_from_audio(finfo):
     # This means we can prompt the user for any corrections sooner.
     scan_duration = min(finfo.duration_s, Config.file_scan_duration_s)
 
-    finfo.speech_range = await find_likely_audio_span(finfo, scan_duration)
+    finfo.speech_range = await find_likely_audio_span(finfo.fpath, scan_duration)
     print(f"Speechinizer: {finfo.orig_filename!r} - processing {finfo.speech_range.duration:.2f}s "
           f"of audio starting at offset {finfo.speech_range.start:.2f}s")
     finfo.orig_speech = await asyncio.to_thread(process_speech,
@@ -1802,20 +1802,24 @@ class TransferInfo:
     #files = [FileInfo(instrument="test",
     #                  fpath=f,
     #                  orig_filename=os.path.basename(f),
-    #                  src_path=os.path.dirname(f),
-    #                  dest_path=dest)
+    #                  [unused] src_path=os.path.dirname(f),
+    #                  [unused] dest_path=dest)
     #         for f in filepaths]
     #
     # Functions using finfo:
     #  process_file_speech - coroutine
+    #    sets finfo.duration_s suggested_filename
+    #    uses finfo.parsed_timestamp fpath duration_s extra_speech instrument orig_filename
     #    process_timestamp_from_audio - coroutine
-    #      X find_likely_audio_span - coroutine
-    #           finfo.silences = await detect_silence(finfo.fpath)
-    #           finfo.non_silences = invert_silences(finfo.silences, ...)
-    #           finfo.speech_range = TimeRange(r.start, duration)
-    #      X process_speech - async thread-launched, runs the speech recognizer
+    #      sets finfo.speech_range orig_speech parsed_timestamp, extra_speech
+    #      uses finfo.duration_s fpath orig_speech speech_range
     #  prompt_for_filename
+    #    sets finfo.final_filename
+    #    uses finfo.fpath suggested_filename
     #    play_media_file
+    #      uses finfo.speech_range fpath suggested_filename
+    #
+    # Needed across steps: speech_range orig_speech suggested_filename
 
 
 #============================================================================
