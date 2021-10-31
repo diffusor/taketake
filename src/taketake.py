@@ -1351,7 +1351,10 @@ class Stepper:
             last_token = token
             last_queue = q
         if q_list:
-            self.log(f"got {last_token} <- {self.fmtqueues(q_list)} [{qtype}]")
+            if qtype == "sync_from":
+                self.log(f"[<= {qtype}({self.fmtqueues(q_list)})]")
+            else:
+                self.log(f"[got {last_token} <= {qtype}({self.fmtqueues(q_list)})]")
         return last_token
 
 
@@ -1392,13 +1395,13 @@ class Stepper:
         for q in self.send_to:
             await q.put(token)
         if self.send_to:
-            self.log(f"put({token}) -> {self.fmtqueues(self.send_to)}")
+            self.log(f"[put {token} => send_to({self.fmtqueues(self.send_to)})]")
 
         if token == self.end:
             for q in self.sync_to:
                 await q.put(token)
             if self.sync_to:
-                self.log(f"put({token}) -> end-queues: {self.fmtqueues(self.sync_to)}")
+                self.log(f"[=> sync_to({self.fmtqueues(self.sync_to)})]")
 
     async def step(self):
         """Simplify the standard while loop idiom.
@@ -1886,7 +1889,7 @@ class Step:
             progress_dir = cmdargs.continue_from
         else:
             progress_dir = cmdargs.dest / inject_timestamp(Config.progress_dir_fmt)
-            if act(f"create main progress dir {progress_dir}"):
+            if act(f"setup: create main progress dir {progress_dir}"):
                 progress_dir.mkdir()
 
         for wav in cmdargs.wavs:
@@ -1898,7 +1901,7 @@ class Step:
                     source_link=progress_dir / wav.name / Config.source_wav_linkname,
                 )
 
-            if act(f"create wav progress dir {wav.name} and symlink to {info.wav_abspath}"):
+            if act(f"setup: create wav progress dir {wav.name} and symlink to {info.wav_abspath}"):
                 info.wav_progress_dir.mkdir()
                 info.source_link.symlink_to(info.wav_abspath)
 
@@ -1910,7 +1913,7 @@ class Step:
 
 
     async def listen(cmdargs, worklist, *, token, stepper):
-        dbg(f"****** {stepper.name} working on {token} *******")
+        stepper.log(f"****** working on {token} *******")
 
     async def prompt(cmdargs, worklist, *, token, stepper):
         pass
