@@ -592,17 +592,15 @@ async def check_xdelta(xdelta_file, expected_size, target_size):
         # See https://bugs.python.org/issue43578
         #
         # As a workaround to minimize the number of times we see this in
-        # testing, we can add a 10ms wait_for timeout call to p.wait() to
-        # allow the process to complete on its own.
+        # testing, add a 10ms wait to allow the process to complete on its own.
         #
-        # However, this results in cleanup errors sometimes:
+        # Using wait_for() would result in event cancellation and
         # 'RuntimeError: Event loop is closed'
-        #try:
-        #    await asyncio.wait_for(p.wait(), timeout=0.01)
-        #except asyncio.exceptions.TimeoutError:
-        #    pass
         if p.returncode is None:
-            p.terminate()
+            pwait_task = asyncio.create_task(p.wait())
+            done, pending = await asyncio.wait({pwait_task}, timeout=0.01)
+            if not done:
+                p.terminate()
         await p.wait()
 
         # Note we must wait for termination - otherwise we trigger resource warnings:
@@ -831,6 +829,8 @@ def process_speech(finfo):
     and any notes.
 
     Returns the resulting text, or None if no transcription could be determined.
+
+    This is called in a separate thread so as to not block the asyncio loop.
     """
     recognizer = speech_recognition.Recognizer()
 
@@ -1809,6 +1809,14 @@ class TransferInfo:
     #                  src_path=os.path.dirname(f),
     #                  dest_path=dest)
     #         for f in filepaths]
+    #
+    # Functions using finfo:
+    #  process_file_speech - coroutine
+    #    process_timestamp_from_audio - coroutine
+    #      find_likely_audio_span - coroutine
+    #      process_speech - async thread-launched, runs the speech recognizer
+    #  prompt_for_filename
+    #    play_media_file
 
 #============================================================================
 # Tasks
