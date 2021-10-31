@@ -1499,7 +1499,7 @@ class StepNetwork:
         self.common_kwargs = {}
 
         # Coroutine to Stepper instance maps
-        self.producers = {}
+        self.tasks = {}
         self.steps = {}
 
         self.seen_coroutines = set()
@@ -1514,23 +1514,20 @@ class StepNetwork:
         # * Fill queue lists from StepNetwork
 
     def update_common_kwargs(self, **kwargs):
-        """Pass the given keyword arguments to each producer/step coroutine."""
+        """Pass the given keyword arguments to each task/step coroutine."""
         self.common_kwargs |= kwargs
 
-    def add_producer(self, *args, **kwargs):
-        """Add a producer into the StepNetwork.
+    def add_task(self, *args, **kwargs):
+        """Add a general non-auto-stepped/walked task into the StepNetwork.
 
-        Producer coroutines are not automatically stepped, unlike step
-        coroutines.  They define the start of the workunit network pipeline,
-        so they do not have inbound sync_from or pull_from queues.
+        For argument descriptions, see add_step().
 
-        send_to is a coroutine (or list of them) to send tokens to
-        sync_to is a coroutine (or list of them) to send end tokens to
-
-        The given coro must use stepper.put() to feed its send_to and sync_to
-        queues.
+        Non-step task coroutines are not automatically stepped, unlike step
+        coroutines.  Non-step tasks define impedence mismatches in the network
+        flow, so they must manage their own get() and put() activities.
+        These are useful for start and finish tasks run as part of the network.
         """
-        self.add_step(*args, is_producer=True, **kwargs)
+        self.add_step(*args, is_task=True, **kwargs)
 
     def fmt_linkerr(self, link: Link, side: str, qdict: LinkQDict) -> str:
         return \
@@ -1586,7 +1583,7 @@ class StepNetwork:
             assert False, f"Niether {src} nor {dest} are functions!" \
                     f"\n  {qdict}"
 
-    def add_step(self, coro, *args, is_producer=False,
+    def add_step(self, coro, *args, is_task=False,
                  sync_from=None, pull_from=None,
                  send_to=None, sync_to=None, **kwargs):
         """Add a step to the StepNetwork.
@@ -1594,7 +1591,7 @@ class StepNetwork:
         The given coro will be automatically stepped via Stepper.walk.
 
         The [sync/pull/send]_[to/_from] arguments specify a single
-        step/producer/consumer, or a list of them, from which the
+        task/step, or a list of them, from which the
         correspending queues will be hooked up between the steppers.
 
         When execute() is called, the queues will be created and hooked into
@@ -1606,11 +1603,11 @@ class StepNetwork:
         stepper.args = args
         stepper.kwargs = kwargs
 
-        if is_producer:
-            self.producers[coro] = stepper
+        if is_task:
+            self.tasks[coro] = stepper
         else:
             assert pull_from is not None, \
-                    f"Non-producer {stepper.name} needs a pull_from source"
+                    f"step {stepper.name} needs a pull_from source"
             self.steps[coro] = stepper
 
         coro.targets = set() # Build out the graph for cycle detection
@@ -1645,7 +1642,7 @@ class StepNetwork:
 
     def check_for_cycles(self):
         def fake(): pass
-        fake.targets = [*self.producers.keys(), *self.steps.keys()]
+        fake.targets = [*self.tasks.keys(), *self.steps.keys()]
         for v in fake.targets:
             v.color = "white"
         self.depth_first_visit(fake)
@@ -1680,16 +1677,16 @@ class StepNetwork:
         self.check_for_cycles()
 
     async def execute(self):
-        """Run asyncio.gather on the producer and step coroutines.
+        """Run asyncio.gather on the task and step coroutines.
 
         execute matches the send/pull/sync queues across the Steppers in
-        the network, and then gathers across the added producer coroutines
+        the network, and then gathers across the added task coroutines
         and the Stepper.walk() coroutine for each step.
         """
         self.check_queues()
 
         tasks = []
-        for coro, stepper in self.producers.items():
+        for coro, stepper in self.tasks.items():
             tasks.append(coro(*stepper.args, stepper=stepper,
                               **stepper.kwargs,
                               **self.common_kwargs))
@@ -2003,7 +2000,7 @@ async def run_tasks(args):
     network = StepNetwork("wavflacer")
     network.update_common_kwargs(cmdargs=args, worklist=worklist)
 
-    network.add_producer(Step.setup,
+    network.add_task(Step.setup,
             send_to=[Step.listen, Step.flacenc])
 
     network.add_step(Step.listen,
