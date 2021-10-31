@@ -23,6 +23,7 @@ import argparse
 import contextlib
 import functools
 from pathlib import Path
+import dataclasses
 
 keeptemp = os.environ.get("TEST_TAKETAKE_KEEPTEMP", None)
 min_xdelta_target_size_for_match = 19
@@ -2044,6 +2045,22 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture):
             with self.subTest(r=r):
                 s = taketake.process_speech(testflacpath, r)
                 self.assertEqual(s, expect)
+
+    async def test_find_audio_span(self):
+        # TODO our flac is too short for scan-to to work
+        for scan_to, start, duration in [
+                (0, 1.640, 4.507),
+                (6, 1.640, 4.507),
+                (10, 1.640, 4.507),
+                ]:
+            expect = taketake.TimeRange(start, duration)
+            r = await taketake.find_likely_audio_span(testflacpath, scan_to)
+            for endpoint in dataclasses.fields(taketake.TimeRange):
+                with self.subTest(scan_to=scan_to, endpoint=endpoint.name):
+                    self.assertAlmostEqual(
+                            getattr(r, endpoint.name),
+                            getattr(expect, endpoint.name),
+                            places=3)
 
 if __name__ == '__main__':
     unittest.main()

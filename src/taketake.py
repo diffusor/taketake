@@ -76,6 +76,7 @@ import subprocess
 import datetime
 import types
 import ctypes
+import dataclasses
 from dataclasses import dataclass, field
 from typing import List
 from pathlib import Path
@@ -781,24 +782,22 @@ def invert_silences(silences, file_scan_duration_s):
     return non_silences
 
 
-async def find_likely_audio_span(finfo, file_scan_duration_s):
-    """Searches the first file_scan_duration_s seconds of the file represented
-    by finfo for regions of silence.
+async def find_likely_audio_span(fpath: Path, scan_to_s: float) -> TimeRange:
+    """Searches for regions of silence in fpath.
+    Scans only the first scan_to_s seconds.
 
-    Fills in the silences, non_silences, and speech_range fields of finfo.
+    Returns a TimeRange representing the likely timestamp readout.
 
-    The speech_range field is set to the TimeRange of the first non-silent
-    span of audio that is considered long enough, expanded a bit to cover any
-    attack or decay in the speech.
+    This TimeRange is the first non-silent span of audio that is considered
+    long enough, expanded a bit to cover any attack or decay in the speech.
 
     Raises NoSuitableAudioSpan if no likely candidate was found.
     """
 
-    finfo.silences = await detect_silence(finfo.fpath)
+    silences = await detect_silence(fpath)
+    non_silences = invert_silences(silences, scan_to_s)
 
-    finfo.non_silences = invert_silences(finfo.silences, file_scan_duration_s)
-
-    for r in finfo.non_silences:
+    for r in non_silences:
         duration = r.duration
         if duration >= Config.min_talk_duration_s:
             # Expand the window a bit to allow for attack and decay below the
@@ -806,8 +805,7 @@ async def find_likely_audio_span(finfo, file_scan_duration_s):
             r.start = max(0, r.start - Config.talk_attack_s)
             duration += Config.talk_attack_s + Config.talk_release_s
             duration = min(duration, Config.max_talk_duration_s)
-            finfo.speech_range = TimeRange(r.start, duration)
-            return
+            return TimeRange(r.start, duration)
 
     raise NoSuitableAudioSpan(f"Could not find any span of audio greater than "
                               f"{Config.min_talk_duration_s}s in file '{f}'")
@@ -1190,7 +1188,7 @@ async def process_timestamp_from_audio(finfo):
     # This means we can prompt the user for any corrections sooner.
     scan_duration = min(finfo.duration_s, Config.file_scan_duration_s)
 
-    await find_likely_audio_span(finfo, scan_duration)
+    finfo.speech_range = await find_likely_audio_span(finfo, scan_duration)
     print(f"Speechinizer: {finfo.orig_filename!r} - processing {finfo.speech_range.duration:.2f}s "
           f"of audio starting at offset {finfo.speech_range.start:.2f}s")
     finfo.orig_speech = await asyncio.to_thread(process_speech,
@@ -1733,8 +1731,6 @@ class FileInfo:
     dest_path: str
 
     duration_s: float = None
-    silences: List[TimeRange] = field(default_factory=list)
-    non_silences: List[TimeRange] = field(default_factory=list)
     speech_range: TimeRange = None
 
     orig_speech: str = None
@@ -1813,7 +1809,10 @@ class TransferInfo:
     # Functions using finfo:
     #  process_file_speech - coroutine
     #    process_timestamp_from_audio - coroutine
-    #      find_likely_audio_span - coroutine
+    #      X find_likely_audio_span - coroutine
+    #           finfo.silences = await detect_silence(finfo.fpath)
+    #           finfo.non_silences = invert_silences(finfo.silences, ...)
+    #           finfo.speech_range = TimeRange(r.start, duration)
     #      X process_speech - async thread-launched, runs the speech recognizer
     #  prompt_for_filename
     #    play_media_file
