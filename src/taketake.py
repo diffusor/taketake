@@ -1597,10 +1597,14 @@ class StepNetwork:
                 src=coro, dest=listify(sync_to))
 
         if is_producer:
-            assert sync_from is None
-            assert pull_from is None
+            assert sync_from is None, \
+                    f"Producer {stepper.name} can't have a sync_from source"
+            assert pull_from is None, \
+                    f"Producer {stepper.name} can't have a pull_from source"
             self.producers[coro] = stepper
         else:
+            assert pull_from is not None, \
+                    f"Non-producer {stepper.name} needs a pull_from source"
             self.steps[coro] = stepper
 
     def check_queue_wiring(self, qdict):

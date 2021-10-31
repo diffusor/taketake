@@ -977,6 +977,53 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(" ".join(runlist),
                 "-f -j -q1 1q1 -q2 1q2 j1 2q1 +q1 2q2 +q2 j2 jNone +j +f")
 
+    async def test_step_network(self):
+        """Build a network that uses all the features and run it."""
+        worklist = "a b".split()
+        runlist = []
+
+        def update(stepper):
+            runlist.append(f"{stepper.name}:{stepper.value}")
+
+        async def src1(stepper):
+            for e in worklist:
+                await stepper.put(e)
+                runlist.append(f"src1:{e}")
+            await stepper.put(None)
+
+        async def src2(stepper):
+            for e in worklist:
+                await stepper.put(e)
+                runlist.append(f"src2:{e}")
+            await stepper.put(None)
+
+        async def w1(token, stepper): update(stepper)
+        async def w2(token, stepper): update(stepper)
+        async def w3(token, stepper): update(stepper)
+        async def w4(token, stepper): update(stepper)
+
+        async def f1(token, stepper): update(stepper)
+        async def f2(token, stepper): update(stepper)
+
+        network = taketake.StepNetwork("net")
+        network.add_producer(src1, send_to=w1, sync_to=[w1, w2])
+        network.add_producer(src2, send_to=[w1, w2, w3], sync_to=w3)
+
+        network.add_step(w1, sync_from=src1, pull_from=[src1, src2],
+                             sync_to=w4,     send_to=w4)
+
+        network.add_step(w2, sync_from=src1, pull_from=src2,
+                                             send_to=w4)
+
+        network.add_step(w3, sync_from=src2, pull_from=src2,
+                                             send_to=w4)
+
+        network.add_step(w4, pull_from=[w1, w2, w3], sync_from=w1)
+        await network.execute()
+
+        self.assertEqual(" ".join(runlist),
+        "src1:a src1:b src2:a src2:b w1:a w1:b w2:a w2:b w3:a w3:b w4:a w4:b")
+
 #===========================================================================
 # ExtCmd external command component tests
 #===========================================================================
