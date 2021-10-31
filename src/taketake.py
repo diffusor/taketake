@@ -1517,18 +1517,6 @@ class StepNetwork:
         """Pass the given keyword arguments to each task/step coroutine."""
         self.common_kwargs |= kwargs
 
-    def add_task(self, *args, **kwargs):
-        """Add a general non-auto-stepped/walked task into the StepNetwork.
-
-        For argument descriptions, see add_step().
-
-        Non-step task coroutines are not automatically stepped, unlike step
-        coroutines.  Non-step tasks define impedence mismatches in the network
-        flow, so they must manage their own get() and put() activities.
-        These are useful for start and finish tasks run as part of the network.
-        """
-        self.add_step(*args, is_task=True, **kwargs)
-
     def fmt_linkerr(self, link: Link, side: str, qdict: LinkQDict) -> str:
         return \
             f"{link.name(side)}:{self.side_q_names[(link.other(side), qdict.name)]}=" \
@@ -1582,6 +1570,18 @@ class StepNetwork:
         else:
             assert False, f"Niether {src} nor {dest} are functions!" \
                     f"\n  {qdict}"
+
+    def add_task(self, *args, **kwargs):
+        """Add a general non-auto-stepped/walked task into the StepNetwork.
+
+        For argument descriptions, see add_step().
+
+        Non-step task coroutines are not automatically stepped, unlike step
+        coroutines.  Non-step tasks define impedence mismatches in the network
+        flow, so they must manage their own get() and put() activities.
+        These are useful for start and finish tasks run as part of the network.
+        """
+        self.add_step(*args, is_task=True, **kwargs)
 
     def add_step(self, coro, *args, is_task=False,
                  sync_from=None, pull_from=None,
@@ -1641,6 +1641,10 @@ class StepNetwork:
             return f"{super().__str__()}:{format_steps(reversed(self.path), sep='->')}"
 
     def check_for_cycles(self):
+        # Create a fake vertex containing all the other vertices.  This
+        # simplifies cycle trace building since this way we only need the
+        # exception manager in depth_first_visit - the backedge will never
+        # point to the fake vertex.
         def fake(): pass
         fake.targets = [*self.tasks.keys(), *self.steps.keys()]
         for v in fake.targets:
