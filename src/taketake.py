@@ -592,9 +592,9 @@ async def check_xdelta(xdelta_file, expected_size, target_size):
         # See https://bugs.python.org/issue43578
         #
         # As a workaround to minimize the number of times we see this in
-        # testing, add a 10ms wait to allow the process to complete on its own.
+        # testing, add a 2ms wait to allow the process to complete on its own.
         #
-        # Using wait_for() would result in event cancellation and
+        # Note using wait_for() results in event cancellation on timeout, and
         # 'RuntimeError: Event loop is closed'
         if p.returncode is None:
             pwait_task = asyncio.create_task(p.wait())
