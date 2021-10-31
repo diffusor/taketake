@@ -1702,8 +1702,9 @@ class StepNetwork:
 
         await asyncio.gather(*tasks)
 
+
 #============================================================================
-# Phase A: Encode - encode flacs, rename, generate pars
+# Filename prompting coroutines
 #============================================================================
 
 def play_media_file(finfo):
@@ -1744,26 +1745,7 @@ class FileInfo:
     final_filename: str = None
 
 
-import random # TODO remove, only for testing
-
-
-async def waiter(name, f):
-    delay = random.uniform(0.2, 1.0)
-    print(f"{name}: '{f.orig_filename}' - {delay}s")
-    await asyncio.sleep(delay)
-    print(f"{name}: '{f.orig_filename}' - done")
-
-
-async def speech_recognizer(files, recognizer2prompter_speech_guesses):
-    for finfo in files:
-        await process_file_speech(finfo)
-        recognizer2prompter_speech_guesses.put_nowait(finfo)
-
-    # Signal completion - no more files to process
-    recognizer2prompter_speech_guesses.put_nowait(None)
-
-
-async def filename_prompter(recognizer2prompter_speech_guesses, prompter2par_dest_names):
+async def prompt_for_filename(finfo):
 
     def toolbar():
         return HTML(f"  <style bg='ansired'>{time.monotonic()}</style>")
@@ -1782,130 +1764,22 @@ async def filename_prompter(recognizer2prompter_speech_guesses, prompter2par_des
         ))
 
     session = PromptSession(key_bindings=bindings)
-    while (finfo := await recognizer2prompter_speech_guesses.get()) is not None:
-        with patch_stdout():
-            finfo.final_filename = await session.prompt_async(HTML(
-                    f"<prompt>* Confirm file rename for</prompt> <fname>{finfo.fpath}</fname>\n <guess>Guess</guess>: <fname>{finfo.suggested_filename}</fname> "
-                    f"<comment>({len(finfo.suggested_filename)} characters)</comment>\n <final>Final&gt;</final> "),
-                    style=style,
-                    default=finfo.suggested_filename,
-                    mouse_support=True,
-                    bottom_toolbar=None, auto_suggest=AutoSuggestFromHistory())
-        prompter2par_dest_names.put_nowait(finfo)
-        recognizer2prompter_speech_guesses.task_done()
-
-    # Signal completion - no more files to process
-    prompter2par_dest_names.put_nowait(None)
-
-
-async def flac_encoder(files, flac2par_completions):
-    for finfo in files:
-        await waiter("FlacEncoder", finfo)
-        flac2par_completions.put_nowait(finfo)
-
-    # Signal completion - no more files to process
-    flac2par_completions.put_nowait(None)
-
-
-async def renamer_and_par_generator(prompter2par_dest_names,
-                                    flac2par_completions,
-                                    par2processor_completions):
-    while (finfo := await prompter2par_dest_names.get()) is not None:
-        await waiter("Renamer", finfo)
-        prompter2par_dest_names.task_done()
-
-        # Wait for flac encoding to complete as well
-        flac = await flac2par_completions.get()
-        if finfo is not flac:
-            raise RuntimeError("Got mismatching files from the prompter and flac task queues!"
-                    f"\n  Prompter: {finfo.orig_filename}"
-                    f"\n  Encoder : {flac.orig_filename}")
-        await waiter("ParGenerator", flac)
-        par2processor_completions.put_nowait(flac)
-
-    # Signal completion - no more files to process
-    flac2par_completions.put_nowait(None)
-
-
-async def phaseA_encode(filepaths, dest):
-    """Process wav files, encoding them to renamed files in the dest path.
-    """
-    # Construct the FileInfo objects
-    files = [FileInfo(instrument="test",
-                      fpath=f,
-                      orig_filename=os.path.basename(f),
-                      src_path=os.path.dirname(f),
-                      dest_path=dest)
-             for f in filepaths]
-
-    # Set up asyncio queues of files between the various worker processes
-
-    # The speech recognizer finds the first span of non-silent audio, passes
-    # it through PocketSphinx, and attempts to parse a timestamp and comments
-    # from the results.
-    recognizer2prompter_speech_guesses = asyncio.Queue()
-
-    # The Prompter asks the user for corrections on those guesses and passes
-    # the results to the renamer/par2-generator
-    prompter2par_dest_names = asyncio.Queue()
-
-    # Meanwhile, the flac encoder copies the wav data while encoding it to the
-    # destination as a temporary file
-    flac2par_completions = asyncio.Queue()
-
-    # Finally, the par processor queues the files back to the coordinator for
-    # completion tracking.
-    par2processor_completions = asyncio.Queue()
-
-    recognizer_task = asyncio.create_task(speech_recognizer(
-        files,
-        recognizer2prompter_speech_guesses))
-
-    prompter_task = asyncio.create_task(filename_prompter(
-        recognizer2prompter_speech_guesses,
-        prompter2par_dest_names))
-
-    flac_task = asyncio.create_task(flac_encoder(
-        files,
-        flac2par_completions))
-
-    rename_and_par_task = asyncio.create_task(renamer_and_par_generator(
-        prompter2par_dest_names,
-        flac2par_completions,
-        par2processor_completions))
-
-    time_start = time.monotonic()
-    # Wait for all files to be completely processed
-    await asyncio.gather(
-        recognizer_task,
-        prompter_task,
-        flac_task,
-        rename_and_par_task)
-    time_end = time.monotonic()
-    print(f"Processor: done, {time_end-time_start:.1f}s total.")
-
-
-#============================================================================
-# Phase B: Verify and copyback - Verify par2s, clean up, copy flacs back to src
-#============================================================================
-
-async def phaseB_verify_and_copyback(dest):
-    pass
-
-
-#============================================================================
-# Phase C: Verify backcopy - Verify USB copy of FLAC files, clean up
-#============================================================================
-
-async def phaseC_verify_backcopy(dest):
-    pass
+    with patch_stdout():
+        finfo.final_filename = await session.prompt_async(HTML(
+                f"<prompt>* Confirm file rename for</prompt> <fname>{finfo.fpath}</fname>\n <guess>Guess</guess>: <fname>{finfo.suggested_filename}</fname> "
+                f"<comment>({len(finfo.suggested_filename)} characters)</comment>\n <final>Final&gt;</final> "),
+                style=style,
+                default=finfo.suggested_filename,
+                mouse_support=True,
+                bottom_toolbar=None, auto_suggest=AutoSuggestFromHistory())
 
 
 #============================================================================
 # TransferInfo and worklists
 #============================================================================
 
-class TransferInfo(types.SimpleNamespace):
+@dataclass
+class TransferInfo:
     """Contains the state of each transfer.
 
     A TransferInfo object is created for each file to transfer, based
@@ -1916,17 +1790,25 @@ class TransferInfo(types.SimpleNamespace):
     based on the tokens it gets from walking its incoming Stepper queues.
     """
 
-    source_wav = None
-    wav_abspath = None
-    dest_dir = None
-    wav_progress_dir = None
-    source_link = None
+    source_wav:Path
+    wav_abspath:Path
+    dest_dir:Path
+    wav_progress_dir:Path
+    source_link:Path
 
-    fname_guess = None
-    fname_prompted = None
-    mtime = None
-    flac_fpath = None
-    par_fpaths = None
+    fname_guess:str = None
+    fname_prompted:str = None
+    mtime:datetime.datetime = None
+    flac_fpath:Path = None
+    par_fpaths:list[Path] = field(default_factory=list)
+
+    # TODO - transition from old FileInfo objects
+    #files = [FileInfo(instrument="test",
+    #                  fpath=f,
+    #                  orig_filename=os.path.basename(f),
+    #                  src_path=os.path.dirname(f),
+    #                  dest_path=dest)
+    #         for f in filepaths]
 
 #============================================================================
 # Tasks
@@ -1973,13 +1855,25 @@ class Step:
 
 
     async def listen(cmdargs, worklist, *, token, stepper):
+        """The speech recognizer finds the first span of non-silent audio, passes
+        it through PocketSphinx, and attempts to parse a timestamp and comments
+        from the results.
+        """
         stepper.log(f"****** working on {token} *******")
+        # TODO merge FileInfo with TransferInfo
+        #await process_file_speech(finfo)
 
     async def prompt(cmdargs, worklist, *, token, stepper):
-        pass
+        """The Prompter asks the user for corrections on the guesses from listen.
+        """
+        # TODO check for in-progress fname_prompted file contents first
+        if act("Prompt for a corrected filename"):
+            await prompt_for_filename(worklist[token])
 
     async def flacenc(cmdargs, worklist, *, token, stepper):
-        pass
+        """Meanwhile, the flac encoder copies the wav data while encoding it
+        to the destination as a temporary file.
+        """
 
     async def pargen(cmdargs, worklist, *, token, stepper):
         pass
