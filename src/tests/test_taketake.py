@@ -2044,6 +2044,10 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
 
 class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture):
     """Test task processing in taketake"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        #self.maxDiff=None
+
     async def test_empty_runtasks(self):
         taketake.Config.act = False
         dest = Path("dest_foo")
@@ -2064,6 +2068,19 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture):
             with self.subTest(r=r):
                 s = taketake.process_speech(testflacpath, r)
                 self.assertEqual(s, expect)
+
+    #@unittest.skipUnless(dontskip, "Takes 0.75s per subtest")
+    async def test_extract_timestamp_from_audio(self):
+        audioinfo = await taketake.extract_timestamp_from_audio(Path(testflacpath), 30)
+        audioinfo = dataclasses.asdict(audioinfo)
+        self.assertEqual(audioinfo, dict(
+            duration_s=30,
+            extra_speech=[],
+            parsed_timestamp=datetime.datetime(2021, 3, 18, 20, 20),
+            recognized_speech='twenty twenty monday march eighteenth two thousand twenty one',
+            speech_range={'duration': 4.507420000000001, 'start': 1.64045},
+            ))
+
 
     async def test_find_audio_span(self):
         # TODO our flac is too short for scan-to to work

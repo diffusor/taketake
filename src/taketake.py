@@ -1194,22 +1194,25 @@ def words_to_timestamp(text):
 # File Audio processing
 #============================================================================
 
-async def process_timestamp_from_audio(fpath, audioinfo):
-    """Returns a timestamp and extra string data from the beginning speech in f.
+async def extract_timestamp_from_audio(fpath:Path, duration_s:float) -> AudioInfo:
+    """Runs speech-to-text on the given audiofile fpath.
 
-    Raises NoSuitableAudioSpan or TimestampGrokError if processing fails.
+    duration_s specifies the runtime of the audio file in float seconds
     """
 
     # Only scan the first bit of the file to avoid transfering a lot of data.
     # This means we can prompt the user for any corrections sooner.
-    scan_duration = min(audioinfo.duration_s, Config.file_scan_duration_s)
+    scan_duration = min(duration_s, Config.file_scan_duration_s)
 
+    audioinfo = AudioInfo()
+    audioinfo.duration_s = duration_s
     audioinfo.speech_range = await find_likely_audio_span(fpath, scan_duration)
-    print(f"Speechinizer: {fpath.name} - processing audio at {finfo.speech_range}")
+    print(f"Speechinizer: {fpath.name} - processing audio at {audioinfo.speech_range}")
     audioinfo.recognized_speech = await asyncio.to_thread(process_speech,
-            fpath, audioinfo.speech_range)
+            str(fpath), audioinfo.speech_range)
     audioinfo.parsed_timestamp, audioinfo.extra_speech \
             = words_to_timestamp(audioinfo.recognized_speech)
+    return audioinfo
 
 
 def format_duration(duration:float, style:str="letters") -> str:
@@ -1266,17 +1269,16 @@ def format_duration(duration:float, style:str="letters") -> str:
         return s
 
 
-async def process_file_speech(fpath:Path):
+async def construct_suggested_filename(fpath:Path) -> str:
     """Process the file from the given FileInfo parameter, filling in the
     fields duration_s, silences, non_silences, speech_range, recognized_speech,
     parsed_timestamp, extra_speech, and suggested_filename.
     """
-    audioinfo = AudioInfo()
-    audioinfo.duration_s = await get_file_duration(finfo.fpath)
+    duration_s = await get_file_duration(fpath)
 
-    dbg(f"Listening for timestamp info in '{f}' ({audioinfo.duration_s:.2f}s)")
+    dbg(f"Listening for timestamp info in '{f}' ({duration_s:.2f}s)")
     try:
-        await process_timestamp_from_audio(fpath, audioinfo)
+        audioinfo = await extract_timestamp_from_audio(fpath, duration_s)
 
         # Format the timestamp
         # TODO we don't want whether .second is 0, we want whether the
@@ -1288,22 +1290,22 @@ async def process_file_speech(fpath:Path):
         tstr = audioinfo.parsed_timestamp.strftime(time_fmt)
 
         # Format the duration
-        dstr = format_duration(finfo.duration_s)
+        dstr = format_duration(duration_s)
 
         # Format the notes
-        if finfo.extra_speech:
-            notes = "-".join(finfo.extra_speech) + "."
+        if audioinfo.extra_speech:
+            notes = "-".join(audioinfo.extra_speech) + "."
         else:
             notes = ""
 
         finfo.suggested_filename = Config.dest_fname_fmt.format(
                 prefix=finfo.instrument, datestamp=tstr,
-                notes=notes, duration=dstr, orig_fname=finfo.orig_filename)
-        print(f"Speechinizer: {finfo.orig_filename!r} - {finfo.recognized_speech!r} -> {finfo.suggested_filename!r}")
+                notes=notes, duration=dstr, orig_fname=fpath.name)
+        print(f"Speechinizer: {fpath.name} - {audioinfo.recognized_speech!r} -> {finfo.suggested_filename!r}")
 
     except (NoSuitableAudioSpan, TimestampGrokError) as e:
         # Couldn't find any timestamp info
-        finfo.suggested_filename = finfo.orig_filename
+        finfo.suggested_filename = fpath.name
 
 
 #============================================================================
@@ -1847,12 +1849,6 @@ class TransferInfo:
     #         for f in filepaths]
     #
     # Functions using finfo:
-    #  process_file_speech - coroutine
-    #    sets finfo.duration_s suggested_filename
-    #    uses finfo.parsed_timestamp fpath duration_s extra_speech instrument orig_filename
-    #    process_timestamp_from_audio - coroutine
-    #      sets finfo.speech_range orig_speech parsed_timestamp, extra_speech
-    #      uses finfo.duration_s fpath orig_speech speech_range
     #  prompt_for_filename
     #    sets finfo.final_filename
     #    uses finfo.fpath suggested_filename
@@ -1915,7 +1911,7 @@ class Step:
         # TODO merge needed cross-step bits of FileInfo into TransferInfo
         #  - But we should keep the information only needed within the listen
         #  step confined to a separate data structure, or pass parameters.
-        #await process_file_speech(finfo)
+        #await construct_suggested_filename(finfo)
         # TODO fall back to the file mtime if needed.  Add a cmdline arg?
         # --timestamp speech, now, mtime, atime, ctime, none
         # (If we allow arbitrary strings, things get silly - would need to prompt)
