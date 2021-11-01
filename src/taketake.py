@@ -121,11 +121,6 @@ class Config:
     dest_fname_fmt = "{prefix}.{datestamp}.{notes}{duration}.{orig_fname}"
     xdelta_fname = ".xdelta"
 
-@dataclass
-class TimeRange:
-    start: float
-    duration: float
-
 
 # Exceptions
 class TaketakeRuntimeError(RuntimeError):
@@ -762,6 +757,27 @@ def inject_timestamp(fmt, when=None):
 # Audio file processing
 #============================================================================
 
+@dataclass
+class TimeRange:
+    start:float
+    duration:float
+
+    def __str__(self):
+        end = self.start + self.duration
+        r = "-".join(format_duration(t, style='colons') for t in (self.start, end))
+        return f"[{r}]({format_duration(self.duration)})"
+
+
+@dataclass
+class AudioInfo:
+    duration_s:float = None
+    speech_range:TimeRange = None
+    recognized_speech:str = None # Was orig_speech
+    parsed_timestamp:datetime.datetime = None
+    extra_speech:str = None
+
+
+
 def invert_silences(silences, file_scan_duration_s):
     """Return a list of TimeRange objects that represent non-silence.
 
@@ -1175,10 +1191,10 @@ def words_to_timestamp(text):
 
 
 #============================================================================
-# File processing
+# File Audio processing
 #============================================================================
 
-async def process_timestamp_from_audio(finfo):
+async def process_timestamp_from_audio(fpath, audioinfo):
     """Returns a timestamp and extra string data from the beginning speech in f.
 
     Raises NoSuitableAudioSpan or TimestampGrokError if processing fails.
@@ -1186,25 +1202,33 @@ async def process_timestamp_from_audio(finfo):
 
     # Only scan the first bit of the file to avoid transfering a lot of data.
     # This means we can prompt the user for any corrections sooner.
-    scan_duration = min(finfo.duration_s, Config.file_scan_duration_s)
+    scan_duration = min(audioinfo.duration_s, Config.file_scan_duration_s)
 
-    finfo.speech_range = await find_likely_audio_span(finfo.fpath, scan_duration)
-    print(f"Speechinizer: {finfo.orig_filename!r} - processing {finfo.speech_range.duration:.2f}s "
-          f"of audio starting at offset {finfo.speech_range.start:.2f}s")
-    finfo.orig_speech = await asyncio.to_thread(process_speech,
-            finfo.fpath, finfo.speech_range)
-    finfo.parsed_timestamp, finfo.extra_speech = words_to_timestamp(finfo.orig_speech)
+    audioinfo.speech_range = await find_likely_audio_span(fpath, scan_duration)
+    print(f"Speechinizer: {fpath.name} - processing audio at {finfo.speech_range}")
+    audioinfo.recognized_speech = await asyncio.to_thread(process_speech,
+            fpath, audioinfo.speech_range)
+    audioinfo.parsed_timestamp, audioinfo.extra_speech \
+            = words_to_timestamp(audioinfo.recognized_speech)
 
 
-def format_duration(duration):
+def format_duration(duration:float, style:str="letters") -> str:
     """Returns a string of the form XhYmZs given a duration in seconds.
+
+    style is one of:
+        letters: 5h2s
+        colons: 5:00:02, 0:00:03
 
     The duration s is first rounded to the nearest second.
     If any unit is 0, omit it, except if the duration is zero return 0s.
     """
 
     parts = []
-    duration = round(duration)     # now an int
+    if style == "letters":
+        intdur = round(duration)     # now an int
+    else:
+        intdur = int(duration)
+        frac = round(duration - intdur, 2)
 
     # The unit_map dict maps unit names to their multiple of the next unit
     # The final unit's multiple must be None.
@@ -1219,33 +1243,49 @@ def format_duration(duration):
 
     for unit, multiple in unit_map.items():
         if multiple is None:
-            value = duration
+            value = intdur
         else:
-            value = duration % multiple
-            duration //= multiple  # int division
-        if value or (not parts and duration == 0):
-            parts.append(f"{value}{unit}")
+            value = intdur % multiple
+            intdur //= multiple  # int division
+        if style == "letters":
+            if value or (not parts and intdur == 0):
+                parts.append(f"{value}{unit}")
+        elif style == "colons":
+            if unit in "sm":
+                parts.append(f"{value:02}")
+            else:
+                parts.append(f"{value}")
 
     parts.reverse()
-    return ''.join(parts)
+    if style == "letters":
+        return ''.join(parts)
+    elif style == "colons":
+        s = ':'.join(parts)
+        if frac:
+            s += str(frac)[1:]
+        return s
 
 
-async def process_file_speech(finfo):
+async def process_file_speech(fpath:Path):
     """Process the file from the given FileInfo parameter, filling in the
-    fields duration_s, silences, non_silences, speech_range, orig_speech,
+    fields duration_s, silences, non_silences, speech_range, recognized_speech,
     parsed_timestamp, extra_speech, and suggested_filename.
     """
-    finfo.duration_s = await get_file_duration(finfo.fpath)
-    #print(f"Listening for timestamp info in '{f}' ({file_duration:.2f}s)")
+    audioinfo = AudioInfo()
+    audioinfo.duration_s = await get_file_duration(finfo.fpath)
+
+    dbg(f"Listening for timestamp info in '{f}' ({audioinfo.duration_s:.2f}s)")
     try:
-        await process_timestamp_from_audio(finfo)
+        await process_timestamp_from_audio(fpath, audioinfo)
 
         # Format the timestamp
-        if finfo.parsed_timestamp.second:
+        # TODO we don't want whether .second is 0, we want whether the
+        # timestamp contained "and X seconds"
+        if audioinfo.parsed_timestamp.second:
             time_fmt = Config.timestamp_fmt_with_seconds
         else:
             time_fmt = Config.timestamp_fmt_no_seconds
-        tstr = finfo.parsed_timestamp.strftime(time_fmt)
+        tstr = audioinfo.parsed_timestamp.strftime(time_fmt)
 
         # Format the duration
         dstr = format_duration(finfo.duration_s)
@@ -1259,7 +1299,7 @@ async def process_file_speech(finfo):
         finfo.suggested_filename = Config.dest_fname_fmt.format(
                 prefix=finfo.instrument, datestamp=tstr,
                 notes=notes, duration=dstr, orig_fname=finfo.orig_filename)
-        print(f"Speechinizer: {finfo.orig_filename!r} - {finfo.orig_speech!r} -> {finfo.suggested_filename!r}")
+        print(f"Speechinizer: {finfo.orig_filename!r} - {finfo.recognized_speech!r} -> {finfo.suggested_filename!r}")
 
     except (NoSuitableAudioSpan, TimestampGrokError) as e:
         # Couldn't find any timestamp info
@@ -1819,7 +1859,7 @@ class TransferInfo:
     #    play_media_file
     #      uses finfo.speech_range fpath suggested_filename
     #
-    # Needed across steps: speech_range orig_speech suggested_filename
+    # Needed across steps: speech_range.start orig_speech? suggested_filename
 
 
 #============================================================================

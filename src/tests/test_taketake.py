@@ -784,55 +784,72 @@ class Test0_words_to_timestamp(unittest.TestCase):
                    2205, 8, 4, 5)
 
 
-class Test0_fmt_duration(unittest.TestCase):
-    def check(self, duration, expect):
-        formatted = taketake.format_duration(duration)
-        self.assertEqual(formatted, expect)
+class Test0_format_duration(unittest.TestCase):
+    def check(self, s, expect, expect_colons=None):
+        with self.subTest(s=s, expect=expect):
+            formatted = taketake.format_duration(s)
+            self.assertEqual(formatted, expect)
+        if expect_colons is not None:
+            with self.subTest(s=s, expect_colons=expect_colons):
+                formatted = taketake.format_duration(s, style="colons")
+                self.assertEqual(formatted, expect_colons)
+
 
     def test_seconds(self):
-        self.check(0, "0s")
-        self.check(0.5, "0s")
-        self.check(1.49, "1s")
-        self.check(1.5, "2s")
-        self.check(59, "59s")
+        self.check(0, "0s", '0:00:00')
+        self.check(0.5, "0s", '0:00:00.5')
+        self.check(1.49, "1s", '0:00:01.49')
+        self.check(1.5, "2s", '0:00:01.5')
+        self.check(59, "59s", '0:00:59')
 
     def test_minutes_no_seconds(self):
-        self.check(60, "1m")
-        self.check(60+60, "2m")
-        self.check(60*59, "59m")
+        self.check(60, "1m", '0:01:00')
+        self.check(60+60, "2m", '0:02:00')
+        self.check(60*59, "59m", '0:59:00')
 
     def test_minutes_with_seconds(self):
-        self.check(61, "1m1s")
-        self.check(60+59, "1m59s")
-        self.check(60+60+1, "2m1s")
-        self.check(60*60-1, "59m59s")
+        self.check(61, "1m1s", '0:01:01')
+        self.check(60+59, "1m59s", '0:01:59')
+        self.check(60+60+1, "2m1s", '0:02:01')
+        self.check(60*60-1, "59m59s", '0:59:59')
 
     def test_hours_no_minutes_no_seconds(self):
-        self.check(3600, "1h")
-        self.check(3600*2, "2h")
-        self.check(3600*60, "60h")
+        self.check(3600, "1h", '1:00:00')
+        self.check(3600*2, "2h", '2:00:00')
+        self.check(3600*60, "60h", '60:00:00')
 
     def test_hours_no_minutes_with_seconds(self):
-        self.check(3600+1, "1h1s")
-        self.check(3600+59, "1h59s")
-        self.check(3600*2+1, "2h1s")
-        self.check(3600*60+59, "60h59s")
+        self.check(3600+1, "1h1s", '1:00:01')
+        self.check(3600+59, "1h59s", '1:00:59')
+        self.check(3600*2+1, "2h1s", '2:00:01')
+        self.check(3600*60+59, "60h59s", '60:00:59')
 
     def test_hours_with_minutes_no_seconds(self):
-        self.check(3600+1*60, "1h1m")
-        self.check(3600+59*60, "1h59m")
-        self.check(3600*2+1*60, "2h1m")
-        self.check(3600*60+59*60, "60h59m")
+        self.check(3600+1*60, "1h1m", '1:01:00')
+        self.check(3600+59*60, "1h59m", '1:59:00')
+        self.check(3600*2+1*60, "2h1m", '2:01:00')
+        self.check(3600*60+59*60, "60h59m", '60:59:00')
 
     def test_hours_with_minutes_and_seconds(self):
-        self.check(3600+1*60+1, "1h1m1s")
-        self.check(3600+59*60+1, "1h59m1s")
-        self.check(3600+59*60+59, "1h59m59s")
-        self.check(3600*2+1*60+1, "2h1m1s")
-        self.check(3600*2+1*60+59, "2h1m59s")
-        self.check(3600*60+59*60+1, "60h59m1s")
-        self.check(3600*60+59*60+59, "60h59m59s")
+        self.check(3600+1*60+1, "1h1m1s", '1:01:01')
+        self.check(3600+59*60+1, "1h59m1s", '1:59:01')
+        self.check(3600+59*60+59, "1h59m59s", '1:59:59')
+        self.check(3600*2+1*60+1, "2h1m1s", '2:01:01')
+        self.check(3600*2+1*60+59, "2h1m59s", '2:01:59')
+        self.check(3600*60+59*60+1, "60h59m1s", '60:59:01')
+        self.check(3600*60+59*60+59, "60h59m59s", '60:59:59')
 
+
+    def test_TimeRange_str(self):
+        for start, dur, expect in (
+                (0, 0, '[0:00:00-0:00:00](0s)'),
+                (0, 1, '[0:00:00-0:00:01](1s)'),
+                (1, 0, '[0:00:01-0:00:01](0s)'),
+                (192167, 0, '[53:22:47-53:22:47](0s)'),
+                (192167.1531, 135870.2123, '[53:22:47.15-91:07:17.37](37h44m30s)'),
+                ):
+            with self.subTest(start=start, dur=dur, expect=expect):
+                self.assertEqual(f"{taketake.TimeRange(start, dur)}", expect)
 
 #===========================================================================
 # Queues and Steppers
