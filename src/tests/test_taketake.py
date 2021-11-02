@@ -851,6 +851,57 @@ class Test0_format_duration(unittest.TestCase):
             with self.subTest(start=start, dur=dur, expect=expect):
                 self.assertEqual(f"{taketake.TimeRange(start, dur)}", expect)
 
+
+class Test0_parse_timestamp(unittest.TestCase):
+    def test_parse_timestamp(self):
+        for in_str in (
+                "20210113-125657",
+                "19301012-005638",
+                "21351201-230002",
+                ):
+            for sep in "_", " ":
+                s = in_str.replace("-", sep)
+
+                for day in "Wed Mon wed sat tue".split():
+                    with_seconds = s
+                    with self.subTest(with_seconds=with_seconds):
+                        out = taketake.parse_timestamp(with_seconds).strftime(f"%Y%m%d{sep}%H%M%S")
+                        self.assertEqual(out, with_seconds)
+
+                    with_seconds_and_day = f"{with_seconds}{sep}{day}"
+                    with self.subTest(with_seconds_and_day=with_seconds_and_day):
+                        out = taketake.parse_timestamp(with_seconds_and_day).strftime(f"%Y%m%d{sep}%H%M%S")
+                        self.assertEqual(out, with_seconds)
+
+                    no_seconds = s[:-2]
+                    with self.subTest(no_seconds=no_seconds):
+                        out = taketake.parse_timestamp(no_seconds).strftime(f"%Y%m%d{sep}%H%M%S")
+                        self.assertEqual(out, no_seconds+"00")
+
+                    no_seconds_and_day = f"{no_seconds}{sep}{day}"
+                    with self.subTest(no_seconds_and_day=no_seconds_and_day):
+                        out = taketake.parse_timestamp(no_seconds_and_day).strftime(f"%Y%m%d{sep}%H%M%S")
+                        self.assertEqual(out, no_seconds+"00")
+
+    def test_parse_timestamp_bad(self):
+        for s in (
+                "x20210113-125657",
+                "21351201-230002x",
+                "21351201:230002",
+                "211201T2300",
+                "19301012-005638-Wxd",
+                "19301012-005638-Monday",
+                "19301012-005638-Mo",
+                "19301012-005638-",
+                "",
+                "foo",
+                "2021-11-01 11:42 -0700 Mon",
+                "2021-11-01 11:42",
+                ):
+            with self.subTest(s=s):
+                out = taketake.parse_timestamp(s)
+                self.assertEqual(out, None)
+
 #===========================================================================
 # Queues and Steppers
 #===========================================================================
@@ -1285,8 +1336,11 @@ class Test6_args(CdTempdirFixture):
                 keep_wavs=False,
                 skip_copyback=False,
                 skip_tests=False,
+                skip_speech_to_text=False,
                 continue_from=None,
                 dest=Path(),
+                fallback_timestamp='mtime',
+                instrument='TODO',
                 sources=[],
                 wavs=[])
 
@@ -1614,6 +1668,44 @@ class Test6_args(CdTempdirFixture):
         self.check_args_with_prepended_src(f"{d} -d",
                 debug=True,
                 dest=d)
+
+
+class Test6_fallback_timestamp(TempdirFixture):
+    def setUp(self):
+        super().setUp()
+        self.tempfile = Path(self.tempdir)/'foobarfile'
+
+    def get_stamp(self, mode):
+        return taketake.get_fallback_timestamp(self.tempfile, mode)
+
+    def test_fallback_timestamp_passthrough(self):
+        self.assertEqual(self.get_stamp("foo"), "foo")
+
+    def test_fallback_timestamp_now(self):
+        """This is a race condition; could mismatch if the second changes"""
+        now = taketake.inject_timestamp("{}")
+        self.assertEqual(self.get_stamp("now"), now)
+
+    def test_fallback_timestamp_filetime_now(self):
+        """This is a race condition; could mismatch if the second changes"""
+        now = taketake.inject_timestamp("{}")
+        self.tempfile.touch()
+        for mode in "mca":
+            with self.subTest(mode=mode):
+                self.assertEqual(self.get_stamp(f"{mode}time"), now)
+
+    def test_fallback_timestamp_filetime_atime_ctime(self):
+        self.tempfile.touch()
+        atime, mtime = 1698710698, 209687106
+        os.utime(self.tempfile, times=(atime, mtime))
+        for mode, seconds in (
+                ("atime", atime),
+                ("mtime", mtime),
+                ):
+            ts = taketake.inject_timestamp("{}",
+                    when=datetime.datetime.fromtimestamp(seconds))
+            with self.subTest(mode=mode, seconds=seconds, ts=ts):
+                self.assertEqual(self.get_stamp(mode), ts)
 
 
 class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
@@ -2048,14 +2140,23 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture):
         super().__init__(*args, **kwargs)
         #self.maxDiff=None
 
+    @unittest.skipUnless(dontskip, "Takes 1s per wav")
     async def test_empty_runtasks(self):
         taketake.Config.act = False
         dest = Path("dest_foo")
         dest.mkdir()
+        src = Path("src")
+        src.mkdir()
+
+        wavpaths = []
+        for w in "take1.wav take2.wav".split():
+            wavpaths.append(src/w)
+            await taketake.flac_decode(testflacpath, wavpaths[-1])
         await taketake.run_tasks(args=argparse.Namespace(
                 continue_from=None,
                 dest=Path("dest_foo"),
-                wavs=pathlist("foo.wav bar.wav"),
+                wavs=wavpaths,
+                instrument="foobar",
             ))
 
     @unittest.skipUnless(dontskip, "Takes 0.75s per subtest")
@@ -2069,7 +2170,7 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture):
                 s = taketake.process_speech(testflacpath, r)
                 self.assertEqual(s, expect)
 
-    #@unittest.skipUnless(dontskip, "Takes 0.75s per subtest")
+    @unittest.skipUnless(dontskip, "Takes 0.75s per subtest")
     async def test_extract_timestamp_from_audio(self):
         audioinfo = await taketake.extract_timestamp_from_audio(Path(testflacpath), 30)
         audioinfo = dataclasses.asdict(audioinfo)

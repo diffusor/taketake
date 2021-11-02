@@ -69,7 +69,8 @@ import asyncio
 import time
 import sys
 import os
-import glob
+import re
+import glob # TODO replace with Path.glob everywhere
 import itertools
 import collections
 import subprocess
@@ -112,13 +113,14 @@ class Config:
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
 
+    prefix = "piano"
     wav_extensions = "wav WAV"
     progress_dir_fmt = ".taketake.{}.tmp"
     source_wav_linkname = ".source.wav"
     interrupted_flac_fmt = ".interrupted-abandoned.{}.flac"
     guess_fname = ".filename_guess"
     provided_fname = ".filename_provided"
-    dest_fname_fmt = "{prefix}.{datestamp}.{notes}{duration}.{orig_fname}"
+    dest_fname_fmt = "{prefix}.{datestamp}.{notes}{duration}.{instrument}.{orig_fname}"
     xdelta_fname = ".xdelta"
 
 
@@ -369,14 +371,14 @@ ExtCmd(
 # External command implementation
 #============================================================================
 
-async def flac_encode(wav_fpath, flac_fpath):
+async def flac_encode(wav_fpath, flac_encode_fpath):
     #flac --preserve-modtime 7d29t001.WAV -o 7d29t001.flac
-    proc = await ExtCmd.flac_encode.run_fg(infile=wav_fpath, outfile=flac_fpath)
-    #print(f"Encoded to {flac_fpath}:", proc.stderr_data.decode())
+    proc = await ExtCmd.flac_encode.run_fg(infile=wav_fpath, outfile=flac_encode_fpath)
+    #print(f"Encoded to {flac_encode_fpath}:", proc.stderr_data.decode())
 
 
-async def flac_decode(flac_fpath, wav_fpath):
-    proc = await ExtCmd.flac_decode.run_fg(infile=flac_fpath, outfile=wav_fpath)
+async def flac_decode(flac_encode_fpath, wav_fpath):
+    proc = await ExtCmd.flac_decode.run_fg(infile=flac_encode_fpath, outfile=wav_fpath)
     #print(f"Decoded to {wav_fpath}:", proc.stderr_data.decode())
 
 
@@ -741,17 +743,64 @@ def set_mtime(f, dt):
     seconds = dt.timestamp()
     os.utime(f, (seconds,)*2)
 
-def inject_timestamp(fmt, when=None):
-    """Format the time into the given fmt string.
+def get_fallback_timestamp(fpath:Path, fallback_timestamp:str) -> str:
+    """Returns the mtime, ctime, or atime of the given file in fpath
+    if the given fallback_timestamp is one of those words.
+    If fallback_timestamp is now, it returns the current time.
 
-    fmt must contain a single {} which indicates where the timestamp goes.
+    Otherwise, it simply returns the given fallback_timestamp string.
+
+    The return timestamp format is intended to match the
+    Config.timestamp_fmt_with_seconds.
+    """
+    if fallback_timestamp == "now":
+        dt = datetime.datetime.now()
+    elif fallback_timestamp in "atime ctime mtime".split():
+        dt = datetime.datetime.fromtimestamp(
+                getattr(fpath.stat(), f"st_{fallback_timestamp}"))
+    else:
+        return fallback_timestamp
+    return inject_timestamp("{}", dt)
+
+def inject_timestamp(template, when=None):
+    """Format the time into the given template string.
+
+    template must contain a single {} which indicates where the timestamp goes.
     Config.timestamp_fmt_with_seconds is used to format the time.
     If when is None, the current time is encoded.
     Otherwise, when should be an object for which strftime is defined.
     """
     if when is None:
         when = datetime.datetime.now()
-    return fmt.format(when.strftime(Config.timestamp_fmt_with_seconds))
+    return template.format(when.strftime(Config.timestamp_fmt_with_seconds))
+
+def parse_timestamp(s):
+    """Parses time from strings like YYYYmmdd-HHMM and YYYYmmdd-HHMMSS.
+
+    Valid date-to-time separators are -, _, and ' ' (a single space).
+
+    Handles optional -shortweekday at the end, not long though.  It not match.
+    """
+    result = None
+
+    s = re.sub(r'[_ ]', '-', s)
+
+    def try_parse(f):
+        nonlocal result
+        try:
+            result = datetime.datetime.strptime(s, f)
+            return True
+        except ValueError as e:
+            #print(f"{s}: {e}")
+            return False
+
+    for fmt in Config.timestamp_fmt_no_seconds, Config.timestamp_fmt_with_seconds:
+        dayless_fmt = fmt.replace("-%a", "")
+        if try_parse(fmt):
+            break
+        if try_parse(dayless_fmt):
+            break
+    return result
 
 #============================================================================
 # Audio file processing
@@ -774,8 +823,7 @@ class AudioInfo:
     speech_range:TimeRange = None
     recognized_speech:str = None # Was orig_speech
     parsed_timestamp:datetime.datetime = None
-    extra_speech:str = None
-
+    extra_speech:str = field(default_factory=list)
 
 
 def invert_silences(silences, file_scan_duration_s):
@@ -1269,43 +1317,28 @@ def format_duration(duration:float, style:str="letters") -> str:
         return s
 
 
-async def construct_suggested_filename(fpath:Path) -> str:
-    """Process the file from the given FileInfo parameter, filling in the
-    fields duration_s, silences, non_silences, speech_range, recognized_speech,
-    parsed_timestamp, extra_speech, and suggested_filename.
-    """
-    duration_s = await get_file_duration(fpath)
+def format_dest_filename(fpath:Path, audioinfo:AudioInfo, instrument:str) -> str:
+    # Format the timestamp
+    # TODO actually want whether the timestamp contained "and X seconds"
+    if audioinfo.parsed_timestamp.second:
+        time_fmt = Config.timestamp_fmt_with_seconds
+    else:
+        time_fmt = Config.timestamp_fmt_no_seconds
+    tstr = audioinfo.parsed_timestamp.strftime(time_fmt)
 
-    dbg(f"Listening for timestamp info in '{f}' ({duration_s:.2f}s)")
-    try:
-        audioinfo = await extract_timestamp_from_audio(fpath, duration_s)
+    # Format the duration
+    dstr = format_duration(audioinfo.duration_s)
 
-        # Format the timestamp
-        # TODO we don't want whether .second is 0, we want whether the
-        # timestamp contained "and X seconds"
-        if audioinfo.parsed_timestamp.second:
-            time_fmt = Config.timestamp_fmt_with_seconds
-        else:
-            time_fmt = Config.timestamp_fmt_no_seconds
-        tstr = audioinfo.parsed_timestamp.strftime(time_fmt)
+    # Format the notes
+    if audioinfo.extra_speech:
+        notes = "-".join(audioinfo.extra_speech) + "."
+    else:
+        notes = ""
 
-        # Format the duration
-        dstr = format_duration(duration_s)
-
-        # Format the notes
-        if audioinfo.extra_speech:
-            notes = "-".join(audioinfo.extra_speech) + "."
-        else:
-            notes = ""
-
-        finfo.suggested_filename = Config.dest_fname_fmt.format(
-                prefix=finfo.instrument, datestamp=tstr,
-                notes=notes, duration=dstr, orig_fname=fpath.name)
-        print(f"Speechinizer: {fpath.name} - {audioinfo.recognized_speech!r} -> {finfo.suggested_filename!r}")
-
-    except (NoSuitableAudioSpan, TimestampGrokError) as e:
-        # Couldn't find any timestamp info
-        finfo.suggested_filename = fpath.name
+    return Config.dest_fname_fmt.format(
+            prefix=Config.prefix, datestamp=tstr,
+            notes=notes, duration=dstr, instrument=instrument,
+            orig_fname=fpath.stem)
 
 
 #============================================================================
@@ -1837,7 +1870,7 @@ class TransferInfo:
     fname_guess:str = None
     fname_prompted:str = None
     mtime:datetime.datetime = None
-    flac_fpath:Path = None
+    flac_encode_fpath:Path = None
     par_fpaths:list[Path] = field(default_factory=list)
 
     # TODO - transition from old FileInfo objects
@@ -1883,6 +1916,7 @@ class Step:
                 progress_dir.mkdir()
 
         for wav in cmdargs.wavs:
+            assert isinstance(wav, Path)
             info = TransferInfo(
                     source_wav=wav,
                     wav_abspath=os.path.abspath(wav),
@@ -1908,12 +1942,30 @@ class Step:
         from the results.
         """
         stepper.log(f"****** working on {token} *******")
+
+        xinfo = worklist[token]
+        fpath = xinfo.source_wav
+
+        duration_s = await get_file_duration(fpath)
+        try:
+            stepper.log(f"Listening for timestamp info in '{fpath}' ({duration_s:.2f}s)")
+            audioinfo = await extract_timestamp_from_audio(fpath, duration_s)
+        except (NoSuitableAudioSpan, TimestampGrokError) as e:
+            # Couldn't find any timestamp info
+            audioinfo = AudioInfo(
+                duration_s=duration_s,
+                parsed_timestamp=get_fallback_timestamp(fpath, cmdargs.fallback_timestamp))
+        xinfo.fname_guess = format_dest_filename(fpath, audioinfo, cmdargs.instrument)
+        print(f"Speechinizer: {fpath.name} - {audioinfo.recognized_speech!r} -> {xinfo.fname_guess!r}")
+
+        # TODO write the suggested_filename to a file if act
+
         # TODO merge needed cross-step bits of FileInfo into TransferInfo
         #  - But we should keep the information only needed within the listen
         #  step confined to a separate data structure, or pass parameters.
-        #await construct_suggested_filename(finfo)
+        #await format_dest_filename(finfo)
         # TODO fall back to the file mtime if needed.  Add a cmdline arg?
-        # --timestamp speech, now, mtime, atime, ctime, none
+        # --timestamp speech, now, mtime, ctime, none
         # (If we allow arbitrary strings, things get silly - would need to prompt)
         # Any other value that speech would avoid the speech recognition.
         # --no-prompt would skip the prompt process
@@ -2019,7 +2071,7 @@ def format_args(args):
         if val is not False and val is not None:
             if val is True:
                 arglist.append(str(arg))
-            elif isinstance(val, collections.abc.Sequence):
+            elif not isinstance(val, str) and isinstance(val, collections.abc.Sequence):
                 arglist.append(f"{arg}=[{', '.join(str(e) for e in val)}]")
             else:
                 arglist.append(f"{arg}={val}")
@@ -2053,7 +2105,23 @@ def validate_args(parser):
     if args.no_act:
         Config.act = False
 
+    if args.prefix:
+        Config.prefix = args.prefix
+
+    if not args.instrument:
+        args.instrument = "TODO" # TODO
+
     dbg("args pre-val: ", format_args(args))
+
+    # Check and fix --fallback-timestamp
+    dt = parse_timestamp(args.fallback_timestamp)
+    if dt is not None:
+        args.fallback_timestamp = dt.strftime(Config.timestamp_fmt_with_seconds)
+    elif args.fallback_timestamp not in "now mtime ctime atime".split():
+        err(f"Invalid --fallback-timestamp: '{args.fallback_timestamp}'"
+            f"\n      Expected one of 'now', 'mtime', 'ctime', or 'atime',"
+            f"\n      or a timestamp like {inject_timestamp('{}')}"
+            f"\n      with form YYYYmmdd-HHMMSS (seconds are optional)")
 
     # Use the final positional parameter as dest, like mv does
     if args.sources and args.dest is None:
@@ -2183,7 +2251,21 @@ def process_args(argv=None):
         help="Show debug output, including tracebacks from exceptions")
 
     arg('-p', '--prefix', action='store',
-        help="Prefix flac files with the given string")
+        help=f"Prefix flac files with the given string. Default: {Config.prefix}")
+
+    arg('-i', '--instrument', action='store',
+        help=f"Inject the given instrument name into the resulting filenames")
+
+    arg('-f', '--fallback-timestamp',
+        metavar=inject_timestamp("now|mtime|ctime|atime|{}"),
+        action='store', default="mtime",
+        help=f"""If speech-to-text fails or is skipped via -S, use this the
+            indicated timestamp instead.  Valid choices are now (use current time),
+            mtime, ctime, atime (use the modified/creation/access time of the
+            file), or the given specific timestamp.""")
+
+    arg('-S', '--skip-speech-to-text', action='store_true',
+        help=f"Use the given --fallback-timestamp instead.")
 
     arg('-k', '--keep-wavs', action='store_true',
         help="Don't delete processed source wav files")
