@@ -24,24 +24,31 @@ index ready for getting.  After processing the index, the actor puts that
 index into all its outbound queues.  A terminal token is used to indicate that
 there are no more items to process.
 
+Checkbox legend:
+
+* [x] Item complete and tested
+* [-] Item code-complete but not tested
+* [.] Item in-progress
+* (no box) Item not wired up
+
 0. [**initialize**]: process command line and set up the step network
 
-   a. Verify all unit tests pass
-   b. Process and validate command line arguments
-   c. Generate list of source wav files
-   d. Load the instrument name from ``src/instrmnt.txt`` if it exists
-   e. If instrmnt.txt doesn't exist and --instrument wasn't specified,
+   a. [x] Verify all unit tests pass
+   b. [x] Process and validate command line arguments
+   c. [x] Generate list of source wav files
+   d. [x] Load the instrument name from ``src/instrmnt.txt`` if it exists
+   e. [x] If instrmnt.txt doesn't exist and --instrument wasn't specified,
       abort out.
 
 1. **setup**: *[global]* Determine wavs to process
 
    ``[setup] => listen,flacenc``
 
-   a. Create main progress directory if it doesn't already exist::
+   a. [x] Create main progress directory if it doesn't already exist::
 
        mkdir .taketake.20211025-1802-Mon
 
-   b. Create src wav progress directories and symlinks that don't already exist for each wav, e.g. ``audio001.wav``::
+   b. [-] Create src wav progress directories and symlinks that don't already exist for each wav, e.g. ``audio001.wav``::
 
        mkdir .taketake.20211025-1802-Mon/audio001.wav/
        symlink .taketake.20211025-1802-Mon/audio001.wav/.source.wav
@@ -57,9 +64,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
    **Skip this task if ``.filename_guess`` exists,
    filling in the guess into the TransferInfo instead.**
 
-   a. Run speech to text, parse timestamp, construct filename guess
+   a. [-] Run speech to text, parse timestamp, construct filename guess
 
-   b. Create filename guess progress file::
+   b. [.] Create filename guess progress file::
 
        echo $filename_guess > .filename_guess
 
