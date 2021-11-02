@@ -114,6 +114,7 @@ class Config:
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
 
     prefix = "piano"
+    instrument_fname = "instrmnt.txt"  # name for storing model name on USB src dir
     wav_extensions = "wav WAV"
     progress_dir_fmt = ".taketake.{}.tmp"
     source_wav_linkname = ".source.wav"
@@ -2108,9 +2109,6 @@ def validate_args(parser):
     if args.prefix:
         Config.prefix = args.prefix
 
-    if not args.instrument:
-        args.instrument = "TODO" # TODO
-
     dbg("args pre-val: ", format_args(args))
 
     # Check and fix --fallback-timestamp
@@ -2234,6 +2232,22 @@ def validate_args(parser):
                 #    err(f"Broken progress dir symlink:"
                 #        f"\n       {wavlink}"
                 #        f"\n    -> {wavlink.resolve()}")
+
+    # Check for instrument file in the first src directory
+    if args.wavs:
+        instrument_fpath = args.wavs[0].parent / Config.instrument_fname
+        if instrument_fpath.exists():
+            read_instrument = instrument_fpath.read_text().strip()
+            dbg(f"read {read_instrument} from {instrument_fpath}")
+            if args.instrument is not None and read_instrument != args.instrument:
+                err(f"Specified --instrument '{args.instrument}' doesn't match "
+                    f"contents of '{instrument_fpath}': '{read_instrument}'")
+            else:
+                args.instrument = read_instrument
+        if not args.instrument:
+            err(f"No '{Config.instrument_fname}' file found in SOURCE_WAV "
+                f"directory '{args.wavs[0].parent}'."
+                f"\n      You must specify an instrument with -i or --instrument")
 
     dbg("args post-val:", format_args(args))
 

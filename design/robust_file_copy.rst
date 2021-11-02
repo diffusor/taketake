@@ -24,7 +24,14 @@ index ready for getting.  After processing the index, the actor puts that
 index into all its outbound queues.  A terminal token is used to indicate that
 there are no more items to process.
 
-0. Verify all unit tests pass; process and validate command line arguments
+0. [**initialize**]: process command line and set up the step network
+
+   a. Verify all unit tests pass
+   b. Process and validate command line arguments
+   c. Generate list of source wav files
+   d. Load the instrument name from ``src/instrmnt.txt`` if it exists
+   e. If instrmnt.txt doesn't exist and --instrument wasn't specified,
+      abort out.
 
 1. **setup**: *[global]* Determine wavs to process
 
@@ -196,6 +203,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
         rm .taketake.$datestamp/*/.source.wav
         rmdir .taketake.$datestamp/*
         rmdir .taketake.$datestamp
+
+    b. Write the instrument name to ``src/instrmnt.txt`` if the file doesn't
+       exist
 
 
 Xdelta3 usage

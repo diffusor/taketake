@@ -1340,9 +1340,10 @@ class Test6_args(CdTempdirFixture):
                 continue_from=None,
                 dest=Path(),
                 fallback_timestamp='mtime',
-                instrument='TODO',
+                instrument='inst1',
                 sources=[],
                 wavs=[])
+        self.cmdline_suffix = "-i inst1"
 
     def mkdir_progress(self, tag, subdir="."):
         name = Path(taketake.Config.progress_dir_fmt.format(tag))
@@ -1350,7 +1351,8 @@ class Test6_args(CdTempdirFixture):
         return name
 
     def check_args(self, cmdline, *expected_errors, **kwargs):
-        argparser = taketake.process_args(cmdline.split())
+        argparser = taketake.process_args(cmdline.split()
+                + self.cmdline_suffix.split())
         errors = argparser.errors
         fmterr = taketake.format_errors
 
@@ -1654,6 +1656,34 @@ class Test6_args(CdTempdirFixture):
                 r" *\n *1.wav -> a/1.wav, b/1.wav"
                 r" *\n *2.wav -> c/2.wav, c/2.wav",
                 )
+
+    def test_instrument_not_specified(self):
+        d = Path("dest_foo")
+        d.mkdir()
+        self.cmdline_suffix = "" # Remove the default -i inst1 args
+        self.check_args_with_prepended_src(f"{d}",
+                r"No 'instrmnt.txt' file found in SOURCE_WAV directory '.'.")
+
+    def test_instrument_in_file(self):
+        inst = "model-3"
+        d = Path("dest_foo")
+        d.mkdir()
+        instfpath = Path(taketake.Config.instrument_fname)
+        instfpath.write_text(f" {inst}\n")
+        self.cmdline_suffix = "" # Remove the default -i inst1 args
+        self.check_args_with_prepended_src(f"{d}",
+                dest=d,
+                instrument=inst)
+
+    def test_instrument_in_file_doesnt_match(self):
+        inst = "model-3"
+        d = Path("dest_foo")
+        d.mkdir()
+        instfpath = Path(taketake.Config.instrument_fname)
+        instfpath.write_text(f" {inst}\n")
+        self.check_args_with_prepended_src(f"{d}",
+                f"Specified --instrument '{self.base_args['instrument']}' doesn't "
+                f"match contents of '{instfpath}': '{inst}'")
 
     def test_no_act_arg(self):
         d = Path("dest_foo")
