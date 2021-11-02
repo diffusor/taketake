@@ -7,6 +7,17 @@ Design goals:
 * Don't modify the USB contents until data has been copied off and verified
 * Do post-copy verification after flushing filesystem caches
 
+Checkbox legend:
+----------------
+Progress is tracked with [x] checkboxes.  Most of the low-level implementation
+is complete, but the step coroutines themselves need to be coded up and
+tested - this is the progress that is being tracked.
+
+* [x] Item complete and tested
+* [-] Item code-complete but not tested
+* [.] Item in-progress
+* (no box) Item not wired up
+
 Flow:
 -----
 The **setup** actor processes the command line options and figures out which
@@ -24,14 +35,7 @@ index ready for getting.  After processing the index, the actor puts that
 index into all its outbound queues.  A terminal token is used to indicate that
 there are no more items to process.
 
-Checkbox legend:
-
-* [x] Item complete and tested
-* [-] Item code-complete but not tested
-* [.] Item in-progress
-* (no box) Item not wired up
-
-0. [**initialize**]: process command line and set up the step network
+0. [x] (**initialize**): process command line and set up the step network
 
    a. [x] Verify all unit tests pass
    b. [x] Process and validate command line arguments
@@ -40,7 +44,7 @@ Checkbox legend:
    e. [x] If instrmnt.txt doesn't exist and --instrument wasn't specified,
       abort out.
 
-1. **setup**: *[global]* Determine wavs to process
+1. [-] **setup**: *[global]* Determine wavs to process
 
    ``[setup] => listen,flacenc``
 
@@ -57,7 +61,7 @@ Checkbox legend:
 *Perform the following steps for each wav, assuming each non-src filename is
 relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory*
 
-2. **listen**: Speech to text
+2. [.] **listen**: Speech to text
 
    ``setup => [listen] => prompt``
 
