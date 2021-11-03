@@ -1920,7 +1920,7 @@ class Step:
             assert isinstance(wav, Path)
             info = TransferInfo(
                     source_wav=wav,
-                    wav_abspath=os.path.abspath(wav),
+                    wav_abspath=Path(os.path.abspath(wav)),
                     dest_dir=cmdargs.dest,
                     wav_progress_dir=progress_dir / wav.name,
                     source_link=progress_dir / wav.name / Config.source_wav_linkname,
