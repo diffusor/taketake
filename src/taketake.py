@@ -1645,31 +1645,20 @@ class StepNetwork:
             assert False, f"Niether {src} nor {dest} are functions!" \
                     f"\n  {qdict}"
 
-    def add_task(self, *args, **kwargs):
-        """Add a general non-auto-stepped/walked task into the StepNetwork.
+    def add(self, coro, *args,
+            sync_from=None, pull_from=None,
+            send_to=None, sync_to=None, **kwargs):
+        """Add a task coroutine to the StepNetwork.
 
-        For argument descriptions, see add_step().
-
-        Non-step task coroutines are not automatically stepped, unlike step
-        coroutines.  Non-step tasks define impedence mismatches in the network
-        flow, so they must manage their own get() and put() activities.
-        These are useful for start and finish tasks run as part of the network.
-        """
-        self.add_step(*args, is_task=True, **kwargs)
-
-    def add_step(self, coro, *args, is_task=False,
-                 sync_from=None, pull_from=None,
-                 send_to=None, sync_to=None, **kwargs):
-        """Add a step to the StepNetwork.
-
-        The given coro will be automatically stepped via Stepper.walk.
+        If the given coro is marked with the @StepNetwork.stepped decorator,
+        then it will be automatically stepped via Stepper.walk.
 
         The [sync/pull/send]_[to/_from] arguments specify a single
         task/step, or a list of them, from which the
         correspending queues will be hooked up between the steppers.
 
         When execute() is called, the queues will be created and hooked into
-        the Steppers.
+        the list of Steppers.
         """
         self.seen_coroutines.add(coro)
 
@@ -1677,12 +1666,12 @@ class StepNetwork:
         stepper.args = args
         stepper.kwargs = kwargs
 
-        if is_task:
-            self.tasks[coro] = stepper
-        else:
+        if hasattr(coro, 'is_stepped'):
             assert pull_from is not None, \
                     f"step {stepper.name} needs a pull_from source"
             self.steps[coro] = stepper
+        else:
+            self.tasks[coro] = stepper
 
         coro.targets = set() # Build out the graph for cycle detection
 
@@ -1775,6 +1764,11 @@ class StepNetwork:
                                       **self.common_kwargs))
 
         await asyncio.gather(*tasks)
+
+    def stepped(coro):
+        """Decorator to mark coro as stepped task."""
+        coro.is_stepped = True
+        return coro
 
 
 #============================================================================
@@ -1937,6 +1931,7 @@ class Step:
         await stepper.put(None)
 
 
+    @StepNetwork.stepped
     async def listen(cmdargs, worklist, *, token, stepper):
         """The speech recognizer finds the first span of non-silent audio, passes
         it through PocketSphinx, and attempts to parse a timestamp and comments
@@ -1971,6 +1966,7 @@ class Step:
         # Any other value that speech would avoid the speech recognition.
         # --no-prompt would skip the prompt process
 
+    @StepNetwork.stepped
     async def prompt(cmdargs, worklist, *, token, stepper):
         """The Prompter asks the user for corrections on the guesses from listen.
         """
@@ -1978,17 +1974,21 @@ class Step:
         if act("Prompt for a corrected filename"):
             await prompt_for_filename(worklist[token])
 
+    @StepNetwork.stepped
     async def flacenc(cmdargs, worklist, *, token, stepper):
         """Meanwhile, the flac encoder copies the wav data while encoding it
         to the destination as a temporary file.
         """
 
+    @StepNetwork.stepped
     async def pargen(cmdargs, worklist, *, token, stepper):
         pass
 
+    @StepNetwork.stepped
     async def xdelta(cmdargs, worklist, *, token, stepper):
         pass
 
+    @StepNetwork.stepped
     async def cleanup(cmdargs, worklist, *, token, stepper):
         pass
 
@@ -2006,32 +2006,32 @@ async def run_tasks(args):
     network = StepNetwork("wavflacer")
     network.update_common_kwargs(cmdargs=args, worklist=worklist)
 
-    network.add_task(Step.setup,
+    network.add(Step.setup,
             send_to=[Step.listen, Step.flacenc])
 
-    network.add_step(Step.listen,
+    network.add(Step.listen,
             pull_from=Step.setup,
             send_to=Step.prompt)
 
-    network.add_step(Step.prompt,
+    network.add(Step.prompt,
             pull_from=Step.listen,
             send_to=Step.pargen)
 
-    network.add_step(Step.flacenc,
+    network.add(Step.flacenc,
             pull_from=Step.setup,
             send_to=[Step.pargen, Step.xdelta],
             sync_to=Step.xdelta)
 
-    network.add_step(Step.pargen,
+    network.add(Step.pargen,
             pull_from=[Step.prompt, Step.flacenc],
             send_to=Step.cleanup)
 
-    network.add_step(Step.xdelta,
+    network.add(Step.xdelta,
             sync_from=Step.flacenc,
             pull_from=Step.flacenc,
             sync_to=Step.cleanup)
 
-    network.add_step(Step.cleanup,
+    network.add(Step.cleanup,
             sync_from=Step.xdelta,
             pull_from=Step.pargen)
 

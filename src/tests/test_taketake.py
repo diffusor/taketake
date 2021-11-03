@@ -1067,99 +1067,117 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
                 runlist.append(f"src2:{e}")
             await stepper.put(None)
 
+        @taketake.StepNetwork.stepped
         async def w1(token, stepper): update(stepper)
+        @taketake.StepNetwork.stepped
         async def w2(token, stepper): update(stepper)
+        @taketake.StepNetwork.stepped
         async def w3(token, stepper): update(stepper)
+        @taketake.StepNetwork.stepped
         async def w4(token, stepper): update(stepper)
 
         async def f1(token, stepper): update(stepper)
         async def f2(token, stepper): update(stepper)
 
         network = taketake.StepNetwork("net")
-        network.add_task(src1, send_to=w1, sync_to=[w1, w2])
-        network.add_task(src2, send_to=[w1, w2, w3], sync_to=w3)
+        network.add(src1, send_to=w1, sync_to=[w1, w2])
+        network.add(src2, send_to=[w1, w2, w3], sync_to=w3)
 
-        network.add_step(w1, sync_from=src1, pull_from=[src1, src2],
+        network.add(w1, sync_from=src1, pull_from=[src1, src2],
                              sync_to=w4,     send_to=w4)
 
-        network.add_step(w2, sync_from=src1, pull_from=src2,
+        network.add(w2, sync_from=src1, pull_from=src2,
                                              send_to=w4)
 
-        network.add_step(w3, sync_from=src2, pull_from=src2,
+        network.add(w3, sync_from=src2, pull_from=src2,
                                              send_to=w4)
 
-        network.add_step(w4, pull_from=[w1, w2, w3], sync_from=w1)
+        network.add(w4, pull_from=[w1, w2, w3], sync_from=w1)
         await network.execute()
 
         self.assertEqual(" ".join(runlist),
         "src1:a src1:b src2:a src2:b w1:a w1:b w2:a w2:b w3:a w3:b w4:a w4:b")
 
     async def test_add_step_with_no_source(self):
+        @taketake.StepNetwork.stepped
         async def s(): pass
+
         network = taketake.StepNetwork("net")
         with self.assertRaisesRegex(AssertionError,
                 "step s needs a pull_from source$"):
-            network.add_step(s)
+            network.add(s)
 
     async def test_add_step_with_sync_but_no_source(self):
+        @taketake.StepNetwork.stepped
         async def s(): pass
+        @taketake.StepNetwork.stepped
         async def s2(): pass
         network = taketake.StepNetwork("net")
         with self.assertRaisesRegex(AssertionError,
                 "step s needs a pull_from source$"):
-            network.add_step(s, sync_from=s2)
+            network.add(s, sync_from=s2)
 
     async def test_add_step_identical_sources(self):
+        @taketake.StepNetwork.stepped
         async def s(): pass
+        @taketake.StepNetwork.stepped
         async def s2(): pass
         network = taketake.StepNetwork("net")
         with self.assertRaisesRegex(AssertionError,
                 "Already added dest side of Link\(s2->s\):"):
-            network.add_step(s, pull_from=[s2, s2])
+            network.add(s, pull_from=[s2, s2])
 
     async def test_add_step_missing_source(self):
         async def p(): pass
+        @taketake.StepNetwork.stepped
         async def s1(): pass
+        @taketake.StepNetwork.stepped
         async def s2(): pass
 
         network = taketake.StepNetwork("net")
-        network.add_task(p, send_to=s1)
+        network.add(p, send_to=s1)
         with self.assertRaisesRegex(AssertionError,
                 r"Already added p, but it was missing p:send_to=s2 for token-type Link\(p->s2\) in StepNetwork\(net\)$"):
-            network.add_step(s2, pull_from=p)
+            network.add(s2, pull_from=p)
 
     async def test_execute_missing_source(self):
         async def p(): pass
+        @taketake.StepNetwork.stepped
         async def s1(): pass
+        @taketake.StepNetwork.stepped
         async def s2(): pass
 
         network = taketake.StepNetwork("net")
-        network.add_task(p, send_to=[s1, s2])
-        network.add_step(s1, pull_from=p)
+        network.add(p, send_to=[s1, s2])
+        network.add(s1, pull_from=p)
         with self.assertRaisesRegex(AssertionError,
                 "missing s2:pull_from=p for token-type Link\(p->s2\) in StepNetwork\(net\)$"):
             await network.execute()
 
     async def test_execute_selfloop_src(self):
         async def p(): pass
+        @taketake.StepNetwork.stepped
         async def s(): pass
         network = taketake.StepNetwork("net")
-        network.add_task(p, send_to=s)
+        network.add(p, send_to=s)
         with self.assertRaisesRegex(AssertionError,
                 r"Self-loops are disallowed: s:send_to=s for token-type Link\(s->s\) in StepNetwork\(net\)$"):
-            network.add_step(s, pull_from=p, send_to=s)
+            network.add(s, pull_from=p, send_to=s)
 
     async def test_execute_cycle(self):
         async def p(): pass
+        @taketake.StepNetwork.stepped
         async def s1(): pass
+        @taketake.StepNetwork.stepped
         async def s2(): pass
+        @taketake.StepNetwork.stepped
         async def s3(): pass
 
         network = taketake.StepNetwork("net")
-        network.add_task(p, send_to=s1)
-        network.add_step(s1, pull_from=p, sync_from=s3, send_to=s2)
-        network.add_step(s2, pull_from=s1, send_to=s3)
-        network.add_step(s3, pull_from=s2, sync_to=s1)
+        network.add(p, send_to=s1)
+        network.add(s1, pull_from=p, sync_from=s3, send_to=s2)
+        network.add(s2, pull_from=s1, send_to=s3)
+        network.add(s3, pull_from=s2, sync_to=s1)
 
         with self.assertRaisesRegex(taketake.StepNetwork.HasCycle,
                 "found backedge s3->s1:s1->s2->s3"):

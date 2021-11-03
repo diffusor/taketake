@@ -52,7 +52,9 @@ there are no more items to process.
 
        mkdir .taketake.20211025-1802-Mon
 
-   b. [x] Create src wav progress directories and symlinks that don't already exist for each wav, e.g. ``audio001.wav``::
+   b. [x] Construct worklist of TransferInfo objects
+
+   c. [x] Create src wav progress directories and symlinks that don't already exist for each wav, e.g. ``audio001.wav``::
 
        mkdir .taketake.20211025-1802-Mon/audio001.wav/
        symlink .taketake.20211025-1802-Mon/audio001.wav/.source.wav
@@ -66,13 +68,18 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
    ``setup => [listen] => prompt``
 
    **Skip this task if ``.filename_guess`` exists,
-   filling in the guess into the TransferInfo instead.**
+   filling in the guessed timestamp and duration into the TransferInfo instead.**
 
-   a. [-] Run speech to text, parse timestamp, construct filename guess
+   a. [.] Extract playtime durations from each src wav file
 
-   b. [.] Create filename guess progress file::
+   b. [-] Run speech to text, parse timestamp, construct filename guess
+
+   c. [.] Create filename guess progress file::
 
        echo $filename_guess > .filename_guess
+
+   d. [] Only emit tokens once we found an actual token timestamp as described
+      below
 
 3. **prompt**: Prompt for name
 
