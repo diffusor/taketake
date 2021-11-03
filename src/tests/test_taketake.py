@@ -2287,10 +2287,13 @@ class Test8_step_setup(unittest.IsolatedAsyncioTestCase,
         self.stepper = DummyStepper()
         self.maxDiff = None
 
-    async def test_step_setup_act_no_progressdir(self):
+    async def do_step_setup_test(self):
         worklist = []
-        progress_dir = self.destdir / taketake.inject_timestamp(
-                taketake.Config.progress_dir_fmt)
+        progress_dir = self.cmdargs.continue_from
+        if not progress_dir:
+            progress_dir = self.destdir / taketake.inject_timestamp(
+                    taketake.Config.progress_dir_fmt)
+
         await taketake.Step.setup(self.cmdargs, worklist, self.stepper)
 
         with self.subTest(phase="check_stepper"):
@@ -2298,7 +2301,10 @@ class Test8_step_setup(unittest.IsolatedAsyncioTestCase,
                     list(range(len(self.wavpaths))) + [None])
 
         with self.subTest(phase="progress_dir"):
-            self.assertIsDir(progress_dir)
+            if taketake.Config.act:
+                self.assertIsDir(progress_dir)
+            else:
+                self.assertNoFile(progress_dir)
 
         for i, wpath in enumerate(self.wavpaths):
             w = wpath.name
@@ -2312,57 +2318,44 @@ class Test8_step_setup(unittest.IsolatedAsyncioTestCase,
                 )
 
             with self.subTest(i=i, w=w, phase="worklist-check"):
-                self.assertDataclassesEqual(worklist[i], expected_xinfo)
+                if taketake.Config.act:
+                    self.assertDataclassesEqual(worklist[i], expected_xinfo)
+                else:
+                    self.assertDataclassesEqual(worklist[i], expected_xinfo)
 
             with self.subTest(i=i, w=w, phase="wav_progress_dir"):
-                self.assertIsDir(expected_xinfo.wav_progress_dir)
+                if taketake.Config.act:
+                    self.assertIsDir(expected_xinfo.wav_progress_dir)
+                else:
+                    self.assertNoFile(expected_xinfo.wav_progress_dir)
 
             with self.subTest(i=i, w=w, phase="source_link"):
-                self.assertSymlinkTo(expected_xinfo.source_link,
-                        expected_xinfo.wav_abspath)
+                if taketake.Config.act:
+                    self.assertSymlinkTo(expected_xinfo.source_link,
+                            expected_xinfo.wav_abspath)
+                else:
+                    self.assertNoFile(expected_xinfo.source_link)
 
-    async def test_step_setup_act_with_progressdir(self):
-        self.assertFalse()
+    async def test_step_setup_act_no_progressdir(self):
+        await self.do_step_setup_test()
 
     async def test_step_setup_no_act_no_progressdir(self):
         self.cmdargs.no_act = True
         taketake.Config.act = False
+        await self.do_step_setup_test()
 
-        worklist = []
-        progress_dir = self.destdir / taketake.inject_timestamp(
-                taketake.Config.progress_dir_fmt)
-        await taketake.Step.setup(self.cmdargs, worklist, self.stepper)
-
-        with self.subTest(phase="check_stepper"):
-            self.assertEqual(self.stepper.output,
-                    list(range(len(self.wavpaths))) + [None])
-
-        with self.subTest(phase="progress_dir"):
-            self.assertIsDir(progress_dir)
-
-        for i, wpath in enumerate(self.wavpaths):
-            w = wpath.name
-            expected_xinfo = taketake.TransferInfo(
-                    source_wav=wpath,
-                    wav_abspath=Path(os.path.abspath(wpath)),
-                    dest_dir=self.destdir,
-                    wav_progress_dir=progress_dir / w,
-                    source_link=progress_dir / w
-                        / taketake.Config.source_wav_linkname,
-                )
-
-            with self.subTest(i=i, w=w, phase="worklist-check"):
-                self.assertDataclassesEqual(worklist[i], expected_xinfo)
-
-            with self.subTest(i=i, w=w, phase="wav_progress_dir"):
-                self.assertIsDir(expected_xinfo.wav_progress_dir)
-
-            with self.subTest(i=i, w=w, phase="source_link"):
-                self.assertSymlinkTo(expected_xinfo.source_link,
-                        expected_xinfo.wav_abspath)
+    async def test_step_setup_act_with_progressdir(self):
+        progress_dir = self.destdir / "a_mocked_out_progress_dir"
+        progress_dir.mkdir()
+        self.cmdargs.continue_from = progress_dir
+        await self.do_step_setup_test()
 
     async def test_step_setup_no_act_with_progressdir(self):
-        self.assertFalse()
+        self.cmdargs.no_act = True
+        taketake.Config.act = False
+        progress_dir = self.destdir / "a_mocked_out_progress_dir"
+        self.cmdargs.continue_from = progress_dir
+        await self.do_step_setup_test()
 
 if __name__ == '__main__':
     unittest.main()
