@@ -1666,7 +1666,7 @@ class StepNetwork:
         stepper.args = args
         stepper.kwargs = kwargs
 
-        if hasattr(coro, 'is_stepped'):
+        if hasattr(coro, 'is_stepped') and getattr(coro, 'is_stepped'):
             assert pull_from is not None, \
                     f"step {stepper.name} needs a pull_from source"
             self.steps[coro] = stepper
