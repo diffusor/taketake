@@ -44,7 +44,7 @@ there are no more items to process.
    e. [x] If instrmnt.txt doesn't exist and --instrument wasn't specified,
       abort out.
 
-1. [-] **setup**: *[global]* Determine wavs to process
+1. [x] **setup**: *[global]* Determine wavs to process
 
    ``[setup] => listen,flacenc``
 
@@ -52,7 +52,7 @@ there are no more items to process.
 
        mkdir .taketake.20211025-1802-Mon
 
-   b. [-] Create src wav progress directories and symlinks that don't already exist for each wav, e.g. ``audio001.wav``::
+   b. [x] Create src wav progress directories and symlinks that don't already exist for each wav, e.g. ``audio001.wav``::
 
        mkdir .taketake.20211025-1802-Mon/audio001.wav/
        symlink .taketake.20211025-1802-Mon/audio001.wav/.source.wav
@@ -205,6 +205,10 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        rm .taketake.$datestamp/$wavfilename/* (except .source.wav)
 
+   g. Update the transfer log on src and dest::
+
+       echo "{timestamp} {src} -> {dest}" >> src/transfer.log >> dest/transfer.log
+
 8. **finish**: *[global]* Wait for all processing to complete
 
    ``All(cleanup) => [finish]``
@@ -268,3 +272,47 @@ following properties should be verified::
     VCDIFF copy window length:    22670
     VCDIFF target window length:  22670
     000000 019  CPY_0 22670 @0
+
+Livetrak support
+----------------
+Zoom multitrack recording format uses project directories.  To support copying
+multiple project directories in one invokation:
+
+* Add -r --recurse command line arg
+* Add cmdargs.common_base
+* When making/accessing the progressdir, subtract off the common_base from the
+  source_wav
+
+Smarter time guessing
+---------------------
+
+* Use src/transfer.txt's mtime as a lower bound
+* Run speech recognition in parallel until we find the first file with a
+  spoken timestamp
+* Ask the user for fixing the timestamp on that one first:
+
+  - Step.listen emits the token number for the first file with a timestamp
+  - Step.listen then emits tokens in reverse order back through 0
+  - Step.listen proceeds to emit the remaining token numbers in order
+
+* If Step.prompt doesn't find a timestamp in the xinfo:
+
+  - If xinfo[i-1] has a timestamp, guess
+    xinfo[i-1].timestamp + xinfo[i-1].duration_s
+    and add "+?" to the timestamp in the guessed filename to indicate the
+    timestamp is likely too far in the past and some value should be added
+    to it to get the real timestamp
+  - Else if xinfo[i+1] has a timestamp, guess
+    xinfo[i+1].timestamp - current_wav_xinfo.duration_s
+    and add "-?" to the timestamp in the guessed filename to indicate the
+    timestamp is too far in the future and some value should be subtracted
+    from it to get the real timestamp
+  - Else this must be i=0:
+
+    . If src/transfer.txt exists, use its mtime as the guess, and append "+?"
+    . Othewrise, use the current time minus the sum total of all durations
+      involved in the transfer.
+
+* When adding or subtracting timestamps, assume a 5 second minimum delta
+  between recordings: When adding, add an extra 5.  When subtracting, subtract
+  an extra five
