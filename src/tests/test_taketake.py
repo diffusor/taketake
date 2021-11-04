@@ -2317,12 +2317,15 @@ class DummyStepper:
     def __init__(self, tokens=None):
         if tokens is None:
             tokens=[]
-        self.tokens = reversed(tokens)
+        elif isinstance(tokens, int):
+            tokens=list(range(tokens))
+            tokens.append(None)
+        self.tokens = list(reversed(tokens))
         self.output = []
         self.loglist = []
 
     async def get(self):
-        return get(tokens.pop())
+        return self.tokens.pop()
 
     async def put(self, token):
         self.output.append(token)
@@ -2331,9 +2334,9 @@ class DummyStepper:
         self.loglist.append(sep.join(args))
 
 
-class Test8_step_setup(unittest.IsolatedAsyncioTestCase,
+class StepSetupBase(unittest.IsolatedAsyncioTestCase,
         CdTempdirFixture, FileAssertions):
-    """Common infrastructure for testing steps"""
+
     def setUp(self):
         super().setUp()
         td = Path(self.tempdir)
@@ -2346,9 +2349,23 @@ class Test8_step_setup(unittest.IsolatedAsyncioTestCase,
                 continue_from=None,
                 dest=self.destdir,
                 wavs=self.wavpaths,
+                do_prompt=False,
         )
         self.stepper = DummyStepper()
         self.maxDiff = None
+
+    def mk_xinfo(self, wpath, progress_dir):
+        return taketake.TransferInfo(
+                source_wav=wpath,
+                wav_abspath=Path(os.path.abspath(wpath)),
+                dest_dir=self.destdir,
+                wav_progress_dir=progress_dir / wpath.name,
+                source_link=progress_dir / wpath.name
+                    / taketake.Config.source_wav_linkname,
+            )
+
+class Test8_step_setup(StepSetupBase):
+    """Common infrastructure for testing steps"""
 
     async def do_step_setup_test(self):
         worklist = []
@@ -2370,21 +2387,11 @@ class Test8_step_setup(unittest.IsolatedAsyncioTestCase,
                 self.assertNoFile(progress_dir)
 
         for i, wpath in enumerate(self.wavpaths):
+            expected_xinfo = self.mk_xinfo(wpath, progress_dir)
             w = wpath.name
-            expected_xinfo = taketake.TransferInfo(
-                    source_wav=wpath,
-                    wav_abspath=Path(os.path.abspath(wpath)),
-                    dest_dir=self.destdir,
-                    wav_progress_dir=progress_dir / w,
-                    source_link=progress_dir / w
-                        / taketake.Config.source_wav_linkname,
-                )
 
             with self.subTest(i=i, w=w, phase="worklist-check"):
-                if taketake.Config.act:
-                    self.assertDataclassesEqual(worklist[i], expected_xinfo)
-                else:
-                    self.assertDataclassesEqual(worklist[i], expected_xinfo)
+                self.assertDataclassesEqual(worklist[i], expected_xinfo)
 
             with self.subTest(i=i, w=w, phase="wav_progress_dir"):
                 if taketake.Config.act:
@@ -2419,6 +2426,28 @@ class Test8_step_setup(unittest.IsolatedAsyncioTestCase,
         progress_dir = self.destdir / "a_mocked_out_progress_dir"
         self.cmdargs.continue_from = progress_dir
         await self.do_step_setup_test()
+
+class Test8_step_listen(StepSetupBase):
+    @unittest.skipUnless(dontskip, "Hangs sometimes.")
+    async def test_step_listen(self):
+        self.wavpaths = [self.srcdir/f"w{w}.wav" for w in range(8)]
+        self.stepper = DummyStepper(len(self.wavpaths))
+        progress_dir = self.destdir / taketake.inject_timestamp(
+                taketake.Config.progress_dir_fmt)
+        progress_dir.mkdir()
+
+        await taketake.flac_decode(testflacpath, self.wavpaths[0])
+        for w in self.wavpaths[1:]:
+            w.symlink_to(self.wavpaths[0])
+
+        worklist = []
+        for w in self.wavpaths:
+            worklist.append(self.mk_xinfo(w, progress_dir))
+            worklist[-1].wav_progress_dir.mkdir()
+
+        #self.cmdargs.debug = True
+        #taketake.Config.debug = True
+        await taketake.Step.listen(self.cmdargs, worklist, stepper=self.stepper)
 
 if __name__ == '__main__':
     unittest.main()
