@@ -24,6 +24,7 @@ import contextlib
 import functools
 from pathlib import Path
 import dataclasses
+import json
 
 keeptemp = int(os.environ.get("TEST_TAKETAKE_KEEPTEMP", "0"))
 dontskip = int(os.environ.get("TEST_TAKETAKE_DONTSKIP", "0"))
@@ -1342,6 +1343,23 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             await network.execute()
 
 
+#===========================================================================
+# Test2 - JSON encode/decode
+#===========================================================================
+
+class Test2_json(unittest.TestCase, FileAssertions):
+    def test_json_roundtrip(self):
+        from taketake import AudioInfo, TimeRange
+        ai = AudioInfo(
+                duration_s=34.5,
+                speech_range=TimeRange(start=3.01, duration=4),
+                recognized_speech=None,
+                parsed_timestamp=datetime.datetime.now(),
+                extra_speech="foobar",
+        )
+        s = json.dumps(ai, cls=taketake.TaketakeJsonEncoder)
+        decoded_ai = json.loads(s, object_hook=taketake.taketake_json_decode)
+        self.assertDataclassesEqual(ai, decoded_ai)
 
 #===========================================================================
 # Test3 - Read-only external commands, no tempdirs
