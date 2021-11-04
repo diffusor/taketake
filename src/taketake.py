@@ -66,6 +66,7 @@ External tools required:
 
 import argparse
 import asyncio
+import concurrent.futures
 import time
 import sys
 import os
@@ -327,6 +328,24 @@ class ExtCmd(metaclass=ExtCmdListMeta):
                     f"\n  Given: {kwargs}"
                     f"\n  Expected: {self.params.keys()}")
         return [arg.format(**kwargs) for arg in self.template.split()]
+
+    def run(self, **kwargs):
+        args = self.construct_args(**kwargs)
+        proc = subprocess.run(args, capture_output=True, text=True, check=True)
+
+        def mlfmt(s):
+            lines = s.splitlines()
+            return "\n    ".join(lines)
+
+        def exmsg():
+            return f"from {args[0]}\n  cmd: '{' '.join(args)}'\n" \
+                    f"  stdout:\n    {mlfmt(proc.stdout)}\n" \
+                    f"  stderr:\n    {mlfmt(proc.stderr)}"
+
+        proc.exmsg = exmsg
+
+        return proc
+
 
     async def exec_async(self, _stdin=None, _stdout=None, _stderr=None, **kwargs):
         args = self.construct_args(**kwargs)
@@ -758,37 +777,37 @@ async def par2_repair(f):
     #print("Repaired", proc.exmsg())
 
 
-async def get_file_duration(fpath):
+def get_file_duration(fpath):
     """Use ffprobe to determine how many seconds the file identified by fpath plays for."""
-    proc = await ExtCmd.get_media_duration.run_fg(file=fpath)
+    proc = ExtCmd.get_media_duration.run(file=fpath)
 
-    if proc.stderr_data:
+    if proc.stderr:
         raise InvalidMediaFile(f"Got extra stderr {proc.exmsg()}")
 
     try:
-        duration = float(proc.stdout_data)
+        duration = float(proc.stdout)
     except ValueError as e:
         raise InvalidMediaFile(f"Could not parse duration stdout {proc.exmsg()}") from e
 
     return duration
 
 
-async def detect_silence(fpath):
+def detect_silence(fpath):
     """Use ffmpeg silencedetect to find all silent segments.
 
     Return a list of TimeRange objects identifying the spans of silence."""
 
-    proc = await ExtCmd.ffmpeg_silence_detect.run_fg(
+    proc = ExtCmd.ffmpeg_silence_detect.run(
             file=fpath,
             length=Config.file_scan_duration_s,
             threshold=Config.silence_threshold_dbfs,
             duration=Config.silence_min_duration_s)
 
-    detected_lines = [line for line in proc.stderr_data.splitlines()
-                        if line.startswith(b'[silencedetect')]
+    detected_lines = [line for line in proc.stderr.splitlines()
+                        if line.startswith('[silencedetect')]
 
-    offsets = [float(line.split()[-1]) for line in detected_lines if b"silence_start" in line]
-    durations = [float(line.split()[-1]) for line in detected_lines if b"silence_end" in line]
+    offsets = [float(line.split()[-1]) for line in detected_lines if "silence_start" in line]
+    durations = [float(line.split()[-1]) for line in detected_lines if "silence_end" in line]
 
     return list(TimeRange(start, duration) for start, duration in zip(offsets, durations))
 
@@ -932,7 +951,7 @@ def invert_silences(silences, file_scan_duration_s):
     return non_silences
 
 
-async def find_likely_audio_span(fpath: Path, scan_to_s: float) -> TimeRange:
+def find_likely_audio_span(fpath: Path, scan_to_s: float) -> TimeRange:
     """Searches for regions of silence in fpath.
     Scans only the first scan_to_s seconds.
 
@@ -944,7 +963,7 @@ async def find_likely_audio_span(fpath: Path, scan_to_s: float) -> TimeRange:
     Raises NoSuitableAudioSpan if no likely candidate was found.
     """
 
-    silences = await detect_silence(fpath)
+    silences = detect_silence(fpath)
     non_silences = invert_silences(silences, scan_to_s)
 
     for r in non_silences:
@@ -1329,7 +1348,7 @@ def words_to_timestamp(text):
 # File Audio processing
 #============================================================================
 
-async def extract_timestamp_from_audio(fpath:Path, audioinfo:AudioInfo):
+def extract_timestamp_from_audio(fpath:Path, audioinfo:AudioInfo):
     """Runs speech-to-text on the given audio file fpath.
 
     audioinfo must have the duration_s field already filled in
@@ -1340,10 +1359,9 @@ async def extract_timestamp_from_audio(fpath:Path, audioinfo:AudioInfo):
     # This means we can prompt the user for any corrections sooner.
     scan_duration = min(audioinfo.duration_s, Config.file_scan_duration_s)
 
-    audioinfo.speech_range = await find_likely_audio_span(fpath, scan_duration)
+    audioinfo.speech_range = find_likely_audio_span(fpath, scan_duration)
     print(f"Speechinizer: {fpath.name} - processing audio at {audioinfo.speech_range}")
-    audioinfo.recognized_speech = await asyncio.to_thread(process_speech,
-            str(fpath), audioinfo.speech_range)
+    audioinfo.recognized_speech = process_speech(str(fpath), audioinfo.speech_range)
     audioinfo.parsed_timestamp, audioinfo.extra_speech \
             = words_to_timestamp(audioinfo.recognized_speech)
     dbg(f"Speechinizer: {fpath.name} Done - {audioinfo}")
@@ -1940,44 +1958,37 @@ def act(msg):
     return Config.act
 
 
-async def listen_worker(worker_id:int, worklist:List[TransferInfo],
-        inq:asyncio.Queue, outq:StepperQueue):
+def listen_to_wav(xinfo:TransferInfo, token:int) -> AudioInfo:
     """Do speech to text on the given workunit read from the inq.
 
     If a .audioinfo progress file exists, use that instead.
     """
-    while (token := await inq.get()) is not None:
-        idstr = f"listen_worker({worker_id})[{token}]"
-        xinfo = worklist[token]
-        audioinfo_fpath = xinfo.wav_progress_dir / Config.audioinfo_fname
+    idstr = f"listen_to_wav({xinfo.source_wav.name})[{token}]"
+    audioinfo_fpath = xinfo.wav_progress_dir / Config.audioinfo_fname
 
-        if audioinfo_fpath.exists():
-            xinfo.audioinfo = read_json(audioinfo_fpath)
-            dbg(f"{idstr} - Loaded stored data {xinfo.audioinfo}")
-            if not isinstance(xinfo.audioinfo, AudioInfo):
-                RuntimeError(f"{idstr} got unexpected data from"
-                        f" {Config.audioinfo_fname}"
-                        f"\n    Path: {audioinfo_fpath}"
-                        f"\n    Dump: {xinfo.audioinfo}"
-                        f"\n    Contents: {audioinfo_fpath.read_text()}")
+    if audioinfo_fpath.exists():
+        audioinfo = read_json(audioinfo_fpath)
+        dbg(f"{idstr} - Loaded stored data {audioinfo}")
+        if not isinstance(audioinfo, AudioInfo):
+            RuntimeError(f"{idstr} got unexpected data from"
+                    f" {Config.audioinfo_fname}"
+                    f"\n    Path: {audioinfo_fpath}"
+                    f"\n    Dump: {audioinfo}"
+                    f"\n    Contents: {audioinfo_fpath.read_text()}")
 
-        else:
-            fpath = xinfo.source_wav
-            xinfo.audioinfo = AudioInfo(duration_s=await get_file_duration(fpath))
-            try:
-                dbg(f"{idstr} - Listening for timestamp info in '{fpath}' ({xinfo.audioinfo.duration_s:.2f}s)")
-                await extract_timestamp_from_audio(fpath, xinfo.audioinfo)
-            except (NoSuitableAudioSpan, TimestampGrokError) as e:
-                pass
-            if act(f"{idstr} - dump audioinfo to {audioinfo_fpath}"):
-                write_json(audioinfo_fpath, xinfo.audioinfo)
+    else:
+        fpath = xinfo.source_wav
+        audioinfo = AudioInfo(duration_s=get_file_duration(fpath))
+        try:
+            dbg(f"{idstr} - Listening for timestamp info in '{fpath}' ({audioinfo.duration_s:.2f}s)")
+            extract_timestamp_from_audio(fpath, audioinfo)
+        except (NoSuitableAudioSpan, TimestampGrokError) as e:
+            pass
+        if act(f"{idstr} - dump audioinfo to {audioinfo_fpath}"):
+            write_json(audioinfo_fpath, audioinfo)
 
-        inq.task_done()
-        await outq.put(token)
-
-    inq.task_done()
-    dbg(f"listen_worker({worker_id}) - done")
-    # Note: the listen step does outq.put(None) so only one end-token ends up in the queue
+    dbg(f"{idstr} - done")
+    return audioinfo
 
 
 class Step:
@@ -2017,21 +2028,20 @@ class Step:
 
         Uses several workers to process multiple files in parallel.
         """
-        workers = []
-        worker_queue = asyncio.Queue()
-        while (token := await stepper.get()) is not None:
-            stepper.log(f"****** got {token} *******")
-            await worker_queue.put(token)
-            if len(workers) < Config.num_listener_tasks:
-                # Spawn another worker
-                workers.append(asyncio.create_task(
-                    listen_worker(len(workers), worklist, worker_queue, stepper)))
+        with concurrent.futures.ProcessPoolExecutor(
+                max_workers=Config.num_listener_tasks) as executor:
+            future_to_token = {}
+            # Submit the listeners to the executor
+            while (token := await stepper.get()) is not None:
+                stepper.log(f"****** got {token} *******")
+                xinfo = worklist[token]
+                future_to_token[executor.submit(listen_to_wav, xinfo, token)] = token
 
-        for w in workers:
-            await worker_queue.put(None)
+            for future in concurrent.futures.as_completed(future_to_token):
+                token = future_to_token[future]
+                xinfo.audioinfo = future.result()
+                await stepper.put(token)
 
-        await asyncio.gather(*workers)
-        # Signal completion to the StepNetwork
         await stepper.put(None)
 
 
