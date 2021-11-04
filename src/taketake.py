@@ -70,6 +70,7 @@ import time
 import sys
 import os
 import re
+import json
 import glob # TODO replace with Path.glob everywhere
 import itertools
 import collections
@@ -78,7 +79,7 @@ import datetime
 import types
 import ctypes
 import dataclasses
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, is_dataclass
 from typing import List
 from pathlib import Path
 
@@ -119,6 +120,7 @@ class Config:
     progress_dir_fmt = ".taketake.{}.tmp"
     source_wav_linkname = ".source.wav"
     interrupted_flac_fmt = ".interrupted-abandoned.{}.flac"
+    audioinfo_fname = ".audioinfo.json"
     guess_fname = ".filename_guess"
     provided_fname = ".filename_provided"
     dest_fname_fmt = "{prefix}.{datestamp}.{notes}{duration}.{instrument}.{orig_fname}"
@@ -146,6 +148,102 @@ class NoSuitableAudioSpan(TaketakeRuntimeError):
 
 class XdeltaMismatch(TaketakeRuntimeError):
     pass
+
+
+#============================================================================
+# Dataclasses
+#============================================================================
+
+@dataclass
+class TimeRange:
+    start:float
+    duration:float
+
+    def __str__(self):
+        end = self.start + self.duration
+        r = "-".join(format_duration(t, style='colons') for t in (self.start, end))
+        return f"[{r}]({format_duration(self.duration)})"
+
+
+@dataclass
+class AudioInfo:
+    duration_s:float = None
+    speech_range:TimeRange = None
+    recognized_speech:str = None # Was orig_speech
+    parsed_timestamp:datetime.datetime = None
+    extra_speech:str = field(default_factory=list)
+
+
+@dataclass
+class TransferInfo:
+    """Contains the state of each transfer.
+
+    A TransferInfo object is created for each file to transfer, based
+    on the wav files that exist and any in-progress transfer directories
+    in the destination directory.
+
+    These objects are stored in the worklist, which each task indexes into
+    based on the tokens it gets from walking its incoming Stepper queues.
+    """
+
+    source_wav:Path
+    wav_abspath:Path
+    dest_dir:Path
+    wav_progress_dir:Path
+    source_link:Path
+
+    audioinfo:AudioInfo = None
+    fname_guess:str = None
+    fname_prompted:str = None
+    mtime:datetime.datetime = None
+    flac_encode_fpath:Path = None
+    par_fpaths:list[Path] = field(default_factory=list)
+
+    # TODO - transition from old FileInfo objects
+    #files = [FileInfo(instrument="test",
+    #                  fpath=f,
+    #                  orig_filename=os.path.basename(f),
+    #                  [unused] src_path=os.path.dirname(f),
+    #                  [unused] dest_path=dest)
+    #         for f in filepaths]
+    #
+    # Functions using finfo:
+    #  prompt_for_filename
+    #    sets finfo.final_filename
+    #    uses finfo.fpath suggested_filename
+    #    play_media_file
+    #      uses finfo.speech_range fpath suggested_filename
+    #
+    # Needed across steps: speech_range.start orig_speech? suggested_filename
+
+
+#============================================================================
+# JSON encode/decode
+#============================================================================
+
+class TaketakeJsonEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if is_dataclass(obj):
+            d = dataclasses.asdict(obj)
+            d["__dataclass__"] = obj.__class__.__name__
+            return d
+        elif isinstance(obj, datetime.datetime):
+            # NOTE: does not dump timezone info
+            return dict(__datetime__=True, timestamp=obj.timestamp())
+        else:
+            return super().default(obj)
+
+def taketake_json_decode(d):
+    if (classname := d.pop("__dataclass__", None)) is not None:
+        cls = globals()[classname]
+        if is_dataclass(cls):
+            return cls(**d)
+        else:
+            return d
+    elif "__datetime__" in d:
+        return datetime.datetime.fromtimestamp(d["timestamp"])
+    else:
+        return d
 
 #============================================================================
 # External command infrastructure
@@ -807,26 +905,6 @@ def parse_timestamp(s):
 # Audio file processing
 #============================================================================
 
-@dataclass
-class TimeRange:
-    start:float
-    duration:float
-
-    def __str__(self):
-        end = self.start + self.duration
-        r = "-".join(format_duration(t, style='colons') for t in (self.start, end))
-        return f"[{r}]({format_duration(self.duration)})"
-
-
-@dataclass
-class AudioInfo:
-    duration_s:float = None
-    speech_range:TimeRange = None
-    recognized_speech:str = None # Was orig_speech
-    parsed_timestamp:datetime.datetime = None
-    extra_speech:str = field(default_factory=list)
-
-
 def invert_silences(silences, file_scan_duration_s):
     """Return a list of TimeRange objects that represent non-silence.
 
@@ -888,6 +966,7 @@ def process_speech(fpath: Path, speech_range: TimeRange) -> str:
 
     This is called in a separate thread so as to not block the asyncio loop.
     """
+    # TODO pass in the recognizer from each worker thread
     recognizer = speech_recognition.Recognizer()
 
     with speech_recognition.AudioFile(fpath) as audio_file:
@@ -1243,25 +1322,23 @@ def words_to_timestamp(text):
 # File Audio processing
 #============================================================================
 
-async def extract_timestamp_from_audio(fpath:Path, duration_s:float) -> AudioInfo:
-    """Runs speech-to-text on the given audiofile fpath.
+async def extract_timestamp_from_audio(fpath:Path, audioinfo:AudioInfo):
+    """Runs speech-to-text on the given audio file fpath.
 
+    audioinfo must have the duration_s field already filled in
     duration_s specifies the runtime of the audio file in float seconds
     """
 
     # Only scan the first bit of the file to avoid transfering a lot of data.
     # This means we can prompt the user for any corrections sooner.
-    scan_duration = min(duration_s, Config.file_scan_duration_s)
+    scan_duration = min(audioinfo.duration_s, Config.file_scan_duration_s)
 
-    audioinfo = AudioInfo()
-    audioinfo.duration_s = duration_s
     audioinfo.speech_range = await find_likely_audio_span(fpath, scan_duration)
     print(f"Speechinizer: {fpath.name} - processing audio at {audioinfo.speech_range}")
     audioinfo.recognized_speech = await asyncio.to_thread(process_speech,
             str(fpath), audioinfo.speech_range)
     audioinfo.parsed_timestamp, audioinfo.extra_speech \
             = words_to_timestamp(audioinfo.recognized_speech)
-    return audioinfo
 
 
 def format_duration(duration:float, style:str="letters") -> str:
@@ -1841,52 +1918,6 @@ async def prompt_for_filename(finfo):
 
 
 #============================================================================
-# TransferInfo and worklists
-#============================================================================
-
-@dataclass
-class TransferInfo:
-    """Contains the state of each transfer.
-
-    A TransferInfo object is created for each file to transfer, based
-    on the wav files that exist and any in-progress transfer directories
-    in the destination directory.
-
-    These objects are stored in the worklist, which each task indexes into
-    based on the tokens it gets from walking its incoming Stepper queues.
-    """
-
-    source_wav:Path
-    wav_abspath:Path
-    dest_dir:Path
-    wav_progress_dir:Path
-    source_link:Path
-
-    fname_guess:str = None
-    fname_prompted:str = None
-    mtime:datetime.datetime = None
-    flac_encode_fpath:Path = None
-    par_fpaths:list[Path] = field(default_factory=list)
-
-    # TODO - transition from old FileInfo objects
-    #files = [FileInfo(instrument="test",
-    #                  fpath=f,
-    #                  orig_filename=os.path.basename(f),
-    #                  [unused] src_path=os.path.dirname(f),
-    #                  [unused] dest_path=dest)
-    #         for f in filepaths]
-    #
-    # Functions using finfo:
-    #  prompt_for_filename
-    #    sets finfo.final_filename
-    #    uses finfo.fpath suggested_filename
-    #    play_media_file
-    #      uses finfo.speech_range fpath suggested_filename
-    #
-    # Needed across steps: speech_range.start orig_speech? suggested_filename
-
-
-#============================================================================
 # step coroutines for the StepNetwork
 #============================================================================
 
@@ -1899,6 +1930,33 @@ def act(msg):
     """
     dbg(f"{'Running' if Config.act else 'Skip (noact)'} :", msg, depth=1)
     return Config.act
+
+
+async def listen_worker(worker_id:int, worklist:List[TransferInfo],
+        inq:asyncio.Queue, outq:StepperQueue):
+    """Do speech to text on the given workunit read from the inq.
+
+    If a .audioinfo progress file exists, use that instead.
+    """
+    while (token := await inq.get()) is not None:
+        xinfo = worklist[token]
+        audioinfo_fpath = xinfo.wav_progress_dir / Config.audioinfo_fname
+
+        if audioinfo_fpath.exists():
+            json_data = audioinfo_fpath.read_text()
+            xinfo.audioinfo = json.loads(json_data)
+        else:
+            fpath = xinfo.source_wav
+            xinfo.audioinfo = AudioInfo(duration_s=await get_file_duration(fpath))
+            try:
+                dbg(f"listen_worker({worker_id}) - Listening for timestamp info in '{fpath}' ({duration_s:.2f}s)")
+                await extract_timestamp_from_audio(fpath, xinfo.audioinfo)
+            except (NoSuitableAudioSpan, TimestampGrokError) as e:
+                pass
+            audioinfo_fpath.write_text(json.dumps(xinfo.audioinfo))
+
+        inq.task_done()
+    inq.task_done()
 
 
 class Step:
@@ -1936,6 +1994,8 @@ class Step:
         """The speech recognizer finds the first span of non-silent audio, passes
         it through PocketSphinx, and attempts to parse a timestamp and comments
         from the results.
+
+        Uses several workers to process multiple files in parallel.
         """
         stepper.log(f"****** working on {token} *******")
 

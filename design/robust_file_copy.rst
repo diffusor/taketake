@@ -67,7 +67,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    ``setup => [listen] => prompt``
 
-   **Skip this task if ``.filename_guess`` exists,
+   **Skip this task if ``.audioinfo.json`` or ``.filename_guess`` exists,
    filling in the guessed timestamp and duration into the TransferInfo instead.**
 
    a. [.] Extract playtime durations from each src wav file
@@ -172,6 +172,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
    **Status of ``.taketake.$datestamp/$wavfilename``**::
 
         .source.wav -> /absolute/path/to/source/audio001.wav
+        .audioinfo.json
         .filename_guess
         .filename_provided
         [.interrupted-abandoned.$datestamp.flac if any]
