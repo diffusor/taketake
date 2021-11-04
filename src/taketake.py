@@ -100,6 +100,7 @@ class Config:
     dbg_prog = "taketake"
     prog = sys.argv[0]
 
+    num_listener_tasks = 4          # Number of concurrent speech-to-text threads
     silence_threshold_dbfs = -55    # Audio above this threshold is not considered silence
     silence_min_duration_s = 0.5    # Silence shorter than this is not detected
     file_scan_duration_s = 90       # -t (time duration).  Note -ss is startseconds
@@ -1945,24 +1946,37 @@ async def listen_worker(worker_id:int, worklist:List[TransferInfo],
     If a .audioinfo progress file exists, use that instead.
     """
     while (token := await inq.get()) is not None:
+        idstr = f"listen_worker({worker_id})[{token}]"
         xinfo = worklist[token]
         audioinfo_fpath = xinfo.wav_progress_dir / Config.audioinfo_fname
 
         if audioinfo_fpath.exists():
-            json_data = audioinfo_fpath.read_text()
-            xinfo.audioinfo = json.loads(json_data)
+            xinfo.audioinfo = read_json(audioinfo_fpath)
+            dbg(f"{idstr} - Loaded stored data {xinfo.audioinfo}")
+            if not isinstance(xinfo.audioinfo, AudioInfo):
+                RuntimeError(f"{idstr} got unexpected data from"
+                        f" {Config.audioinfo_fname}"
+                        f"\n    Path: {audioinfo_fpath}"
+                        f"\n    Dump: {xinfo.audioinfo}"
+                        f"\n    Contents: {audioinfo_fpath.read_text()}")
+
         else:
             fpath = xinfo.source_wav
             xinfo.audioinfo = AudioInfo(duration_s=await get_file_duration(fpath))
             try:
-                dbg(f"listen_worker({worker_id}) - Listening for timestamp info in '{fpath}' ({duration_s:.2f}s)")
+                dbg(f"{idstr} - Listening for timestamp info in '{fpath}' ({xinfo.audioinfo.duration_s:.2f}s)")
                 await extract_timestamp_from_audio(fpath, xinfo.audioinfo)
             except (NoSuitableAudioSpan, TimestampGrokError) as e:
                 pass
-            audioinfo_fpath.write_text(json.dumps(xinfo.audioinfo))
+            if act(f"{idstr} - dump audioinfo to {audioinfo_fpath}"):
+                write_json(audioinfo_fpath, xinfo.audioinfo)
 
         inq.task_done()
+        await outq.put(token)
+
     inq.task_done()
+    dbg(f"listen_worker({worker_id}) - done")
+    # Note: the listen step does outq.put(None) so only one end-token ends up in the queue
 
 
 class Step:
@@ -1995,50 +2009,46 @@ class Step:
         await stepper.put(None)
 
 
-    @StepNetwork.stepped
-    async def listen(cmdargs, worklist, *, token, stepper):
+    async def listen(cmdargs, worklist, *, stepper):
         """The speech recognizer finds the first span of non-silent audio, passes
         it through PocketSphinx, and attempts to parse a timestamp and comments
         from the results.
 
         Uses several workers to process multiple files in parallel.
         """
-        stepper.log(f"****** working on {token} *******")
+        workers = []
+        worker_queue = asyncio.Queue()
+        while (token := await stepper.get()) is not None:
+            stepper.log(f"****** got {token} *******")
+            await worker_queue.put(token)
+            if len(workers) < Config.num_listener_tasks:
+                # Spawn another worker
+                workers.append(asyncio.create_task(
+                    listen_worker(len(workers), worklist, worker_queue, stepper)))
 
-        xinfo = worklist[token]
-        fpath = xinfo.source_wav
+        for w in workers:
+            await worker_queue.put(None)
 
-        duration_s = await get_file_duration(fpath)
-        try:
-            stepper.log(f"Listening for timestamp info in '{fpath}' ({duration_s:.2f}s)")
-            audioinfo = await extract_timestamp_from_audio(fpath, duration_s)
-        except (NoSuitableAudioSpan, TimestampGrokError) as e:
-            # Couldn't find any timestamp info
-            audioinfo = AudioInfo(
-                duration_s=duration_s,
-                parsed_timestamp=get_fallback_timestamp(fpath, cmdargs.fallback_timestamp))
-        xinfo.fname_guess = format_dest_filename(fpath, audioinfo, cmdargs.instrument)
-        print(f"Speechinizer: {fpath.name} - {audioinfo.recognized_speech!r} -> {xinfo.fname_guess!r}")
+        await asyncio.gather(*workers)
+        # Signal completion to the StepNetwork
+        await stepper.put(None)
 
-        # TODO write the suggested_filename to a file if act
-
-        # TODO merge needed cross-step bits of FileInfo into TransferInfo
-        #  - But we should keep the information only needed within the listen
-        #  step confined to a separate data structure, or pass parameters.
-        #await format_dest_filename(finfo)
-        # TODO fall back to the file mtime if needed.  Add a cmdline arg?
-        # --timestamp speech, now, mtime, ctime, none
-        # (If we allow arbitrary strings, things get silly - would need to prompt)
-        # Any other value that speech would avoid the speech recognition.
-        # --no-prompt would skip the prompt process
 
     @StepNetwork.stepped
     async def prompt(cmdargs, worklist, *, token, stepper):
         """The Prompter asks the user for corrections on the guesses from listen.
         """
+        # TODO --no-prompt should also skip the prompt process
         # TODO check for in-progress fname_prompted file contents first
-        if act("Prompt for a corrected filename"):
-            await prompt_for_filename(worklist[token])
+        # TODO write the suggested_filename to a file if act
+        xinfo = worklist[token]
+        fpath = xinfo.source_wav
+        xinfo.fname_guess = format_dest_filename(fpath, xinfo.audioinfo, cmdargs.instrument)
+        # TODO parsed_timestamp=get_fallback_timestamp(fpath, cmdargs.fallback_timestamp))
+        print(f"Speechinizer: {fpath.name} - {xinfo.audioinfo.recognized_speech!r} -> {xinfo.fname_guess!r}")
+        if cmdargs.do_prompt:
+            if act("Prompt for a corrected filename"):
+                await prompt_for_filename(worklist[token])
 
     @StepNetwork.stepped
     async def flacenc(cmdargs, worklist, *, token, stepper):
@@ -2329,6 +2339,9 @@ def process_args(argv=None):
 
     arg('-d', '--debug', action='store_true',
         help="Show debug output, including tracebacks from exceptions")
+
+    arg('-P', '--no-prompt', action='store_false', dest='do_prompt',
+        help=f"Don't prompt for filename corrections")
 
     arg('-p', '--prefix', action='store',
         help=f"Prefix flac files with the given string. Default: {Config.prefix}")

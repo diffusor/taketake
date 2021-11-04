@@ -1410,6 +1410,7 @@ class Test6_args(CdTempdirFixture):
                 _dest=None,
                 debug=False,
                 no_act=False,
+                do_prompt=True,
                 prefix=None,
                 keep_wavs=False,
                 skip_copyback=False,
@@ -2242,7 +2243,7 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
 # File processing integration tests
 #===========================================================================
 
-class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture):
+class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture, FileAssertions):
     """Test task processing in taketake"""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -2260,11 +2261,15 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture):
         for w in "take1.wav take2.wav".split():
             wavpaths.append(src/w)
             await taketake.flac_decode(testflacpath, wavpaths[-1])
+        # Note: this hits that dratted loop deprecation warning.
+        # To suppress it, we'd need to make this function non-async
+        # so that the warning ignore can be set up properly.
         await taketake.run_tasks(args=argparse.Namespace(
                 continue_from=None,
                 dest=Path("dest_foo"),
                 wavs=wavpaths,
                 instrument="foobar",
+                do_prompt=False,
             ))
 
     @unittest.skipUnless(dontskip, "Takes 0.75s per subtest")
@@ -2280,15 +2285,16 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture):
 
     @unittest.skipUnless(dontskip, "Takes 0.75s per subtest")
     async def test_extract_timestamp_from_audio(self):
-        audioinfo = await taketake.extract_timestamp_from_audio(Path(testflacpath), 30)
-        audioinfo = dataclasses.asdict(audioinfo)
-        self.assertEqual(audioinfo, dict(
+        audioinfo = taketake.AudioInfo(duration_s=30)
+        await taketake.extract_timestamp_from_audio(Path(testflacpath), audioinfo)
+        audioinfo_expect = taketake.AudioInfo(
             duration_s=30,
             extra_speech=[],
             parsed_timestamp=datetime.datetime(2021, 3, 18, 20, 20),
             recognized_speech='twenty twenty monday march eighteenth two thousand twenty one',
             speech_range={'duration': 4.507420000000001, 'start': 1.64045},
-            ))
+            )
+        self.assertDataclassesEqual(audioinfo, audioinfo_expect)
 
 
     async def test_find_audio_span(self):

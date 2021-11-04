@@ -63,32 +63,38 @@ there are no more items to process.
 *Perform the following steps for each wav, assuming each non-src filename is
 relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory*
 
-2. [.] **listen**: Speech to text
+2. [-] **listen**: Speech to text
 
    ``setup => [listen] => prompt``
 
-   **Skip this task if ``.audioinfo.json`` or ``.filename_guess`` exists,
+   **Skip this task if ``.audioinfo.json`` exists,
    filling in the guessed timestamp and duration into the TransferInfo instead.**
 
-   a. [.] Extract playtime durations from each src wav file
+   a. [-] Extract playtime durations from each src wav file
 
    b. [-] Run speech to text, parse timestamp, construct filename guess
 
-   c. [.] Create filename guess progress file::
+   c. [-] Dump audioinfo::
 
-       echo $filename_guess > .filename_guess
+       echo $filename_guess > .audioinfo.json
 
-   d. [] Only emit tokens once we found an actual token timestamp as described
+   d. [-] Only emit tokens once we found an actual token timestamp as described
       below
 
 3. **prompt**: Prompt for name
 
    ``listen => [prompt] => pargen``
 
-   a. Suggest contents of ``.filename_provided`` if it exists,
+   a. If ``.filename_guess`` exists, load the guess from there.  Otherwise,
+      construct the guess from the audioinfo from the **listen** step,
+      and dump it te ``.filename_guess``::
+
+       echo $filename_guess > .filename_guess
+
+   b. Suggest contents of ``.filename_provided`` if it exists,
       otherwise use the given filename_guess
 
-   b. Check the resulting timestamp:
+   c. Check the resulting timestamp:
 
       * Parse out the timestamp from the ``$filename_provided``
       * Verify that the weekday matches that from the timestamp
@@ -97,7 +103,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
       * If the verification fails, prompt the user to confirm or redo the
         filename
 
-   b. Create provided filename file::
+   d. Create provided filename file::
 
        echo $filename_provided > .filename_provided
 
