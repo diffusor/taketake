@@ -2462,5 +2462,8 @@ class Test8_step_listen(StepSetupBase):
                 loaded_ai = taketake.read_json(xinfo.wav_progress_dir / taketake.Config.audioinfo_fname)
                 self.assertDataclassesEqual(loaded_ai, flacaudioinfo)
 
+        self.assertEqual(len(self.stepper.output), num_wavs+1)
+        self.assertEqual(set(self.stepper.output), set(range(num_wavs)) | set([None]))
+
 if __name__ == '__main__':
     unittest.main()
