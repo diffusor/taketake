@@ -100,7 +100,7 @@ class Config:
     dbg_prog = "taketake"
     prog = sys.argv[0]
 
-    num_listener_tasks = 4          # Number of concurrent speech-to-text threads
+    num_listener_tasks = 6          # Number of concurrent speech-to-text threads
     silence_threshold_dbfs = -55    # Audio above this threshold is not considered silence
     silence_min_duration_s = 0.5    # Silence shorter than this is not detected
     file_scan_duration_s = 90       # -t (time duration).  Note -ss is startseconds
@@ -1346,6 +1346,7 @@ async def extract_timestamp_from_audio(fpath:Path, audioinfo:AudioInfo):
             str(fpath), audioinfo.speech_range)
     audioinfo.parsed_timestamp, audioinfo.extra_speech \
             = words_to_timestamp(audioinfo.recognized_speech)
+    dbg(f"Speechinizer: {fpath.name} Done - {audioinfo}")
 
 
 def format_duration(duration:float, style:str="letters") -> str:

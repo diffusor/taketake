@@ -34,6 +34,13 @@ testpath = os.path.dirname(os.path.abspath(__file__))
 testflacpath = os.path.join(testpath, testflac)
 flacsize = os.path.getsize(testflacpath)
 flacwavsize = 1889324
+flacaudioinfo = taketake.AudioInfo(
+        duration_s=10.710204,
+        extra_speech=[],
+        parsed_timestamp=datetime.datetime(2021, 3, 18, 20, 20),
+        recognized_speech="twenty twenty monday march eighteenth two thousand twenty one",
+        speech_range=taketake.TimeRange(duration=4.507420000000001, start=1.64045),
+    )
 
 #===========================================================================
 # File helpers
@@ -2428,9 +2435,11 @@ class Test8_step_setup(StepSetupBase):
         await self.do_step_setup_test()
 
 class Test8_step_listen(StepSetupBase):
-    @unittest.skipUnless(dontskip, "Hangs sometimes.")
+    @unittest.skipUnless(dontskip, "Takes 4s for 12 wavs with 6 workers.")
     async def test_step_listen(self):
-        self.wavpaths = [self.srcdir/f"w{w}.wav" for w in range(8)]
+        num_wavs = 12
+
+        self.wavpaths = [self.srcdir/f"w{w}.wav" for w in range(num_wavs)]
         self.stepper = DummyStepper(len(self.wavpaths))
         progress_dir = self.destdir / taketake.inject_timestamp(
                 taketake.Config.progress_dir_fmt)
@@ -2445,9 +2454,13 @@ class Test8_step_listen(StepSetupBase):
             worklist.append(self.mk_xinfo(w, progress_dir))
             worklist[-1].wav_progress_dir.mkdir()
 
-        #self.cmdargs.debug = True
         #taketake.Config.debug = True
         await taketake.Step.listen(self.cmdargs, worklist, stepper=self.stepper)
+        # Ensure all the dumped AudioInfo are as expected
+        for xinfo in worklist:
+            with self.subTest(w=xinfo.source_wav.name):
+                loaded_ai = taketake.read_json(xinfo.wav_progress_dir / taketake.Config.audioinfo_fname)
+                self.assertDataclassesEqual(loaded_ai, flacaudioinfo)
 
 if __name__ == '__main__':
     unittest.main()
