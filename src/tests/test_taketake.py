@@ -1385,18 +1385,18 @@ class Test3_ext_commands_read_only(unittest.TestCase):
     """Test ExtCmd commands that don't modify the filesystem"""
 
     def test_duration_flac(self):
-        duration = asyncio.run(taketake.get_file_duration(testflacpath))
+        duration = taketake.get_file_duration(testflacpath)
         self.assertAlmostEqual(duration, 10.710204, places=3)
 
     def test_duration_no_file(self):
         fpath = tempfile.mktemp(dir=testpath)
         with self.assertRaisesRegex(taketake.SubprocessError,
                 f'(?s)Got bad exit code 1 from.*{fpath}: No such file or directory'):
-            asyncio.run(taketake.get_file_duration(fpath))
+            taketake.get_file_duration(fpath)
 
     def test_detect_silence(self):
         """This one is a bit fragile, as ffmpeg silencedetect float output is janky"""
-        silences = asyncio.run(taketake.detect_silence(testflacpath))
+        silences = taketake.detect_silence(testflacpath)
         self.assertEqual(silences, [taketake.TimeRange(start=0.0, duration=1.84045),
             taketake.TimeRange(start=5.94787, duration=1.91383),
             taketake.TimeRange(start=10.117, duration=0.593175)])
@@ -2271,6 +2271,7 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture, FileAssert
         # Note: this hits that dratted loop deprecation warning.
         # To suppress it, we'd need to make this function non-async
         # so that the warning ignore can be set up properly.
+        #taketake.Config.debug = True
         await taketake.run_tasks(args=argparse.Namespace(
                 continue_from=None,
                 dest=Path("dest_foo"),
@@ -2290,10 +2291,10 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture, FileAssert
                 s = taketake.process_speech(testflacpath, r)
                 self.assertEqual(s, expect)
 
-    @unittest.skipUnless(dontskip, "Takes 0.75s per subtest")
-    async def test_extract_timestamp_from_audio(self):
+    @unittest.skipUnless(dontskip, "Takes 1s per subtest")
+    def test_extract_timestamp_from_audio(self):
         audioinfo = taketake.AudioInfo(duration_s=30)
-        await taketake.extract_timestamp_from_audio(Path(testflacpath), audioinfo)
+        taketake.extract_timestamp_from_audio(Path(testflacpath), audioinfo)
         audioinfo_expect = taketake.AudioInfo(
             duration_s=30,
             extra_speech=[],
@@ -2304,7 +2305,7 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture, FileAssert
         self.assertDataclassesEqual(audioinfo, audioinfo_expect)
 
 
-    async def test_find_audio_span(self):
+    def test_find_audio_span(self):
         # TODO our flac is too short for scan-to to work
         for scan_to, start, duration in [
                 (0, 1.640, 4.507),
@@ -2312,7 +2313,7 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture, FileAssert
                 (10, 1.640, 4.507),
                 ]:
             expect = taketake.TimeRange(start, duration)
-            r = await taketake.find_likely_audio_span(testflacpath, scan_to)
+            r = taketake.find_likely_audio_span(testflacpath, scan_to)
             for endpoint in dataclasses.fields(taketake.TimeRange):
                 with self.subTest(scan_to=scan_to, endpoint=endpoint.name):
                     self.assertAlmostEqual(

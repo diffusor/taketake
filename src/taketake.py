@@ -331,7 +331,7 @@ class ExtCmd(metaclass=ExtCmdListMeta):
 
     def run(self, **kwargs):
         args = self.construct_args(**kwargs)
-        proc = subprocess.run(args, capture_output=True, text=True, check=True)
+        proc = subprocess.run(args, capture_output=True, text=True)
 
         def mlfmt(s):
             lines = s.splitlines()
@@ -344,6 +344,8 @@ class ExtCmd(metaclass=ExtCmdListMeta):
 
         proc.exmsg = exmsg
 
+        if proc.returncode:
+            raise SubprocessError(f"Got bad exit code {proc.returncode} {proc.exmsg()}")
         return proc
 
 
@@ -1987,7 +1989,7 @@ def listen_to_wav(xinfo:TransferInfo, token:int) -> AudioInfo:
         if act(f"{idstr} - dump audioinfo to {audioinfo_fpath}"):
             write_json(audioinfo_fpath, audioinfo)
 
-    dbg(f"{idstr} - done")
+    dbg(f"{idstr} - done: {audioinfo}")
     return audioinfo
 
 
@@ -2034,12 +2036,12 @@ class Step:
             # Submit the listeners to the executor
             while (token := await stepper.get()) is not None:
                 stepper.log(f"****** got {token} *******")
-                xinfo = worklist[token]
-                future_to_token[executor.submit(listen_to_wav, xinfo, token)] = token
+                future_to_token[executor.submit(
+                    listen_to_wav, worklist[token], token)] = token
 
             for future in concurrent.futures.as_completed(future_to_token):
                 token = future_to_token[future]
-                xinfo.audioinfo = future.result()
+                worklist[token].audioinfo = future.result()
                 await stepper.put(token)
 
         await stepper.put(None)
@@ -2054,9 +2056,12 @@ class Step:
         # TODO write the suggested_filename to a file if act
         xinfo = worklist[token]
         fpath = xinfo.source_wav
-        xinfo.fname_guess = format_dest_filename(fpath, xinfo.audioinfo, cmdargs.instrument)
-        # TODO parsed_timestamp=get_fallback_timestamp(fpath, cmdargs.fallback_timestamp))
-        print(f"Speechinizer: {fpath.name} - {xinfo.audioinfo.recognized_speech!r} -> {xinfo.fname_guess!r}")
+        audioinfo = xinfo.audioinfo
+        if audioinfo.parsed_timestamp is None:
+            # TODO implement complicated fallback
+            xinfo.parsed_timestamp = get_fallback_timestamp(fpath, cmdargs.fallback_timestamp)
+        xinfo.fname_guess = format_dest_filename(fpath, audioinfo, cmdargs.instrument)
+        print(f"Speechinizer: {fpath.name} - {audioinfo.recognized_speech!r} -> {xinfo.fname_guess!r}")
         if cmdargs.do_prompt:
             if act("Prompt for a corrected filename"):
                 await prompt_for_filename(worklist[token])
