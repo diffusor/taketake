@@ -34,6 +34,164 @@ testflacpath = os.path.join(testpath, testflac)
 flacsize = os.path.getsize(testflacpath)
 flacwavsize = 1889324
 
+#===========================================================================
+# File helpers
+#===========================================================================
+
+class FileAssertions():
+    def __init__(self, *args, **kwargs):
+        super.__init__(self, *args, **kwargs)
+        self.addTypeEqualityFunc(Path, self.assertPathEqual)
+
+    def assertDataclassesEqual(self, a, b, msg=None):
+        self.assertEqual(a.__class__, b.__class__, msg)
+        self.assertEqual(dataclasses.asdict(a), dataclasses.asdict(b), msg)
+
+    def assertPathEqual(self, a:Path, b:Path, msg:str=None):
+        self.assertEqual(str(a), str(b), msg)
+
+    def mlfmt(self, b):
+        if isinstance(b, bytes):
+            lines = b.decode().splitlines()
+            return "\n    ".join(lines)
+        elif b is None:
+            return ""
+        else:
+            return repr(b)
+
+    def poutfmt(self, p):
+        return f"\n  cmd: '{' '.join(p.args)}'" \
+                f"\n  stdout:  {self.mlfmt(p.stdout)}" \
+                f"\n  stderr:  {self.mlfmt(p.stderr)}"
+
+    def assertIsDir(self, p:Path):
+        assert p.is_dir(), f"Not a directory: {str(p)}"
+
+    def assertNoFile(self, p:Path, msg=None):
+        self.assertFalse(p.exists(), f"File exists: {str(p)}")
+
+    def assertSymlinkTo(self, p:Path, expected:Path):
+        assert p.is_symlink(), f"Not a symlink: {str(p)}"
+        target = p.readlink()
+        self.assertPathEqual(target, expected, f"\n  Wrong target in symlink {str(p)}")
+
+    def assertEqualFiles(self, f1, f2):
+        p = subprocess.run(("cmp", f1, f2), capture_output=True)
+        if p.returncode != 0:
+            raise AssertionError(f"Files mismatch:\n  {f1}\n  {f2}{self.poutfmt(p)}")
+
+    def assertNotEqualFiles(self, f1, f2):
+        p = subprocess.run(("cmp", f1, f2), capture_output=True)
+        if p.returncode == 0:
+            raise AssertionError(f"Files match:\n  {f1}\n  {f2}{self.poutfmt(p)}")
+
+    def assertFileType(self, f, typestring):
+        """Run the file(1) command on f and check its string against typestring,
+        which should not include the 'file: ' portion of the output"""
+        p = subprocess.run(("file", f), capture_output=True, text=True, check=True)
+        try:
+            self.assertEqual(p.stdout.strip(), f"{f}: {typestring}")
+        except AssertionError as e:
+            e.args = (f"Bad file type; see + line below for expected type:\n  {e.args[0]}", *e.args[1:])
+            raise
+
+    def assertExitCode(self, p, exitcode=0):
+        if p.returncode != exitcode:
+            raise AssertionError(f"Expected exit code {exitcode} != {p.returncode}:{self.poutfmt(p)}")
+
+    def assertMd5FileGood(self, md5file):
+        p = subprocess.run(("md5sum", "-c", md5file), capture_output=True, text=True)
+        if p.returncode != 0:
+            raise AssertionError(f"md5sum check failed:{self.poutfmt(p)}")
+
+    def assertMd5FileBad(self, md5file):
+        p = subprocess.run(("md5sum", "-c", md5file), capture_output=True, text=True)
+        if p.returncode == 0:
+            raise AssertionError(f"md5sum check unexpectedly passed:{self.poutfmt(p)}")
+
+    def gen_xdelta_from_flac(self, flac, wav, xdelta):
+        flac_p, xdelta_p = asyncio.run(
+                taketake.encode_xdelta_from_flac_to_wav(flac, wav, xdelta))
+        self.assertExitCode(flac_p, 0)
+        self.assertExitCode(xdelta_p, 0)
+
+    def check_xdelta(self, xdelta_file, source_file, target_file):
+        """Pull out the size from the file itself and run the checker"""
+        if not isinstance(source_file, int):
+            source_file = os.path.getsize(source_file)
+        if not isinstance(target_file, int):
+            target_file = os.path.getsize(target_file)
+        asyncio.run(taketake.check_xdelta(xdelta_file, source_file, target_file))
+
+
+class TempdirFixture(unittest.TestCase):
+    def setUp(self):
+        timestamp = time.strftime("%Y%m%d-%H%M%S-%a")
+        self.tempdir = tempfile.mkdtemp(
+                prefix=f'{self.__class__.__name__}.{timestamp}.')
+        #print("Tempdir:", self.tempdir)
+
+    def tearDown(self):
+        cleandir(self.tempdir)
+
+    def tempfile(self, fname):
+        return os.path.join(self.tempdir, fname)
+
+
+class CdTempdirFixture(TempdirFixture):
+    """Changes dirictory into the tempdir for execution of each test.
+    Also store the Config so we don't get carried config state between tests.
+    """
+    def setUp(self):
+        super().setUp()
+        self.origdir = os.getcwd()
+        os.chdir(self.tempdir)
+        self.saved_config = dict(**taketake.Config.__dict__)
+
+    def tearDown(self):
+        for k, v in self.saved_config.items():
+            if not k.startswith('_'):
+                setattr(taketake.Config, k, v)
+        os.chdir(self.origdir)
+        super().tearDown()
+
+
+# from https://stackoverflow.com/a/170174
+@contextlib.contextmanager
+def cd(newdir):
+    olddir = os.getcwd()
+    try:
+        os.chdir(newdir)
+        yield
+    finally:
+        os.chdir(olddir)
+
+def raises_nodir(dirname):
+    """Decorates test function, injects Path(dirname) as an argument"""
+    def decorator(function):
+        @functools.wraps(function)
+        def wrapper(self, *args, **kwargs):
+            with self.assertRaisesRegex(taketake.TaketakeRuntimeError,
+                    f"Dest dir does not exist! '{dirname}'"):
+                return function(self, Path(dirname), *args, **kwargs)
+        return wrapper
+    return decorator
+
+def pathlist(s):
+    return [Path(word) for word in s.split()]
+
+def fmtpaths(paths):
+    return " ".join(str(p) for p in paths)
+
+def make_md5sum_file(fname, md5file):
+    with open(md5file, "w") as f:
+        subprocess.run(("md5sum", "-b", fname), stdout=f, check=True, text=True)
+
+def encode_xdelta(source, input, xdelta):
+    assert xdelta.endswith(".xdelta")
+    subprocess.run(("xdelta3", "-f", "-s", source, input, xdelta),
+            capture_output=True, check=True, text=True)
+
 def cleandir(d):
     if keeptemp:
         subprocess.run(("ls", "-d", d))
@@ -903,7 +1061,7 @@ class Test0_parse_timestamp(unittest.TestCase):
                 self.assertEqual(out, None)
 
 #===========================================================================
-# Queues and Steppers
+# Test1 - Queues and Steppers
 #===========================================================================
 
 class Test1_stepper(unittest.IsolatedAsyncioTestCase):
@@ -1183,106 +1341,13 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
                 "found backedge s3->s1:s1->s2->s3"):
             await network.execute()
 
+
+
 #===========================================================================
-# ExtCmd external command component tests
+# Test3 - Read-only external commands, no tempdirs
 #===========================================================================
 
-def make_md5sum_file(fname, md5file):
-    with open(md5file, "w") as f:
-        subprocess.run(("md5sum", "-b", fname), stdout=f, check=True, text=True)
-
-def encode_xdelta(source, input, xdelta):
-    assert xdelta.endswith(".xdelta")
-    subprocess.run(("xdelta3", "-f", "-s", source, input, xdelta),
-            capture_output=True, check=True, text=True)
-
-class FileAssertions():
-    def __init__(self, *args, **kwargs):
-        super.__init__(self, *args, **kwargs)
-        self.addTypeEqualityFunc(Path, self.assertPathEqual)
-
-    def assertDataclassesEqual(self, a, b, msg=None):
-        self.assertEqual(a.__class__, b.__class__, msg)
-        self.assertEqual(dataclasses.asdict(a), dataclasses.asdict(b), msg)
-
-    def assertPathEqual(self, a:Path, b:Path, msg:str=None):
-        self.assertEqual(str(a), str(b), msg)
-
-    def mlfmt(self, b):
-        if isinstance(b, bytes):
-            lines = b.decode().splitlines()
-            return "\n    ".join(lines)
-        elif b is None:
-            return ""
-        else:
-            return repr(b)
-
-    def poutfmt(self, p):
-        return f"\n  cmd: '{' '.join(p.args)}'" \
-                f"\n  stdout:  {self.mlfmt(p.stdout)}" \
-                f"\n  stderr:  {self.mlfmt(p.stderr)}"
-
-    def assertIsDir(self, p:Path):
-        assert p.is_dir(), f"Not a directory: {str(p)}"
-
-    def assertNoFile(self, p:Path, msg=None):
-        self.assertFalse(p.exists(), f"File exists: {str(p)}")
-
-    def assertSymlinkTo(self, p:Path, expected:Path):
-        assert p.is_symlink(), f"Not a symlink: {str(p)}"
-        target = p.readlink()
-        self.assertPathEqual(target, expected, f"\n  Wrong target in symlink {str(p)}")
-
-    def assertEqualFiles(self, f1, f2):
-        p = subprocess.run(("cmp", f1, f2), capture_output=True)
-        if p.returncode != 0:
-            raise AssertionError(f"Files mismatch:\n  {f1}\n  {f2}{self.poutfmt(p)}")
-
-    def assertNotEqualFiles(self, f1, f2):
-        p = subprocess.run(("cmp", f1, f2), capture_output=True)
-        if p.returncode == 0:
-            raise AssertionError(f"Files match:\n  {f1}\n  {f2}{self.poutfmt(p)}")
-
-    def assertFileType(self, f, typestring):
-        """Run the file(1) command on f and check its string against typestring,
-        which should not include the 'file: ' portion of the output"""
-        p = subprocess.run(("file", f), capture_output=True, text=True, check=True)
-        try:
-            self.assertEqual(p.stdout.strip(), f"{f}: {typestring}")
-        except AssertionError as e:
-            e.args = (f"Bad file type; see + line below for expected type:\n  {e.args[0]}", *e.args[1:])
-            raise
-
-    def assertExitCode(self, p, exitcode=0):
-        if p.returncode != exitcode:
-            raise AssertionError(f"Expected exit code {exitcode} != {p.returncode}:{self.poutfmt(p)}")
-
-    def assertMd5FileGood(self, md5file):
-        p = subprocess.run(("md5sum", "-c", md5file), capture_output=True, text=True)
-        if p.returncode != 0:
-            raise AssertionError(f"md5sum check failed:{self.poutfmt(p)}")
-
-    def assertMd5FileBad(self, md5file):
-        p = subprocess.run(("md5sum", "-c", md5file), capture_output=True, text=True)
-        if p.returncode == 0:
-            raise AssertionError(f"md5sum check unexpectedly passed:{self.poutfmt(p)}")
-
-    def gen_xdelta_from_flac(self, flac, wav, xdelta):
-        flac_p, xdelta_p = asyncio.run(
-                taketake.encode_xdelta_from_flac_to_wav(flac, wav, xdelta))
-        self.assertExitCode(flac_p, 0)
-        self.assertExitCode(xdelta_p, 0)
-
-    def check_xdelta(self, xdelta_file, source_file, target_file):
-        """Pull out the size from the file itself and run the checker"""
-        if not isinstance(source_file, int):
-            source_file = os.path.getsize(source_file)
-        if not isinstance(target_file, int):
-            target_file = os.path.getsize(target_file)
-        asyncio.run(taketake.check_xdelta(xdelta_file, source_file, target_file))
-
-
-class Test5_ext_commands_read_only(unittest.TestCase):
+class Test3_ext_commands_read_only(unittest.TestCase):
     """Test ExtCmd commands that don't modify the filesystem"""
 
     def test_duration_flac(self):
@@ -1307,62 +1372,9 @@ class Test5_ext_commands_read_only(unittest.TestCase):
         self.assertEqual(size, flacwavsize)
 
 
-class TempdirFixture(unittest.TestCase):
-    def setUp(self):
-        timestamp = time.strftime("%Y%m%d-%H%M%S-%a")
-        self.tempdir = tempfile.mkdtemp(
-                prefix=f'{self.__class__.__name__}.{timestamp}.')
-        #print("Tempdir:", self.tempdir)
-
-    def tearDown(self):
-        cleandir(self.tempdir)
-
-    def tempfile(self, fname):
-        return os.path.join(self.tempdir, fname)
-
-class CdTempdirFixture(TempdirFixture):
-    """Changes dirictory into the tempdir for execution of each test.
-    Also store the Config so we don't get carried config state between tests.
-    """
-    def setUp(self):
-        super().setUp()
-        self.origdir = os.getcwd()
-        os.chdir(self.tempdir)
-        self.saved_config = dict(**taketake.Config.__dict__)
-
-    def tearDown(self):
-        for k, v in self.saved_config.items():
-            if not k.startswith('_'):
-                setattr(taketake.Config, k, v)
-        os.chdir(self.origdir)
-        super().tearDown()
-
-# from https://stackoverflow.com/a/170174
-@contextlib.contextmanager
-def cd(newdir):
-    olddir = os.getcwd()
-    try:
-        os.chdir(newdir)
-        yield
-    finally:
-        os.chdir(olddir)
-
-def raises_nodir(dirname):
-    """Decorates test function, injects Path(dirname) as an argument"""
-    def decorator(function):
-        @functools.wraps(function)
-        def wrapper(self, *args, **kwargs):
-            with self.assertRaisesRegex(taketake.TaketakeRuntimeError,
-                    f"Dest dir does not exist! '{dirname}'"):
-                return function(self, Path(dirname), *args, **kwargs)
-        return wrapper
-    return decorator
-
-def pathlist(s):
-    return [Path(word) for word in s.split()]
-
-def fmtpaths(paths):
-    return " ".join(str(p) for p in paths)
+#===========================================================================
+# Test6 - longer external commands
+#===========================================================================
 
 class Test6_args(CdTempdirFixture):
     def setUp(self):
