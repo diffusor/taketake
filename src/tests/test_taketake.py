@@ -1347,19 +1347,28 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 # Test2 - JSON encode/decode
 #===========================================================================
 
-class Test2_json(unittest.TestCase, FileAssertions):
-    def test_json_roundtrip(self):
-        from taketake import AudioInfo, TimeRange
-        ai = AudioInfo(
+class Test2_json_AudioInfo(TempdirFixture, FileAssertions):
+    def setUp(self):
+        super().setUp()
+        self.ai = taketake.AudioInfo(
                 duration_s=34.5,
-                speech_range=TimeRange(start=3.01, duration=4),
+                speech_range=taketake.TimeRange(start=3.01, duration=4),
                 recognized_speech=None,
                 parsed_timestamp=datetime.datetime.now(),
                 extra_speech="foobar",
         )
-        s = json.dumps(ai, cls=taketake.TaketakeJsonEncoder)
+        self.jsonfile = Path(self.tempdir) / "test2.json"
+
+    def test_json_dumps_loads(self):
+        s = json.dumps(self.ai, cls=taketake.TaketakeJsonEncoder)
         decoded_ai = json.loads(s, object_hook=taketake.taketake_json_decode)
-        self.assertDataclassesEqual(ai, decoded_ai)
+        self.assertDataclassesEqual(self.ai, decoded_ai, f"\n* JSON encode = {s}")
+
+    def test_path_write_read_json(self):
+        taketake.write_json(self.jsonfile, self.ai)
+        decoded_ai = taketake.read_json(self.jsonfile)
+        self.assertDataclassesEqual(self.ai, decoded_ai,
+                f"\n* JSON file contents: {self.jsonfile.read_text()}")
 
 #===========================================================================
 # Test3 - Read-only external commands, no tempdirs

@@ -245,6 +245,12 @@ def taketake_json_decode(d):
     else:
         return d
 
+def write_json(fpath:Path, obj):
+    fpath.write_text(json.dumps(obj, cls=TaketakeJsonEncoder))
+
+def read_json(fpath:Path):
+    return json.loads(fpath.read_text(), object_hook=taketake_json_decode)
+
 #============================================================================
 # External command infrastructure
 #============================================================================
