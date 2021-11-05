@@ -1147,7 +1147,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(r, ['012'] + [num_tokens-1] * len(d))
 
-    async def test_bad_join(self):
+    async def test_queue_desync_error(self):
         #taketake.Config.debug = True
         d = taketake.make_queues("q1 q2")
         runlist = []
@@ -1173,8 +1173,9 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaisesRegex(
                 taketake.Stepper.DesynchronizationError,
-                "Mismatching tokens between queues.*"
-                "\n  tokens matched across queues: \[\]"
+                "Mismatching tokens between token-queues detected in Stepper\(joiner\).*"
+                "\n.*"
+                "\n  Tokens that matched across queues: \[\]"
                 "\n  Mismatches in q1: \['s0'\]"
                 "\n  Mismatches in q1: \['s1'\]"):
 
@@ -1184,6 +1185,30 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(" ".join(runlist),
                 "-j -s0 1s0 +s0 -s1 1s1 +s1")
+
+    async def test_queue_dup_token_error(self):
+        async def dupsrc(stepper):
+            await stepper.put("dup")
+            await stepper.put("dup")
+            await stepper.put(None)
+
+        async def consrc(stepper):
+            await stepper.put("confound")
+            await stepper.put("nomatch")
+            await stepper.put(None)
+
+        @taketake.StepNetwork.stepped
+        async def sink(token, stepper): ...
+
+        network = taketake.StepNetwork("net")
+        network.add(dupsrc, send_to=sink)
+        network.add(consrc, send_to=sink)
+        network.add(sink, pull_from=[dupsrc, consrc])
+
+        with self.assertRaisesRegex(
+                taketake.Stepper.DuplicateTokenError,
+                "Duplicate token dup from token-queue dupsrc->sink detected"):
+            await network.execute()
 
     async def test_send_post(self):
         #taketake.Config.debug = True
