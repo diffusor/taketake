@@ -986,10 +986,7 @@ def process_speech(fpath: Path, speech_range: TimeRange) -> {str, None}:
 
     This is called in a separate thread so as to not block the asyncio loop.
     """
-    if hasattr(Config, 'recognizer'):
-        recognizer = Config.recognizer
-    else:
-        recognizer = speech_recognition.Recognizer()
+    recognizer = speech_recognition.Recognizer()
 
     with speech_recognition.AudioFile(str(fpath)) as audio_file:
         speech_recording = recognizer.record(audio_file,
@@ -2076,13 +2073,8 @@ class Step:
 
         Uses several workers to process multiple files in parallel.
         """
-        def set_recognizer():
-            Config.recognizer = speech_recognition.Recognizer()
-
         with concurrent.futures.ProcessPoolExecutor(
-                max_workers=Config.num_listener_tasks,
-                initializer=set_recognizer,
-                ) as executor:
+                max_workers=Config.num_listener_tasks) as executor:
             future_to_token = {}
             # Submit the listeners to the executor
             while (token := await stepper.get()) is not None:
