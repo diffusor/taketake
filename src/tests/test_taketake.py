@@ -2497,35 +2497,64 @@ class Test8_step_setup(StepSetupBase):
         await self.do_step_setup_test()
 
 class Test8_step_listen(StepSetupBase):
-    @unittest.skipUnless(dontskip, "Takes 4s for 12 wavs with 6 workers.")
-    async def test_step_listen(self):
-        num_wavs = 12
+    def setUp(self):
+        super().setUp()
+        self.num_wavs = 12
 
-        self.wavpaths = [self.srcdir/f"w{w}.wav" for w in range(num_wavs)]
+        self.wavpaths = [self.srcdir/f"w{w}.wav" for w in range(self.num_wavs)]
         self.stepper = DummyStepper(len(self.wavpaths))
-        progress_dir = self.destdir / taketake.inject_timestamp(
+        self.progress_dir = self.destdir / taketake.inject_timestamp(
                 taketake.Config.progress_dir_fmt)
-        progress_dir.mkdir()
+        self.progress_dir.mkdir()
 
-        await taketake.flac_decode(testflacpath, self.wavpaths[0])
-        for w in self.wavpaths[1:]:
-            w.symlink_to(self.wavpaths[0])
-
-        worklist = []
+        self.worklist = []
         for w in self.wavpaths:
-            worklist.append(self.mk_xinfo(w, progress_dir))
-            worklist[-1].wav_progress_dir.mkdir()
+            self.worklist.append(self.mk_xinfo(w, self.progress_dir))
+            self.worklist[-1].wav_progress_dir.mkdir()
 
+    async def run_and_check_step_listen(self):
         #taketake.Config.debug = True
-        await taketake.Step.listen(self.cmdargs, worklist, stepper=self.stepper)
+        await taketake.Step.listen(self.cmdargs, self.worklist, stepper=self.stepper)
         # Ensure all the dumped AudioInfo are as expected
-        for xinfo in worklist:
+        for xinfo in self.worklist:
             with self.subTest(w=xinfo.source_wav.name):
+                self.assertDataclassesEqual(xinfo.audioinfo, flacaudioinfo)
                 loaded_ai = taketake.read_json(xinfo.wav_progress_dir / taketake.Config.audioinfo_fname)
                 self.assertDataclassesEqual(loaded_ai, flacaudioinfo)
 
-        self.assertEqual(len(self.stepper.output), num_wavs+1)
-        self.assertEqual(set(self.stepper.output), set(range(num_wavs)) | set([None]))
+        self.assertEqual(len(self.stepper.output), self.num_wavs+1)
+        self.assertEqual(set(self.stepper.output), set(range(self.num_wavs)) | set([None]))
+
+    @unittest.skipUnless(dontskip, "Takes 4s for 12 wavs with 6 workers.")
+    async def test_step_listen_recognize(self):
+        await taketake.flac_decode(testflacpath, self.wavpaths[0])
+        for w in self.wavpaths[1:]:
+            w.symlink_to(self.wavpaths[0])
+        await self.run_and_check_step_listen()
+
+    async def test_step_listen_load_json(self):
+        for xinfo in self.worklist:
+            taketake.write_json(xinfo.wav_progress_dir / taketake.Config.audioinfo_fname,
+                    flacaudioinfo)
+        await self.run_and_check_step_listen()
+
+    async def test_step_listen_wrong_dataclass_type(self):
+        bad_aifile_index = 3
+        for xinfo in self.worklist:
+            taketake.write_json(xinfo.wav_progress_dir
+                    / taketake.Config.audioinfo_fname,
+                    flacaudioinfo)
+        taketake.write_json(self.worklist[bad_aifile_index].wav_progress_dir
+                / taketake.Config.audioinfo_fname,
+                self.worklist[bad_aifile_index])
+        with self.assertRaisesRegex(taketake.InvalidProgressFile,
+                rf"listen_to_wav\({self.wavpaths[bad_aifile_index].name}\)\[{bad_aifile_index}\] "
+                rf"got unexpected data from {taketake.Config.audioinfo_fname}"
+                rf"\n.*"
+                rf"\n *Dump: TransferInfo"
+                ):
+            await self.run_and_check_step_listen()
+
 
 if __name__ == '__main__':
     unittest.main()

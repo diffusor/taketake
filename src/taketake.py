@@ -131,27 +131,14 @@ class Config:
 
 
 # Exceptions
-class TaketakeRuntimeError(RuntimeError):
-    pass
-
-class SubprocessError(TaketakeRuntimeError):
-    pass
-
-class InvalidMediaFile(TaketakeRuntimeError):
-    pass
-
-class MissingPar2File(TaketakeRuntimeError):
-    pass
-
-class TimestampGrokError(TaketakeRuntimeError):
-    pass
-
-class NoSuitableAudioSpan(TaketakeRuntimeError):
-    pass
-
-class XdeltaMismatch(TaketakeRuntimeError):
-    pass
-
+class TaketakeRuntimeError(RuntimeError): ...
+class InvalidProgressFile(TaketakeRuntimeError): ...
+class SubprocessError(TaketakeRuntimeError): ...
+class InvalidMediaFile(TaketakeRuntimeError): ...
+class MissingPar2File(TaketakeRuntimeError): ...
+class TimestampGrokError(TaketakeRuntimeError): ...
+class NoSuitableAudioSpan(TaketakeRuntimeError): ...
+class XdeltaMismatch(TaketakeRuntimeError): ...
 
 #============================================================================
 # Dataclasses
@@ -230,6 +217,8 @@ class TaketakeJsonEncoder(json.JSONEncoder):
             d = dataclasses.asdict(obj)
             d["__dataclass__"] = obj.__class__.__name__
             return d
+        elif isinstance(obj, Path):
+            return dict(__Path__=True, path=str(obj))
         elif isinstance(obj, datetime.datetime):
             # NOTE: does not dump timezone info
             return dict(__datetime__=True, timestamp=obj.timestamp())
@@ -243,6 +232,8 @@ def taketake_json_decode(d):
             return cls(**d)
         else:
             return d
+    elif "__Path__" in d:
+        return Path(d["path"])
     elif "__datetime__" in d:
         return datetime.datetime.fromtimestamp(d["timestamp"])
     else:
@@ -995,8 +986,10 @@ def process_speech(fpath: Path, speech_range: TimeRange) -> {str, None}:
 
     This is called in a separate thread so as to not block the asyncio loop.
     """
-    # TODO pass in the recognizer from each worker thread
-    recognizer = speech_recognition.Recognizer()
+    if hasattr(Config, 'recognizer'):
+        recognizer = Config.recognizer
+    else:
+        recognizer = speech_recognition.Recognizer()
 
     with speech_recognition.AudioFile(str(fpath)) as audio_file:
         speech_recording = recognizer.record(audio_file,
@@ -2016,7 +2009,7 @@ def act(msg):
 def listen_to_wav(xinfo:TransferInfo, token:int) -> AudioInfo:
     """Do speech to text on the given workunit read from the inq.
 
-    If a .audioinfo progress file exists, use that instead.
+    If a .audioinfo.json progress file exists, use that instead.
     """
     idstr = f"listen_to_wav({xinfo.source_wav.name})[{token}]"
     audioinfo_fpath = xinfo.wav_progress_dir / Config.audioinfo_fname
@@ -2025,7 +2018,7 @@ def listen_to_wav(xinfo:TransferInfo, token:int) -> AudioInfo:
         audioinfo = read_json(audioinfo_fpath)
         dbg(f"{idstr} - Loaded stored data {audioinfo}")
         if not isinstance(audioinfo, AudioInfo):
-            RuntimeError(f"{idstr} got unexpected data from"
+            raise InvalidProgressFile(f"{idstr} got unexpected data from"
                     f" {Config.audioinfo_fname}"
                     f"\n    Path: {audioinfo_fpath}"
                     f"\n    Dump: {audioinfo}"
@@ -2083,8 +2076,13 @@ class Step:
 
         Uses several workers to process multiple files in parallel.
         """
+        def set_recognizer():
+            Config.recognizer = speech_recognition.Recognizer()
+
         with concurrent.futures.ProcessPoolExecutor(
-                max_workers=Config.num_listener_tasks) as executor:
+                max_workers=Config.num_listener_tasks,
+                initializer=set_recognizer,
+                ) as executor:
             future_to_token = {}
             # Submit the listeners to the executor
             while (token := await stepper.get()) is not None:

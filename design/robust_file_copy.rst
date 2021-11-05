@@ -63,7 +63,7 @@ there are no more items to process.
 *Perform the following steps for each wav, assuming each non-src filename is
 relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory*
 
-2. [-x] **listen**: Speech to text
+2. [x] **listen**: Speech to text
 
    ``setup => [listen] => prompt``
 
