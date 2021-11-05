@@ -2512,15 +2512,15 @@ class Test8_step_listen(StepSetupBase):
             self.worklist.append(self.mk_xinfo(w, self.progress_dir))
             self.worklist[-1].wav_progress_dir.mkdir()
 
-    async def run_and_check_step_listen(self):
+    async def run_and_check_step_listen(self, ai_expect=flacaudioinfo):
         #taketake.Config.debug = True
         await taketake.Step.listen(self.cmdargs, self.worklist, stepper=self.stepper)
         # Ensure all the dumped AudioInfo are as expected
         for xinfo in self.worklist:
             with self.subTest(w=xinfo.source_wav.name):
-                self.assertDataclassesEqual(xinfo.audioinfo, flacaudioinfo)
+                self.assertDataclassesEqual(xinfo.audioinfo, ai_expect)
                 loaded_ai = taketake.read_json(xinfo.wav_progress_dir / taketake.Config.audioinfo_fname)
-                self.assertDataclassesEqual(loaded_ai, flacaudioinfo)
+                self.assertDataclassesEqual(loaded_ai, ai_expect)
 
         self.assertEqual(len(self.stepper.output), self.num_wavs+1)
         self.assertEqual(set(self.stepper.output), set(range(self.num_wavs)) | set([None]))
@@ -2555,6 +2555,13 @@ class Test8_step_listen(StepSetupBase):
                 ):
             await self.run_and_check_step_listen()
 
+    @unittest.skipUnless(dontskip, "Takes 4s for 12 wavs with 6 workers.")
+    async def test_step_listen_bad_timestamp(self):
+        p = subprocess.run(("ffmpeg", "-i", testflacpath, "-ss", "3", "-t", "2",
+            self.wavpaths[0]), capture_output=True, text=True)
+        for w in self.wavpaths[1:]:
+            w.symlink_to(self.wavpaths[0])
+        await self.run_and_check_step_listen(taketake.AudioInfo(duration_s=2.0))
 
 if __name__ == '__main__':
     unittest.main()
