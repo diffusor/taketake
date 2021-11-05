@@ -63,22 +63,22 @@ there are no more items to process.
 *Perform the following steps for each wav, assuming each non-src filename is
 relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory*
 
-2. [-] **listen**: Speech to text
+2. [x] **listen**: Speech to text
 
    ``setup => [listen] => prompt``
 
    **Skip this task if ``.audioinfo.json`` exists,
    filling in the guessed timestamp and duration into the TransferInfo instead.**
 
-   a. [-] Extract playtime durations from each src wav file
+   a. [x] Extract playtime durations from each src wav file
 
-   b. [-] Run speech to text, parse timestamp, construct filename guess
+   b. [x] Run speech to text, parse timestamp, construct filename guess
 
-   c. [-] Dump audioinfo::
+   c. [x] Dump audioinfo::
 
        echo $filename_guess > .audioinfo.json
 
-   d. [-] Only emit tokens once we found an actual token timestamp as described
+   d. [x] Only emit tokens once we found an actual token timestamp as described
       below
 
 3. **prompt**: Prompt for name
