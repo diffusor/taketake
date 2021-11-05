@@ -1186,6 +1186,22 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(" ".join(runlist),
                 "-j -s0 1s0 +s0 -s1 1s1 +s1")
 
+    async def test_queue_pre_sync_error(self):
+        async def badsrc(stepper):
+            await stepper.sync_to[0].put("dup")
+
+        async def sink(stepper):
+            await stepper.get()
+
+        network = taketake.StepNetwork("net")
+        network.add(badsrc, sync_to=sink)
+        network.add(sink, sync_from=badsrc)
+
+        with self.assertRaisesRegex(
+                taketake.Stepper.PreSyncTokenError,
+                "Got non-end token 'dup' from sync_from queues badsrc->sink"):
+            await network.execute()
+
     async def test_queue_dup_token_error(self):
         async def dupsrc(stepper):
             await stepper.put("dup")
