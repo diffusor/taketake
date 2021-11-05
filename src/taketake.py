@@ -81,7 +81,7 @@ import types
 import ctypes
 import dataclasses
 from dataclasses import dataclass, field, is_dataclass
-from typing import List
+from typing import List, Callable
 from pathlib import Path
 
 import speech_recognition
@@ -173,7 +173,7 @@ class AudioInfo:
     speech_range:TimeRange = None
     recognized_speech:str = None # Was orig_speech
     parsed_timestamp:datetime.datetime = None
-    extra_speech:str = field(default_factory=list)
+    extra_speech:list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -979,14 +979,14 @@ def find_likely_audio_span(fpath: Path, scan_to_s: float) -> TimeRange:
             return TimeRange(r.start, duration)
 
     raise NoSuitableAudioSpan(f"Could not find any span of audio greater than "
-                              f"{Config.min_talk_duration_s}s in file '{f}'")
+                              f"{Config.min_talk_duration_s}s in file '{fpath}'")
 
 
 #============================================================================
 # Speech recognition and parsing
 #============================================================================
 
-def process_speech(fpath: Path, speech_range: TimeRange) -> str:
+def process_speech(fpath: Path, speech_range: TimeRange) -> {str, None}:
     """Uses the PocketSphinx speech recognizer to decode the spoken timestamp
     and any notes.
 
@@ -1010,7 +1010,7 @@ def process_speech(fpath: Path, speech_range: TimeRange) -> str:
                     category=DeprecationWarning)
             return recognizer.recognize_sphinx(speech_recording)
     except speech_recognition.UnknownValueError as e:
-        pass
+        return None
 
 
 def reverse_hashify(s):
@@ -1350,7 +1350,7 @@ def words_to_timestamp(text):
 # File Audio processing
 #============================================================================
 
-def extract_timestamp_from_audio(fpath:Path, audioinfo:AudioInfo):
+def extract_timestamp_from_audio(fpath:Path, audioinfo:AudioInfo) -> None:
     """Runs speech-to-text on the given audio file fpath.
 
     audioinfo must have the duration_s field already filled in
@@ -1363,7 +1363,7 @@ def extract_timestamp_from_audio(fpath:Path, audioinfo:AudioInfo):
 
     audioinfo.speech_range = find_likely_audio_span(fpath, scan_duration)
     print(f"Speechinizer: {fpath.name} - processing audio at {audioinfo.speech_range}")
-    audioinfo.recognized_speech = process_speech(str(fpath), audioinfo.speech_range)
+    audioinfo.recognized_speech = process_speech(fpath, audioinfo.speech_range)
     audioinfo.parsed_timestamp, audioinfo.extra_speech \
             = words_to_timestamp(audioinfo.recognized_speech)
     dbg(f"Speechinizer: {fpath.name} Done - {audioinfo}")
@@ -1451,7 +1451,7 @@ def format_dest_filename(fpath:Path, audioinfo:AudioInfo, instrument:str) -> str
 # Signaling interface
 #============================================================================
 
-def make_queues(s):
+def make_queues(s:str) -> LinkQDict:
     """Make a StepperQueue for each word in s.
 
     Returns a dict keyed off of the given names, but also with
@@ -1463,7 +1463,7 @@ def make_queues(s):
         setattr(qdict, qname, qdict[qname])
     return qdict
 
-def listify(arg):
+def listify(arg) -> list:
     if arg is None:
         return []
     elif isinstance(arg, str) or isinstance(arg, bytes):
@@ -1914,7 +1914,7 @@ class StepNetwork:
 
         await asyncio.gather(*tasks)
 
-    def stepped(coro):
+    def stepped(coro:types.Callable):
         """Decorator to mark coro as stepped task."""
         coro.is_stepped = True
         return coro
