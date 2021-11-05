@@ -1451,19 +1451,15 @@ def format_dest_filename(fpath:Path, audioinfo:AudioInfo, instrument:str) -> str
 # Signaling interface
 #============================================================================
 
-class QDict(dict):
-    """Allow additing attributes.  dict locks down its slots."""
-
 def make_queues(s):
-    """Make an asyncio.Queue with an added name attribute for each word in s.
+    """Make a StepperQueue for each word in s.
 
     Returns a dict keyed off of the given names, but also with
     attributes set based on those names so they are dot accessible.
     """
-    qdict = QDict()
+    qdict = LinkQDict("noname")
     for qname in s.split():
-        qdict[qname] = asyncio.Queue()
-        qdict[qname].name = qname
+        qdict[qname] = StepperQueue(qname, "any")
         setattr(qdict, qname, qdict[qname])
     return qdict
 
@@ -1484,10 +1480,10 @@ def format_steps(steps, sep=", "):
     return sep.join(step.__name__ for step in steplist)
 
 class Stepper:
-    """Manage a set of asyncio.Queues for coordinating stepping a sequence.
+    """Manage a set of StepperQueue instances for coordinating stepping a sequence.
 
     The end of the sequence should be indicated be the given end token.
-    Each sync_ and send_ parameter should be None, an asyncio.Queue with a
+    Each sync_ and send_ parameter should be None, a StepperQueue with a
     .name attr as returned by make_queues, or a list of such.
 
     The step() and walk() methods provide high-level interfaces for easily
@@ -1519,26 +1515,69 @@ class Stepper:
     class DesynchronizationError(RuntimeError):
         pass
 
-    async def _get_across(self, q_list, qtype=""):
-        last_token = None
-        last_queue = None
-        # sync across the next token from each stream
+    async def _get_across(self, q_list):
+        """Gets the next token that matches across all the queues in the q_list"""
+        if not q_list:
+            return None
+        # Gather up all the queues' get() tasks into a dict mapping the task
+        # back to the queue.  Also create any new get() tasks as needed.
+        tasks = {}
         for q in q_list:
-            token = await q.get()
-            q.task_done()
-            if last_queue is not None and token != last_token:
-                raise Stepper.DesynchronizationError(
-                        f"Mismatching tokens between queues!"
-                        f"\n  {last_token!r} <= {last_queue.name}"
-                        f"\n  {token!r} <= {q.name}")
-            last_token = token
-            last_queue = q
-        if q_list:
-            if qtype == "sync_from":
-                self.log(f"[<= {qtype}({self.fmtqueues(q_list)})]")
-            else:
-                self.log(f"[got {last_token} <= {qtype}({self.fmtqueues(q_list)})]")
-        return last_token
+            if not q.done:
+                if q.getter is None:
+                    q.getter = asyncio.create_task(q.get())
+                tasks[q.getter] = q
+
+        # Loop until we get a token that's been emitted by all queues
+        while True:
+            # First check if any tokens have been seen by all.
+            # We must do this before waiting for any more tokens because a
+            # prior call to _get_across may have gotten different
+            # tokens from multiple queues from the same wait call.
+            tokens_done = set.intersection(*[q.seen for q in q_list])
+
+            if self.end in tokens_done:
+                # We do this check every time after the None is received
+                # across all queues, but that's probably fine.  It's not an
+                # expected case.
+                for q in q_list:
+                    if tokens_done != q.seen:
+                        bad_queue_strs = []
+                        for badq in q_list:
+                            extra_tokens = badq.seen - tokens_done
+                            if extra_tokens:
+                                bad_queue_strs.append(
+                                        f"\n  Mismatches in {q.name}: {sorted(extra_tokens)}")
+                        bad_str = "".join(bad_queue_strs)
+                        raise Stepper.DesynchronizationError(
+                                f"Mismatching tokens between queues detected! (Got at end token from all)"
+                                f"\n  tokens matched across queues: {sorted(tokens_done - {None})}"
+                                f"{bad_str}")
+
+            if tokens_done:
+                self.log(f"[[[ready tokens: {tokens_done}]]]")
+                token = tokens_done.pop()
+                if token == self.end and tokens_done:
+                        token = tokens_done.pop()
+                for q in q_list:
+                    q.seen.remove(token)
+                return token
+
+            self.log(f"[[[waiting for {len(tasks)} tasks]]]")
+            if tasks:
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    token = task.result()
+                    q = tasks.pop(task)
+                    q.task_done()
+                    if token == self.end:
+                        q.getter = None
+                        q.done = True
+                    else:
+                        q.getter = asyncio.create_task(q.get())
+                        tasks[q.getter] = q
+                    q.seen.add(token)
+                    self.log(f"[[[got {token} <= {q}]]]")
 
 
     async def pre_sync(self):
@@ -1551,11 +1590,11 @@ class Stepper:
         token.
         """
         if not self.pre_sync_met:
-            while (token := await self._get_across(self.sync_from,
-                    qtype="sync_from")) != self.end:
+            while (token := await self._get_across(self.sync_from)) != self.end:
                 raise Stepper.PreSyncTokenError(
                         f"Got non-end token {token!r} from sync_from queues"
                         f" {self.fmtqueues(self.sync_from)}")
+            self.log(f"[<= sync_from({self.fmtqueues(self.sync_from)})]")
             self.pre_sync_met = True
 
 
@@ -1566,7 +1605,8 @@ class Stepper:
         all report matching tokens.
         """
         await self.pre_sync()
-        self.value = await self._get_across(self.pull_from, "pull_from")
+        self.value = await self._get_across(self.pull_from)
+        self.log(f"[got {self.value} <= pull_from({self.fmtqueues(self.pull_from)})]")
         return self.value
 
 
@@ -1641,6 +1681,7 @@ class Link(collections.namedtuple('Link', 'src dest')):
         return "src" if side == "dest" else "dest"
 
 class LinkQDict(collections.UserDict):
+    """named dictionary mapping coro->coro links to queues"""
     def __init__(self, name):
         self.name = name
         super().__init__()
@@ -1657,6 +1698,9 @@ class StepperQueue(asyncio.Queue):
         self.qtype = qtype
         self.src = False
         self.dest = False
+        self.seen = set()  # Set of seen tokens for synchronizing
+        self.getter = None # Queue.get() task from the last get()
+        self.done = False  # Set True when the end token is seen
         super().__init__()
 
     def __str__(self):

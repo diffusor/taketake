@@ -1119,7 +1119,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.assertEqual(runlist,
-                ['finisher', 'goer', '-0', '+0', '-1', '+1', '-None', 'done', '+None'])
+                ['finisher', 'goer', '-0', '+0', '-1', '+1', '-None', '+None', 'done'])
 
     async def test_join(self):
         d = taketake.make_queues("q1 q2 q3")
@@ -1148,28 +1148,45 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r, ['012'] + [num_tokens-1] * len(d))
 
     async def test_bad_join(self):
+        #taketake.Config.debug = True
         d = taketake.make_queues("q1 q2")
+        runlist = []
+        def log(msg):
+            runlist.append(msg)
 
         async def joiner(stepper):
+            log("-j")
             while (token := await stepper.get()) is not None:
-                pass
+                log(f"j{token}")
+            log("+j")
 
         async def sender(name, stepper):
+            log(f"-{name}")
             await stepper.put(name)
+            log(f"1{name}")
             await stepper.put(None)
+            log(f"+{name}")
 
         senders = []
         for i, q in enumerate(d.values()):
-            senders.append(sender(f"s{i}", taketake.Stepper(send_to=q)))
+            senders.append(sender(f"s{i}", taketake.Stepper(name=q.name, send_to=q)))
 
         with self.assertRaisesRegex(
                 taketake.Stepper.DesynchronizationError,
-                "Mismatching tokens between queues!"):
+                "Mismatching tokens between queues.*"
+                "\n  tokens matched across queues: \[\]"
+                "\n  Mismatches in q1: \['s0'\]"
+                "\n  Mismatches in q1: \['s1'\]"):
+
             await asyncio.gather(
-                    joiner(taketake.Stepper(pull_from=d.values())),
+                    joiner(taketake.Stepper(name="joiner", pull_from=d.values())),
                     *senders)
 
+        self.assertEqual(" ".join(runlist),
+                "-j -s0 1s0 +s0 -s1 1s1 +s1")
+
     async def test_send_post(self):
+        #taketake.Config.debug = True
         d = taketake.make_queues("q1 q2 end")
         runlist = []
         def log(msg):
@@ -1178,9 +1195,11 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
         async def joiner(stepper):
             i = 0
             log("-j")
+            stepper.log(f"** j{i} waiting for tokens**")
             while (token := await stepper.get()) is not None:
                 i += 1
                 log(f"j{i}")
+                stepper.log(f"** got token={token} : j{i} **")
                 self.assertEqual(token, i)
             log("jNone")
             await stepper.put(None)
@@ -1195,22 +1214,23 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             log(f"-{name}")
             await stepper.put(1)
             log(f"1{name}")
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.0005) # Allow the joiner to run
             await stepper.put(2)
             log(f"2{name}")
             await stepper.put(None)
             log(f"+{name}")
 
         r = await asyncio.gather(
-                finisher(taketake.Stepper(sync_from=d.end)),
-                joiner(taketake.Stepper(
+                finisher(taketake.Stepper(name="finisher", sync_from=d.end)),
+                joiner(taketake.Stepper(name="joiner",
                     pull_from=[d.q1, d.q2],
                     sync_to=d.end,
                     )),
-                sender("q1", taketake.Stepper(send_to=d.q1)),
-                sender("q2", taketake.Stepper(send_to=d.q2)))
+                sender("q1", taketake.Stepper(name="q1", send_to=d.q1)),
+                sender("q2", taketake.Stepper(name="q2", send_to=d.q2)))
 
         self.assertEqual(" ".join(runlist),
+                #"-f -j -q1 1q1 -q2 1q2 2q1 +q1 2q2 +q2 j1 j2 jNone +j +f")
                 "-f -j -q1 1q1 -q2 1q2 j1 2q1 +q1 2q2 +q2 j2 jNone +j +f")
 
     async def test_step_network(self):
@@ -1262,7 +1282,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
         await network.execute()
 
         self.assertEqual(" ".join(runlist),
-        "src1:a src1:b src2:a src2:b w1:a w1:b w2:a w2:b w3:a w3:b w4:a w4:b")
+        "src1:a src1:b src2:a src2:b w1:a w2:a w3:a w1:b w2:b w3:b w4:a w4:b")
 
     async def test_add_step_with_no_source(self):
         @taketake.StepNetwork.stepped
