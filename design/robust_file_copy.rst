@@ -123,20 +123,15 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    Finally:
 
-   e. Construct the filename using the timestamp.
+   e. [x] Construct the guessed filename using the timestamp.
 
-   f. Dump the constructed filename to ``.filename_guess``::
+   f. [-] Dump the constructed filename to ``.filename_guess``::
 
        echo $filename_guess > .filename_guess
 
-   Prompt for name based on timestamp from above:
+   g. Prompt for the final filename, checking the resulting timestamp:
 
-   g. Suggest TransferInfo.fname_guess
-
-   h. Prompt for the final filename
-
-   i. Check the resulting timestamp:
-
+      * Suggest TransferInfo.fname_guess
       * Parse out the timestamp from the ``$filename_provided``
       * Verify that the weekday matches that from the timestamp
       * Verify the timestamp is within a reasonable delta from the speech-recognized time
@@ -144,9 +139,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
       * If the verification fails, prompt the user to confirm or redo the
         filename
 
-   j. Set TransferInfo.timestamp for the current file from the prompt results
+   h. Set TransferInfo.timestamp for the current file from the prompt results
 
-   k. Dump the response filename to ``.filename_provided``::
+   i. Dump the response filename to ``.filename_provided``::
 
        echo $filename_provided > .filename_provided
 

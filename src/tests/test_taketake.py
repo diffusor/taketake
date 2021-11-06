@@ -1017,6 +1017,32 @@ class Test0_format_duration(unittest.TestCase):
             with self.subTest(start=start, dur=dur, expect=expect):
                 self.assertEqual(f"{taketake.TimeRange(start, dur)}", expect)
 
+class Test0_format_dest_filename(unittest.TestCase):
+    def test_format_dest_filename(self):
+        xinfo = taketake.TransferInfo(
+                source_wav=Path("wow.wav"),
+                wav_abspath=Path("foo/wow008.wav"),
+                dest_dir=Path("dest"),
+                wav_progress_dir=Path("dest/baz"),
+                source_link=Path(),
+                instrument="foobuzz",
+                audioinfo=taketake.AudioInfo(
+                    duration_s=16391,
+                    extra_speech="these are extra words".split(),
+                    ),
+                timestamp=datetime.datetime.fromtimestamp(0,
+                    tz=datetime.timezone(datetime.timedelta(0))),
+                )
+
+        for extra in "", "bark", "these are extra words":
+            with self.subTest(extra_speech=extra):
+                extra_list = extra.split()
+                xinfo.audioinfo.extra_speech = extra_list
+                expect = "-".join(extra_list)
+                if expect:
+                    expect += "."
+                self.assertEqual(taketake.format_dest_filename(xinfo),
+                        f"piano.19700101-000000-Thu.{expect}4h33m11s.foobuzz.wow")
 
 class Test0_parse_timestamp(unittest.TestCase):
     def test_parse_timestamp(self):
@@ -2450,6 +2476,7 @@ class StepSetupBase(unittest.IsolatedAsyncioTestCase,
                 dest=self.destdir,
                 wavs=self.wavpaths,
                 do_prompt=False,
+                instrument="foobaz",
         )
         self.stepper = DummyStepper()
         self.maxDiff = None
@@ -2462,6 +2489,7 @@ class StepSetupBase(unittest.IsolatedAsyncioTestCase,
                 wav_progress_dir=progress_dir / wpath.name,
                 source_link=progress_dir / wpath.name
                     / taketake.Config.source_wav_linkname,
+                instrument="foobaz",
             )
 
 
@@ -2611,7 +2639,9 @@ class Test8_step_reorder(unittest.IsolatedAsyncioTestCase,
                 dest_dir=Path(),
                 wav_progress_dir=Path(),
                 source_link=Path(),
-                audioinfo=taketake.AudioInfo())
+                audioinfo=taketake.AudioInfo(),
+                instrument="foobuzz",
+                )
             for i in range(self.numitems)]
 
     def timestamp(self, i):

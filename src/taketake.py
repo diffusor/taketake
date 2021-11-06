@@ -181,6 +181,7 @@ class TransferInfo:
     dest_dir:Path
     wav_progress_dir:Path
     source_link:Path
+    instrument:str
 
     audioinfo:AudioInfo = None
     fname_guess:str = None
@@ -1415,28 +1416,23 @@ def format_duration(duration:float, style:str="letters") -> str:
         return s
 
 
-def format_dest_filename(fpath:Path, audioinfo:AudioInfo, instrument:str) -> str:
-    # Format the timestamp
-    # TODO actually want whether the timestamp contained "and X seconds"
-    if audioinfo.parsed_timestamp.second:
-        time_fmt = Config.timestamp_fmt_with_seconds
-    else:
-        time_fmt = Config.timestamp_fmt_no_seconds
-    tstr = audioinfo.parsed_timestamp.strftime(time_fmt)
+def format_dest_filename(xinfo:TransferInfo) -> str:
+    """Returns an extensionless pathless filename string."""
 
-    # Format the duration
-    dstr = format_duration(audioinfo.duration_s)
-
-    # Format the notes
-    if audioinfo.extra_speech:
-        notes = "-".join(audioinfo.extra_speech) + "."
+    timestamp_str = xinfo.timestamp.strftime(Config.timestamp_fmt_with_seconds)
+    duration_str = format_duration(xinfo.audioinfo.duration_s)
+    if xinfo.audioinfo.extra_speech:
+        notes = "-".join(xinfo.audioinfo.extra_speech) + "."
     else:
         notes = ""
 
     return Config.dest_fname_fmt.format(
-            prefix=Config.prefix, datestamp=tstr,
-            notes=notes, duration=dstr, instrument=instrument,
-            orig_fname=fpath.stem)
+            prefix=Config.prefix,
+            datestamp=timestamp_str,
+            notes=notes,
+            duration=duration_str,
+            instrument=xinfo.instrument,
+            orig_fname=xinfo.source_wav.stem)
 
 
 #============================================================================
@@ -1965,27 +1961,6 @@ def play_media_file(finfo):
     res = subprocess.Popen(args, stdin=null, stdout=null, stderr=null)
 
 
-@dataclass
-class FileInfo:
-    """Class tracking speech recognition and file renaming"""
-    instrument: str
-
-    fpath: str
-    orig_filename: str
-    src_path: str
-    dest_path: str
-
-    duration_s: float = None
-    speech_range: TimeRange = None
-
-    orig_speech: str = None
-    parsed_timestamp: str = None
-    extra_speech: str = None
-
-    suggested_filename: str = None
-    final_filename: str = None
-
-
 async def prompt_for_filename(finfo):
 
     def toolbar():
@@ -2082,6 +2057,7 @@ class Step:
                     dest_dir=cmdargs.dest,
                     wav_progress_dir=progress_dir / wav.name,
                     source_link=progress_dir / wav.name / Config.source_wav_linkname,
+                    instrument=cmdargs.instrument,
                 )
 
             if act(f"create wav progress dir {wav.name} and symlink to {info.wav_abspath}"):
@@ -2163,10 +2139,17 @@ class Step:
         fpath = xinfo.source_wav
         audioinfo = xinfo.audioinfo
         timestamp_seen = False
+
         if audioinfo.parsed_timestamp is None:
             # TODO implement complicated fallback
             xinfo.parsed_timestamp = get_fallback_timestamp(fpath, cmdargs.fallback_timestamp)
-        xinfo.fname_guess = format_dest_filename(fpath, audioinfo, cmdargs.instrument)
+
+        # Generate the extensionless guessed filename
+        xinfo.fname_guess = format_dest_filename(xinfo)
+        guess_fpath = xinfo.wav_progress_dir / Config.fname_guess
+        if act(f"create {Config.fname_guess} for {wav.name}:  {xinfo.fname_guess}"):
+            guess_fpath.write_text(xinfo.fname_guess)
+
         print(f"Speechinizer: {fpath.name} - {audioinfo.recognized_speech!r} -> {xinfo.fname_guess!r}")
         if cmdargs.do_prompt:
             if act("Prompt for a corrected filename"):
