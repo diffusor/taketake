@@ -78,7 +78,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        echo $filename_guess > .audioinfo.json
 
-3. [] **reorder**: Reorder the source files for timestamping
+3. [x] **reorder**: Reorder the source files for timestamping
 
    a. Buffer the file workunits until the first one with a successfully parsed
       audio timestamp is encountered.
@@ -100,18 +100,10 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    Determine timestamp:
 
-   **If ``.filename_provided`` exists, set TransferInfo.timestamp from there,
-   write ``.filename_guess``, and skip this task.**
+   **If ``.filename_provided`` exists, set TransferInfo.timestamp from there
+   and skip this task.**
 
-   **Else if ``.filename_guess`` exists, set TransferInfo.timestamp from
-   there and skip this task.**
-
-   Otherwise, to get the timestamp of a given file in the following steps,
-   first choose the timestamp parsed from the user-supplied filename from a
-   prior run if it exists in ``.filename_provided``.  Otherwise, use the
-   speech-to-text recognized timestamp from the audioinfo for the file.
-
-   If no such timestamp is found:
+   If AudioInfo.parsed_timestamp does not exist for the current file:
 
    a. Calculate the timestamp based on the preceding file if it exists::
 
@@ -139,9 +131,6 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    Prompt for name based on timestamp from above:
 
-   **Skip this task if ``.filename_provided`` exists,
-   filling in the TransferInfo field from its contents instead.**
-
    g. Suggest TransferInfo.fname_guess
 
    h. Prompt for the final filename
@@ -155,7 +144,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
       * If the verification fails, prompt the user to confirm or redo the
         filename
 
-   j. Dump the response filename to ``.filename_provided``::
+   j. Set TransferInfo.timestamp for the current file from the prompt results
+
+   k. Dump the response filename to ``.filename_provided``::
 
        echo $filename_provided > .filename_provided
 
