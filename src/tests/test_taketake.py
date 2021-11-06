@@ -1325,6 +1325,37 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(" ".join(runlist),
         "src1:a src1:b src2:a src2:b w1:a w2:a w3:a w1:b w2:b w3:b w4:a w4:b")
 
+    async def test_step_network_pipeline(self):
+        worklist = "a b c".split()
+        runlist = []
+        def update(stepper):
+            if not hasattr(stepper, "seen_tokens"):
+                stepper.seen_tokens = set()
+            stepper.seen_tokens.add(stepper.value)
+
+        async def src(stepper):
+            for e in worklist:
+                await stepper.put(e)
+                runlist.append(f"src:{e}")
+            await stepper.put(None)
+        @taketake.StepNetwork.stepped
+        async def w1(token, stepper): update(stepper)
+        @taketake.StepNetwork.stepped
+        async def w2(token, stepper): update(stepper)
+        @taketake.StepNetwork.stepped
+        async def w3(token, stepper): update(stepper)
+        @taketake.StepNetwork.stepped
+        async def w4(token, stepper): update(stepper)
+
+        network = taketake.StepNetwork("net")
+        network.add_pipeline(src, w1, w2, w3, w4)
+        await network.execute()
+        self.assertEqual(" ".join(runlist), "src:a src:b src:c")
+        for w in w1, w2, w3, w4:
+            with self.subTest(w=w.__name__):
+                self.assertEqual(w._stepper.seen_tokens, set(worklist))
+
+
     async def test_add_step_with_no_source(self):
         @taketake.StepNetwork.stepped
         async def s(): pass

@@ -1688,6 +1688,7 @@ class Stepper:
         while await self.step():
             await coro(*args, **kwargs, token=self.value, stepper=self)
 
+
 class Link(collections.namedtuple('Link', 'src dest')):
     __slots__ = ()
 
@@ -1706,6 +1707,7 @@ class Link(collections.namedtuple('Link', 'src dest')):
     @classmethod
     def other(cls, side):
         return "src" if side == "dest" else "dest"
+
 
 class StepNetwork:
     """Auto-wired DAG of Steppers and their step coroutines"""
@@ -1814,6 +1816,7 @@ class StepNetwork:
         stepper = Stepper(name=coro.__name__, end=self.end)
         stepper.args = args
         stepper.kwargs = kwargs
+        coro._stepper = stepper # for testing
 
         if hasattr(coro, 'is_stepped') and getattr(coro, 'is_stepped'):
             assert pull_from is not None, \
@@ -2061,6 +2064,8 @@ def listen_to_wav(xinfo:TransferInfo, token:int) -> AudioInfo:
 
 
 class Step:
+    """Namespace class for the step tasks in the taketake StepNetwork"""
+
     async def setup(cmdargs, worklist, stepper):
         if cmdargs.continue_from:
             progress_dir = cmdargs.continue_from
