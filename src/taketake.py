@@ -2119,44 +2119,40 @@ class Step:
         await stepper.put(None)
 
     async def reorder(cmdargs, worklist, *, stepper):
+        """Buffer and emit tokens in a way that autoname
         """
-        """
+        token_cursor = 0
+        seen = set() # Set of all gotten tokens that are > token_cursor
+        found_first_timestamp = False
 
-    @StepNetwork.stepped
-    async def autoname(cmdargs, worklist, *, token, stepper):
-        """
-        """
+        while (token := await stepper.get()) is not None:
+            seen.add(token)
+            # If we now have a contiguous span from token_cursor through
+            # token, emit them once we've found one with a timestamp.
+            while token_cursor in seen:
+                seen.remove(token_cursor) # Keep the set small
+                if found_first_timestamp:
+                    await stepper.put(token_cursor)
+                elif worklist[token_cursor].audioinfo.parsed_timestamp is not None:
+                    found_first_timestamp = True
+                    # Emit contiguous tokens in reverse order
+                    for i in range(token_cursor, -1, -1):
+                        await stepper.put(i)
+
+                token_cursor += 1
+
+        assert token_cursor == len(worklist)
+        if not found_first_timestamp:
+            # Emit all takens in reverse order
+            for i in range(token_cursor - 1, -1, -1):
+                await stepper.put(i)
+
+        await stepper.put(None)
 
     @StepNetwork.stepped
     async def prompt(cmdargs, worklist, *, token, stepper):
         """The Prompter asks the user for corrections on the guesses from autoname.
         """
-        def reorderer():
-            seen = set()
-            while True:
-                new_token = yield
-
-                yield ready_token_list
-
-        (reord := reorderer()).next()
-        while True:
-            reord.send(await stepper().get)
-            for token in reord.next():
-                if token is None:
-                    reord.close()
-
-                xinfo = worklist[token]
-                stepper.log(f"Actually processing token {token}: {xinfo.source_wav.name}")
-                pass # do the prompt thing
-
-        seen = set()
-        next_token = 0
-        while (token := await stepper.get()) is not None:
-            seen.add(token)
-            if token == next_token:
-                # Advance the next_token cursor, processing in order
-                while next_token in seen:
-                    next_token += 1
         # TODO gather up the tokens until we find the first one with a timestamp,
         #  then work backwards to determine the earlier token timestamps
         #  (also ensure we are processing the tokens in sequence)
@@ -2215,7 +2211,6 @@ async def run_tasks(args):
 
             Step.listen,
             Step.reorder,
-            Step.autoname,
             Step.prompt,
 
             pull_from=Step.setup,

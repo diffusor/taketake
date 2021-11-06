@@ -2464,6 +2464,7 @@ class StepSetupBase(unittest.IsolatedAsyncioTestCase,
                     / taketake.Config.source_wav_linkname,
             )
 
+
 class Test8_step_setup(StepSetupBase):
     """Common infrastructure for testing steps"""
 
@@ -2526,6 +2527,7 @@ class Test8_step_setup(StepSetupBase):
         progress_dir = self.destdir / "a_mocked_out_progress_dir"
         self.cmdargs.continue_from = progress_dir
         await self.do_step_setup_test()
+
 
 class Test8_step_listen(StepSetupBase):
     def setUp(self):
@@ -2593,6 +2595,87 @@ class Test8_step_listen(StepSetupBase):
         for w in self.wavpaths[1:]:
             w.symlink_to(self.wavpaths[0])
         await self.run_and_check_step_listen(taketake.AudioInfo(duration_s=2.0))
+
+
+class Test8_step_reorder(unittest.IsolatedAsyncioTestCase,
+        CdTempdirFixture, FileAssertions):
+
+    def setUp(self):
+        super().setUp()
+        self.numitems = 10
+
+    def init_worklist(self):
+        self.worklist = [taketake.TransferInfo(
+                source_wav=f"w{i}.wav",
+                wav_abspath=f"w{i}.wav",
+                dest_dir=Path(),
+                wav_progress_dir=Path(),
+                source_link=Path(),
+                audioinfo=taketake.AudioInfo())
+            for i in range(self.numitems)]
+
+    def timestamp(self, i):
+        self.worklist[i].audioinfo.parsed_timestamp=datetime.datetime.fromtimestamp(i)
+
+    async def check(self, expected_order):
+        self.stepper = DummyStepper(len(self.worklist))
+        await taketake.Step.reorder(cmdargs=None, worklist=self.worklist, stepper=self.stepper)
+        self.assertEqual(self.stepper.output, list(expected_order) + [None])
+
+    async def test_step_reorder_empty_worklist(self):
+        self.worklist = []
+        await self.check([])
+
+    async def test_step_reorder_one_token_no_timestamp(self):
+        self.numitems = 1
+        self.init_worklist()
+        await self.check([0])
+
+    async def test_step_reorder_one_token_with_timestamp(self):
+        self.numitems = 1
+        self.init_worklist()
+        self.timestamp(0)
+        await self.check([0])
+
+    async def test_step_reorder_all_timestamps(self):
+        self.init_worklist()
+        for i in range(len(self.worklist)):
+            self.timestamp(i)
+        await self.check(range(self.numitems))
+
+    async def test_step_reorder_missing_timestamp_at_i(self):
+        for i in range(1, self.numitems):
+            with self.subTest(i=i):
+                self.init_worklist()
+                for j in range(self.numitems):
+                    if j == i:
+                        continue
+                    self.timestamp(j)
+                await self.check(range(self.numitems))
+
+    async def test_step_reorder_timestamps_start_at_i(self):
+        for i in range(0, self.numitems):
+            with self.subTest(i=i):
+                self.init_worklist()
+                for j in range(self.numitems):
+                    if j < i:
+                        continue
+                    self.timestamp(j)
+
+                    expect = list(range(i, -1, -1))
+                    expect.extend(range(i+1, self.numitems))
+                    await self.check(expect)
+
+
+    async def test_step_reorder_timestamp_only_at_i(self):
+        for i in range(self.numitems):
+            with self.subTest(i=i):
+                self.init_worklist()
+                self.timestamp(i)
+
+                expect = list(range(i, -1, -1))
+                expect.extend(range(i+1, self.numitems))
+                await self.check(expect)
 
 if __name__ == '__main__':
     unittest.main()
