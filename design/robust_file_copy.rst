@@ -65,7 +65,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
 2. [x] **listen**: Speech to text
 
-   ``setup => [listen] => prompt``
+   ``setup => [listen] => autoname``
 
    **Skip this task if ``.audioinfo.json`` exists,
    filling in the guessed timestamp and duration into the TransferInfo instead.**
@@ -78,12 +78,34 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        echo $filename_guess > .audioinfo.json
 
-   d. [x] Only emit tokens once we found an actual token timestamp as described
-      below
+3. [.] **autoname**: construct the filename guess
 
-3. **prompt**: Prompt for name
+   ``listen => [autoname] => prompt``
 
-   ``listen => [prompt] => pargen``
+   [.] Reorder the output from listen to consider the first file with a parsed
+   audio timestamp, then consider each preceding file, guessing a timestamp
+   for each according to the file's duration.  Then consider the succeeding
+   files.
+
+   For each file, **Skip the file if ``.filename_guess`` exists, loading
+   the guess from that file insead.**  Otherwise:
+
+   a. Calculate the timestamp based on the preceding file::
+
+       timestamp = prev.timestamp + prev.duration_s + delta
+
+   b. Construct the filename using the template.
+
+   c. Dump the constructed filename to ``.filename_guess``::
+
+       echo $filename_guess > .filename_guess
+
+4. **prompt**: Prompt for name
+
+   ``autoname => [prompt] => pargen``
+
+   **Skip this task if ``.filename_provided`` exists,
+   filling in the TransferInfo field from its contents instead.**
 
    a. If ``.filename_guess`` exists, load the guess from there.  Otherwise,
       construct the guess from the audioinfo from the **listen** step,
@@ -107,7 +129,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        echo $filename_provided > .filename_provided
 
-4. **flacenc**: Flac encode
+5. **flacenc**: Flac encode
 
    ``setup => [flacenc] => pargen``
 
@@ -129,7 +151,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        fadvise DONTNEED src/audio001.wav
 
-5. **pargen**: Rename and par2 dest flac file
+6. **pargen**: Rename and par2 dest flac file
 
    ``prompt,flacenc => [pargen] => cleanup``
 
@@ -160,7 +182,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        par2 verify $filename_provided.flac
 
-6. **xdelta**: Xdelta check wavs
+7. **xdelta**: Xdelta check wavs
 
    ``All(flacenc) => [xdelta] => cleanup``
 
@@ -171,7 +193,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    b. Check ``.xdelta`` for actual diffs
 
-7. **cleanup**: Delete src wav and copy back flac
+8. **cleanup**: Delete src wav and copy back flac
 
    ``All(xdelta),pargen => [cleanup] => finish``
 
@@ -223,7 +245,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        echo "{timestamp} {src} -> {dest}" >> src/transfer.log >> dest/transfer.log
 
-8. **finish**: *[global]* Wait for all processing to complete
+9. **finish**: *[global]* Wait for all processing to complete
 
    ``All(cleanup) => [finish]``
 

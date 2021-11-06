@@ -2089,17 +2089,49 @@ class Step:
 
         await stepper.put(None)
 
-
-    @StepNetwork.stepped
-    async def prompt(cmdargs, worklist, *, token, stepper):
-        """The Prompter asks the user for corrections on the guesses from listen.
+    async def autoname(cmdargs, worklist, *, stepper):
         """
+        """
+
+    async def prompt(cmdargs, worklist, *, token, stepper):
+        """The Prompter asks the user for corrections on the guesses from autoname.
+        """
+        def reorderer():
+            seen = set()
+            while True:
+                new_token = yield
+
+                yield ready_token_list
+
+        (reord := reorderer()).next()
+        while True:
+            reord.send(await stepper().get)
+            for token in reord.next():
+                if token is None:
+                    reord.close()
+
+                xinfo = worklist[token]
+                stepper.log(f"Actually processing token {token}: {xinfo.source_wav.name}")
+                pass # do the prompt thing
+
+        seen = set()
+        next_token = 0
+        while (token := await stepper.get()) is not None:
+            seen.add(token)
+            if token == next_token:
+                # Advance the next_token cursor, processing in order
+                while next_token in seen:
+                    next_token += 1
+        # TODO gather up the tokens until we find the first one with a timestamp,
+        #  then work backwards to determine the earlier token timestamps
+        #  (also ensure we are processing the tokens in sequence)
         # TODO --no-prompt should also skip the prompt process
         # TODO check for in-progress fname_prompted file contents first
         # TODO write the suggested_filename to a file if act
         xinfo = worklist[token]
         fpath = xinfo.source_wav
         audioinfo = xinfo.audioinfo
+        timestamp_seen = False
         if audioinfo.parsed_timestamp is None:
             # TODO implement complicated fallback
             xinfo.parsed_timestamp = get_fallback_timestamp(fpath, cmdargs.fallback_timestamp)
@@ -2150,6 +2182,10 @@ async def run_tasks(args):
 
     network.add(Step.prompt,
             pull_from=Step.listen,
+            send_to=Step.autoname)
+
+    network.add(Step.autoname,
+            pull_from=Step.prompt,
             send_to=Step.pargen)
 
     network.add(Step.flacenc,
