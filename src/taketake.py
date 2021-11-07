@@ -195,23 +195,6 @@ class TransferInfo:
     flac_encode_fpath:Path = None
     par_fpaths:list[Path] = field(default_factory=list)
 
-    # TODO - transition from old FileInfo objects
-    #files = [FileInfo(instrument="test",
-    #                  fpath=f,
-    #                  orig_filename=os.path.basename(f),
-    #                  [unused] src_path=os.path.dirname(f),
-    #                  [unused] dest_path=dest)
-    #         for f in filepaths]
-    #
-    # Functions using finfo:
-    #  prompt_for_filename
-    #    sets finfo.final_filename
-    #    uses finfo.fpath suggested_filename
-    #    play_media_file
-    #      uses finfo.speech_range fpath suggested_filename
-    #
-    # Needed across steps: speech_range.start orig_speech? suggested_filename
-
 
 #============================================================================
 # JSON encode/decode
@@ -1967,22 +1950,22 @@ class StepNetwork:
 # Filename prompting coroutines
 #============================================================================
 
-def play_media_file(finfo):
+def play_media_file(xinfo:TransferInfo) -> subprocess.Popen:
     """Play the given file in a background process."""
 
     start = 0
-    if finfo.speech_range is not None:
-        start = finfo.speech_range.start
+    if xinfo.audioinfo.speech_range is not None:
+        start = xinfo.audioinfo.speech_range.start
 
-    args = ExtCmd.play_media_file.construct_args(file=finfo.fpath,
+    args = ExtCmd.play_media_file.construct_args(file=xinfo.source_wav,
                                                  start=start,
-                                                 suggestion=finfo.suggested_filename)
+                                                 suggestion=xinfo.fname_guess)
 
     null = subprocess.DEVNULL
-    res = subprocess.Popen(args, stdin=null, stdout=null, stderr=null)
+    return subprocess.Popen(args, stdin=null, stdout=null, stderr=null)
 
 
-async def prompt_for_filename(finfo):
+async def prompt_for_filename(xinfo:TransferInfo):
 
     def toolbar():
         return HTML(f"  <style bg='ansired'>{time.monotonic()}</style>")
@@ -1990,7 +1973,7 @@ async def prompt_for_filename(finfo):
     bindings = KeyBindings()
     @bindings.add('escape', 'h')
     def _(event):
-        play_media_file(finfo)
+        play_media_file(xinfo)
 
     style = Style.from_dict(dict(
         prompt="#eeeeee bold",
@@ -2002,11 +1985,14 @@ async def prompt_for_filename(finfo):
 
     session = PromptSession(key_bindings=bindings)
     with patch_stdout():
-        finfo.final_filename = await session.prompt_async(HTML(
-                f"<prompt>* Confirm file rename for</prompt> <fname>{finfo.fpath}</fname>\n <guess>Guess</guess>: <fname>{finfo.suggested_filename}</fname> "
-                f"<comment>({len(finfo.suggested_filename)} characters)</comment>\n <final>Final&gt;</final> "),
+        xinfo.fname_prompted = await session.prompt_async(HTML(
+                f"<prompt>* Confirm file rename for</prompt> "
+                f"<fname>{xinfo.source_wav}</fname>"
+                f"\n <guess>Guess</guess>: <fname>{xinfo.fname_guess}</fname> "
+                f"<comment>({len(xinfo.fname_guess)} characters)</comment>"
+                f"\n <final>Final&gt;</final> "),
                 style=style,
-                default=finfo.suggested_filename,
+                default=xinfo.fname_guess,
                 mouse_support=True,
                 bottom_toolbar=None, auto_suggest=AutoSuggestFromHistory())
 

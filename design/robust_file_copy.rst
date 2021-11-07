@@ -72,7 +72,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    ``setup => [listen] => autoname``
 
-   **Skip this task if ``.audioinfo.json`` exists,
+   [x] **Skip this task if ``.audioinfo.json`` exists,
    filling in the guessed timestamp and duration into the TransferInfo instead.**
 
    a. [x] Extract playtime durations from each src wav file
@@ -105,7 +105,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    Determine timestamp:
 
-   **If ``.filename_provided`` exists, set TransferInfo.timestamp from there
+   [] **If ``.filename_provided`` exists, set TransferInfo.timestamp from there
    and skip this task.**
 
    [-] If AudioInfo.parsed_timestamp does not exist for the current file:
@@ -134,9 +134,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        echo $filename_guess > .filename_guess
 
-   g. Prompt for the final filename, checking the resulting timestamp:
+   g. [.] Prompt for the final filename, checking the resulting timestamp:
 
-      * Suggest TransferInfo.fname_guess
+      * [.] Suggest TransferInfo.fname_guess
       * Parse out the timestamp from the ``$filename_provided``
       * Verify that the weekday matches that from the timestamp
       * Verify the timestamp is within a reasonable delta from the speech-recognized time
@@ -144,7 +144,8 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
       * If the verification fails, prompt the user to confirm or redo the
         filename
 
-   h. Set TransferInfo.timestamp for the current file from the prompt results
+   h. Set TransferInfo.timestamp for the current file from the prompt results,
+      and set timestamp_guess_direction to ""
 
    i. Dump the response filename to ``.filename_provided``::
 
