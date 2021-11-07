@@ -116,6 +116,7 @@ class Config:
 
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
+    interfile_timestamp_delta_s = 5 # Assumed minimum time between takes
 
     prefix = "piano"
     instrument_fname = "instrmnt.txt"  # name for storing model name on USB src dir
@@ -183,6 +184,7 @@ class TransferInfo:
     source_link:Path
     instrument:str
 
+    fstat:os.stat_result = None
     audioinfo:AudioInfo = None
     fname_guess:str = None
     fname_prompted:str = None
@@ -1990,8 +1992,8 @@ async def prompt_for_filename(finfo):
                 bottom_toolbar=None, auto_suggest=AutoSuggestFromHistory())
 
 
-#============================================================================
-# step coroutines for the StepNetwork
+#===========================================================================
+# Support functinos for the steps
 #============================================================================
 
 def act(msg):
@@ -2038,6 +2040,41 @@ def listen_to_wav(xinfo:TransferInfo, token:int) -> AudioInfo:
     return audioinfo
 
 
+# TODO test this
+def derive_timestamp(worklist:list[TransferInfo], token:int,
+        fallback_mode:str, fallback_dt:datetime.datetime,
+        delta:datetime.datetime) -> None:
+    """Set the TransferInfo.timestamp for the worklist entry corresponding to token.
+    """
+    prev = worklist[token - 1] if token > 0 else None
+    current = worklist[token]
+    next = worklist[token + 1] if token < (len(worklist) - 1) else None
+
+    assert current.timestamp == None
+
+    if current.audioinfo.parsed_timestamp:
+        current.timestamp = current.audioinfo.parsed_timestamp
+
+    elif prev and prev.timestamp is not None:
+        current.timestamp = prev.timestamp + prev.audioinfo.duration_s + delta
+
+    elif next and next.timestamp is not None:
+        current.timestamp = next.timestamp - current.audioinfo.duration_s - delta
+
+    elif next:
+        assert fallback_mode in 'last ctime mtime timestamp+'.split()
+        assert token == 0
+        current.timestamp = get_fallback_timestamp()
+
+    else:
+        assert fallback_mode in 'now timestamp-'.split()
+        assert token == len(worklist) - 1
+        current.timestamp = get_fallback_timestamp()
+
+#===========================================================================
+# step coroutines for the StepNetwork
+#============================================================================
+
 class Step:
     """Namespace class for the step tasks in the taketake StepNetwork"""
 
@@ -2051,7 +2088,7 @@ class Step:
 
         for wav in cmdargs.wavs:
             assert isinstance(wav, Path)
-            info = TransferInfo(
+            xinfo = TransferInfo(
                     source_wav=wav,
                     wav_abspath=Path(os.path.abspath(wav)),
                     dest_dir=cmdargs.dest,
@@ -2060,11 +2097,15 @@ class Step:
                     instrument=cmdargs.instrument,
                 )
 
-            if act(f"create wav progress dir {wav.name} and symlink to {info.wav_abspath}"):
-                info.wav_progress_dir.mkdir()
-                info.source_link.symlink_to(info.wav_abspath)
+            # TODO - check if the progress dir exists
+            if act(f"create progress dir for {wav.name}; symlink to {xinfo.wav_abspath}"):
+                xinfo.wav_progress_dir.mkdir()
+                xinfo.source_link.symlink_to(xinfo.wav_abspath)
 
-            worklist.append(info)
+            # TODO - pull the .fstat.json file if it exists, otherwise build
+            # it and write it if act.  Fill in xinfo.fstat.
+
+            worklist.append(xinfo)
             await stepper.put(len(worklist) - 1)
             await asyncio.sleep(0) # Let the work begin
 
@@ -2119,9 +2160,14 @@ class Step:
 
         assert token_cursor == len(worklist)
         if not found_first_timestamp:
-            # Emit all takens in reverse order
-            for i in range(token_cursor - 1, -1, -1):
-                await stepper.put(i)
+            if cmdargs.fallback_timestamp_mode in 'now timestamp-'.split():
+                # Emit all takens in reverse order
+                for i in range(token_cursor - 1, -1, -1):
+                    await stepper.put(i)
+            else:
+                for i in range(token_cursor):
+                    await stepper.put(i)
+
 
         await stepper.put(None)
 
@@ -2138,16 +2184,16 @@ class Step:
         xinfo = worklist[token]
         fpath = xinfo.source_wav
         audioinfo = xinfo.audioinfo
-        timestamp_seen = False
 
-        if audioinfo.parsed_timestamp is None:
-            # TODO implement complicated fallback
-            xinfo.parsed_timestamp = get_fallback_timestamp(fpath, cmdargs.fallback_timestamp)
+        derive_timestamp(worklist=worklist, token=token,
+                fallback_mode=cmdargs.fallback_timestamp_mode,
+                fallback_dt=cmdargs.fallback_timestamp_dt,
+                delta=Config.interfile_timestamp_delta_s)
 
         # Generate the extensionless guessed filename
         xinfo.fname_guess = format_dest_filename(xinfo)
-        guess_fpath = xinfo.wav_progress_dir / Config.fname_guess
-        if act(f"create {Config.fname_guess} for {wav.name}:  {xinfo.fname_guess}"):
+        guess_fpath = xinfo.wav_progress_dir / Config.guess_fname
+        if act(f"create {Config.guess_fname} for {fpath.name}:  {xinfo.fname_guess}"):
             guess_fpath.write_text(xinfo.fname_guess)
 
         print(f"Speechinizer: {fpath.name} - {audioinfo.recognized_speech!r} -> {xinfo.fname_guess!r}")
@@ -2294,14 +2340,21 @@ def validate_args(parser):
     dbg("args pre-val: ", format_args(args))
 
     # Check and fix --fallback-timestamp
-    dt = parse_timestamp(args.fallback_timestamp)
-    if dt is not None:
-        args.fallback_timestamp = dt.strftime(Config.timestamp_fmt_with_seconds)
-    elif args.fallback_timestamp not in "now mtime ctime atime".split():
+    args.fallback_timestamp_mode = args.fallback_timestamp
+    args.fallback_timestamp_dt = None
+    if args.fallback_timestamp[:-1] in "+-":
+        dt = parse_timestamp(args.fallback_timestamp[:-1]) # Omit trailing -+
+        if dt is not None:
+            args.fallback_timestamp_mode = "timestamp" + args.fallback_timestamp[-1]
+            args.fallback_timestamp_dt = dt
+        else:
+            err(f"Couldn't parse timestamp[+-] from --fallback-timestamp: "
+                f"{args.fallback_timestamp}")
+    elif args.fallback_timestamp not in "prior mtime ctime atime now".split():
         err(f"Invalid --fallback-timestamp: '{args.fallback_timestamp}'"
-            f"\n      Expected one of 'now', 'mtime', 'ctime', or 'atime',"
+            f"\n      Expected one of 'prior', 'mtime', 'ctime', 'atime', or 'now'"
             f"\n      or a timestamp like {inject_timestamp('{}')}"
-            f"\n      with form YYYYmmdd-HHMMSS (seconds are optional)")
+            f"\n      with form YYYYmmdd-HHMMSS+ or - (seconds are optional)")
 
     # Use the final positional parameter as dest, like mv does
     if args.sources and args.dest is None:
@@ -2437,7 +2490,7 @@ def validate_args(parser):
 def process_args(argv=None):
     parser = argparse.ArgumentParser(
             description=__doc__,
-            formatter_class=argparse.RawDescriptionHelpFormatter)
+            formatter_class=argparse.RawTextHelpFormatter) #RawDescriptionHelpFormatter)
     arg = parser.add_argument
 
     arg('-n', '--no-act', action='store_true',
@@ -2456,12 +2509,27 @@ def process_args(argv=None):
         help=f"Inject the given instrument name into the resulting filenames")
 
     arg('-f', '--fallback-timestamp',
-        metavar=inject_timestamp("now|mtime|ctime|atime|{}"),
+        metavar='TIMESTAMP_MODE',
         action='store', default="mtime",
-        help=f"""If speech-to-text fails or is skipped via -S, use this the
-            indicated timestamp instead.  Valid choices are now (use current time),
-            mtime, ctime, atime (use the modified/creation/access time of the
-            file), or the given specific timestamp.""")
+        help=f"""If speech-to-text fails, use the indicated timestamp instead.
+
+Valid choices are:
+
+    "now" - use current time for the last file minus its duration, and
+    back calculate the times from there based on there durations;
+
+    {inject_timestamp("{}-")} - specify the timestamp of the last file,
+    with prior files calculated based on durations;
+
+    {inject_timestamp("{}+")} - specify the timestamp of the first file,
+    with succeeding files calculated based on durations;
+
+    "prior" - use the last mtime from src/transfer.log as timestamp of
+    the first file, with succeeding files calculated based on durations;
+
+    "mtime", "ctime", "atime" - use the modified/creation/access time of
+    the first file, with succeeding files calculated based on durations.
+    """)
 
     arg('-S', '--skip-speech-to-text', action='store_true',
         help=f"Use the given --fallback-timestamp instead.")
@@ -2475,38 +2543,43 @@ def process_args(argv=None):
     arg('--skip-tests', action='store_true',
         help="""Do not run unit tests prior to starting the transfer.
 
-            This saves a few seconds at startup, but you risk integrity
-            issues if some system change causes differences that wouldn't
-            otherwise be detectable during normal running.""")
+This saves a few seconds at startup, but you risk integrity
+issues if some system change causes differences that wouldn't
+otherwise be detectable during normal running.
+    """)
 
     arg('-c', '--continue',
         metavar='PROGRESS_DIR', action='store', dest='continue_from',
         type=Path,
         help="""Continue processing an interrupted transfer.
-            The PROGRESS_DIR must exist and be a child directory
-            contained within the target DEST_PATH.
-            When -c is used, specifying SOURCE_WAV and DEST_PATH
-            is unnecessary, but if they are specified, they must
-            match what is found in the given PROGRESS_DIR.
-            """)
+
+The PROGRESS_DIR must exist and be a child directory
+contained within the target DEST_PATH.
+When -c is used, specifying SOURCE_WAV and DEST_PATH
+is unnecessary, but if they are specified, they must
+match what is found in the given PROGRESS_DIR.
+    """)
 
     arg('-t', '--target', '--target-directory', dest='dest', type=Path,
         metavar='DEST_PATH', action='store',
         help="""Causes the specified path to be used as the destination.
-            The final positional will not be handled specially--all
-            positional arguments will be treated as SOURCE arguments""")
+The final positional will not be handled specially--all
+positional arguments will be treated as SOURCE arguments.
+    """)
 
     arg('sources', metavar='SOURCE_WAV', nargs='*', type=Path,
         help="""Transfer the specified SOURCE_WAV files.  If there is only
-            a single SOURCE_WAV specified and it is a directory, then
-            transfer all wav files found in that directory.""")
+a single SOURCE_WAV specified and it is a directory, then
+transfer all wav files found in that directory.
+    """)
 
     # This is left empty because sources is greedy.  process_args() fills it.
     arg('_dest', metavar='DEST_PATH', nargs='?', type=Path,
         help=f"""Destination directory for encoded flac and par2 files.
 
-            This directory will also contain the timestamped
-            {Config.progress_dir_fmt.format('*')} directory for tracking progress.""")
+This directory will also contain the timestamped
+{Config.progress_dir_fmt.format('*')} directory for tracking progress.
+    """)
 
     parser.args = parser.parse_args(argv)
     validate_args(parser)

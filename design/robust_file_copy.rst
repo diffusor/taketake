@@ -44,7 +44,7 @@ there are no more items to process.
    e. [x] If instrmnt.txt doesn't exist and --instrument wasn't specified,
       abort out.
 
-1. [x] **setup**: *[global]* Determine wavs to process
+1. [.] **setup**: *[global]* Determine wavs to process
 
    ``[setup] => listen,flacenc``
 
@@ -54,11 +54,16 @@ there are no more items to process.
 
    b. [x] Construct worklist of TransferInfo objects
 
-   c. [x] Create src wav progress directories and symlinks that don't already exist for each wav, e.g. ``audio001.wav``::
+   c. [.] Create src wav progress directories and symlinks that don't already exist for each wav, e.g. ``audio001.wav``::
 
        mkdir .taketake.20211025-1802-Mon/audio001.wav/
        symlink .taketake.20211025-1802-Mon/audio001.wav/.source.wav
             -> /absolute/path/to/source/audio001.wav
+
+   d. [] Load stat info from ``.fstat.json`` and ensure it matches the stat of
+      the source wav file if it still exists
+
+   e. [] Create ``.fstat.json`` if it doesn't exist
 
 *Perform the following steps for each wav, assuming each non-src filename is
 relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory*
@@ -103,7 +108,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
    **If ``.filename_provided`` exists, set TransferInfo.timestamp from there
    and skip this task.**
 
-   If AudioInfo.parsed_timestamp does not exist for the current file:
+   [.] If AudioInfo.parsed_timestamp does not exist for the current file:
 
    a. Calculate the timestamp based on the preceding file if it exists::
 
@@ -112,10 +117,10 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
    b. Otherwise, if the prior file's timestamp doesn't exist, calculate the
       timestamp based on the next file if it exists::
 
-       timestamp = next.timestamp - current.duration_s + delta
+       timestamp = next.timestamp - current.duration_s - delta
 
    c. Otherwise, if there is a next file and its timestamp doesn't exist, we
-      must be using the "last", "ctime", "mtime", or timestamp"+" fallback and
+      must be using the "prior", "ctime", "mtime", or timestamp"+" fallback and
       this must be the first file (token==0).  Use the fallback timestamp.
 
    d. Otherwise, if this is the last file, we must be using the "now" or

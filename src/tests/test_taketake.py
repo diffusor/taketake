@@ -1544,6 +1544,8 @@ class Test6_args(CdTempdirFixture):
                 continue_from=None,
                 dest=Path(),
                 fallback_timestamp='mtime',
+                fallback_timestamp_dt=None,
+                fallback_timestamp_mode='mtime',
                 instrument='inst1',
                 sources=[],
                 wavs=[])
@@ -2396,6 +2398,8 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture, FileAssert
                 wavs=wavpaths,
                 instrument="foobar",
                 do_prompt=False,
+                fallback_timestamp_dt=None,
+                fallback_timestamp_mode="now",
             ))
 
     @unittest.skipUnless(dontskip, "Takes 0.75s per subtest")
@@ -2633,6 +2637,9 @@ class Test8_step_reorder(unittest.IsolatedAsyncioTestCase,
         self.numitems = 10
 
     def init_worklist(self):
+        self.cmdargs = argparse.Namespace(
+                fallback_timestamp_mode="now",
+                )
         self.worklist = [taketake.TransferInfo(
                 source_wav=f"w{i}.wav",
                 wav_abspath=f"w{i}.wav",
@@ -2649,10 +2656,14 @@ class Test8_step_reorder(unittest.IsolatedAsyncioTestCase,
 
     async def check(self, expected_order):
         self.stepper = DummyStepper(len(self.worklist))
-        await taketake.Step.reorder(cmdargs=None, worklist=self.worklist, stepper=self.stepper)
+        await taketake.Step.reorder(
+                cmdargs=self.cmdargs,
+                worklist=self.worklist,
+                stepper=self.stepper)
         self.assertEqual(self.stepper.output, list(expected_order) + [None])
 
     async def test_step_reorder_empty_worklist(self):
+        self.init_worklist()
         self.worklist = []
         await self.check([])
 
