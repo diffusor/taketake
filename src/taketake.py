@@ -129,6 +129,7 @@ class Config:
     provided_fname = ".filename_provided"
     dest_fname_fmt = "{prefix}.{datestamp}.{notes}{duration}.{instrument}.{orig_fname}"
     xdelta_fname = ".xdelta"
+    transfer_log_fname = "transfer.log"
 
 
 # Exceptions
@@ -866,7 +867,11 @@ def set_mtime(f, dt):
     seconds = dt.timestamp()
     os.utime(f, (seconds,)*2)
 
-def get_fallback_timestamp(fpath:Path, fallback_timestamp:str) -> str:
+def get_fallback_timestamp(
+        fpath:Path,
+        fallback_timestamp_mode:str,
+        fallback_timestamp_dt:{datetime.datetime, None},
+        ) -> str:
     """Returns the mtime, ctime, or atime of the given file in fpath
     if the given fallback_timestamp is one of those words.
     If fallback_timestamp is now, it returns the current time.
@@ -876,13 +881,25 @@ def get_fallback_timestamp(fpath:Path, fallback_timestamp:str) -> str:
     The return timestamp format is intended to match the
     Config.timestamp_fmt_with_seconds.
     """
-    if fallback_timestamp == "now":
+    if fallback_timestamp_mode == "now":
         dt = datetime.datetime.now()
-    elif fallback_timestamp in "atime ctime mtime".split():
+
+    elif fallback_timestamp_mode == "prior":
+        # TODO LiveTrak L-12 project support requires using the next parent
+        transfer_log_fpath = fpath.parent / Config.transfer_log_fname
         dt = datetime.datetime.fromtimestamp(
-                getattr(fpath.stat(), f"st_{fallback_timestamp}"))
+                getattr(transfer_log_fpath.stat(), f"st_mtime"))
+
+    elif fallback_timestamp_mode in "atime ctime mtime".split():
+        dt = datetime.datetime.fromtimestamp(
+                getattr(fpath.stat(), f"st_{fallback_timestamp_mode}"))
+
+    elif fallback_timestamp_mode in "timestamp- timestamp+".split():
+        return fallback_timestamp_dt
+
     else:
-        return fallback_timestamp
+        assert False, f"Invalid timestamp mode {fallback_timestamp_mode} for {fpath}"
+
     return inject_timestamp("{}", dt)
 
 def inject_timestamp(template, when=None):
@@ -2042,8 +2059,8 @@ def listen_to_wav(xinfo:TransferInfo, token:int) -> AudioInfo:
 
 # TODO test this
 def derive_timestamp(worklist:list[TransferInfo], token:int,
-        fallback_mode:str, fallback_dt:datetime.datetime,
-        delta:datetime.datetime) -> None:
+        fallback_timestamp_mode:str, fallback_timestamp_dt:datetime.datetime,
+        delta:datetime.timedelta) -> None:
     """Set the TransferInfo.timestamp for the worklist entry corresponding to token.
     """
     prev = worklist[token - 1] if token > 0 else None
@@ -2061,15 +2078,25 @@ def derive_timestamp(worklist:list[TransferInfo], token:int,
     elif next and next.timestamp is not None:
         current.timestamp = next.timestamp - current.audioinfo.duration_s - delta
 
-    elif next:
-        assert fallback_mode in 'last ctime mtime timestamp+'.split()
-        assert token == 0
-        current.timestamp = get_fallback_timestamp()
-
     else:
-        assert fallback_mode in 'now timestamp-'.split()
-        assert token == len(worklist) - 1
-        current.timestamp = get_fallback_timestamp()
+        current.timestamp = get_fallback_timestamp(
+                current.source_wav,
+                fallback_timestamp_mode,
+                fallback_timestamp_dt,
+                )
+
+        if next:
+            assert fallback_timestamp_mode in 'prior ctime mtime timestamp+'.split()
+            assert token == 0
+            if fallback_timestamp_mode == 'prior':
+                current.timestamp += delta
+
+        else:
+            assert fallback_timestamp_mode in 'now timestamp-'.split()
+            assert token == len(worklist) - 1
+            if fallback_timestamp_mode == 'now':
+                current.timestamp -= delta
+
 
 #===========================================================================
 # step coroutines for the StepNetwork
@@ -2186,9 +2213,9 @@ class Step:
         audioinfo = xinfo.audioinfo
 
         derive_timestamp(worklist=worklist, token=token,
-                fallback_mode=cmdargs.fallback_timestamp_mode,
-                fallback_dt=cmdargs.fallback_timestamp_dt,
-                delta=Config.interfile_timestamp_delta_s)
+                fallback_timestamp_mode=cmdargs.fallback_timestamp_mode,
+                fallback_timestamp_dt=cmdargs.fallback_timestamp_dt,
+                delta=datetime.timedelta(seconds=Config.interfile_timestamp_delta_s))
 
         # Generate the extensionless guessed filename
         xinfo.fname_guess = format_dest_filename(xinfo)

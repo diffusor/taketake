@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+#
+# TODO - test derive_timestamp
+# TODO - test get_fallback_timestamp
+# TODO - test resuming from a different current directory so the src paths don't work
 
 import unittest
 
@@ -1911,16 +1915,18 @@ class Test6_fallback_timestamp(TempdirFixture):
         super().setUp()
         self.tempfile = Path(self.tempdir)/'foobarfile'
 
-    def get_stamp(self, mode):
-        return taketake.get_fallback_timestamp(self.tempfile, mode)
+    def get_stamp(self, mode, dt=None):
+        return taketake.get_fallback_timestamp(self.tempfile, mode, dt)
 
     def test_fallback_timestamp_passthrough(self):
-        self.assertEqual(self.get_stamp("foo"), "foo")
+        self.assertEqual(self.get_stamp("timestamp+", "foo"), "foo")
+
+    def test_fallback_timestamp_passthrough2(self):
+        self.assertEqual(self.get_stamp("timestamp-", "bar"), "bar")
 
     def test_fallback_timestamp_now(self):
-        """This is a race condition; could mismatch if the second changes"""
         now = taketake.inject_timestamp("{}")
-        self.assertEqual(self.get_stamp("now"), now)
+        self.assertEqual(self.get_stamp("now", now), now)
 
     def test_fallback_timestamp_filetime_now(self):
         """This is a race condition; could mismatch if the second changes"""
