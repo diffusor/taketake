@@ -44,7 +44,7 @@ there are no more items to process.
    e. [x] If instrmnt.txt doesn't exist and --instrument wasn't specified,
       abort out.
 
-1. [.] **setup**: *[global]* Determine wavs to process
+1. [-] **setup**: *[global]* Determine wavs to process
 
    ``[setup] => listen,flacenc``
 
@@ -54,7 +54,7 @@ there are no more items to process.
 
    b. [x] Construct worklist of TransferInfo objects
 
-   c. [.] Create src wav progress directories and symlinks that don't already exist for each wav, e.g. ``audio001.wav``::
+   c. [-] Create src wav progress directories and symlinks that don't already exist for each wav, e.g. ``audio001.wav``::
 
        mkdir .taketake.20211025-1802-Mon/audio001.wav/
        symlink .taketake.20211025-1802-Mon/audio001.wav/.source.wav

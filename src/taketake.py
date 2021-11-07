@@ -2139,10 +2139,13 @@ class Step:
                     instrument=cmdargs.instrument,
                 )
 
-            # TODO - check if the progress dir exists
-            if act(f"create progress dir for {wav.name}; symlink to {xinfo.wav_abspath}"):
-                xinfo.wav_progress_dir.mkdir()
-                xinfo.source_link.symlink_to(xinfo.wav_abspath)
+            # TODO - test cases where the wav dir or symlink doesn't exist
+            if not xinfo.wav_progress_dir.exists():
+                if act(f"create progress dir for {wav.name}; symlink to {xinfo.wav_abspath}"):
+                    xinfo.wav_progress_dir.mkdir()
+            if not xinfo.source_link.is_symlink():
+                if act(f"create symlink from {xinfo.source_link} to {xinfo.wav_abspath}"):
+                    xinfo.source_link.symlink_to(xinfo.wav_abspath)
 
             # TODO - pull the .fstat.json file if it exists, otherwise build
             # it and write it if act.  Fill in xinfo.fstat.
