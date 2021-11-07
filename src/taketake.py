@@ -81,7 +81,7 @@ import types
 import ctypes
 import dataclasses
 from dataclasses import dataclass, field, is_dataclass
-from typing import Any, List, Dict, Set
+from typing import Any, List, Dict, Set, NamedTuple
 from collections.abc import Callable, Coroutine, Sequence, Iterable
 from pathlib import Path
 
@@ -116,6 +116,14 @@ class Config:
 
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
+    timestamp_re = re.compile(
+            r'(?:^|\D)' # Ensure we don't grab the middle of a number
+            r'(?P<timestamp>\d{8}[- _]\d{4,6})'
+            r'[- _]?'   # timestamp-weekday_name separator
+            r'(?P<weekday>sun|mon|tue|wed|thu|fri|sat)'
+            r'(?:$|day|sday|nesday|rsday|urday|\W|_|\d)'
+            , flags=re.IGNORECASE)
+
     interfile_timestamp_delta_s = 5 # Assumed minimum time between takes
 
     prefix = "piano"
@@ -898,12 +906,14 @@ def inject_timestamp(template, when=None):
         when = datetime.datetime.now()
     return template.format(when.strftime(Config.timestamp_fmt_with_seconds))
 
-def parse_timestamp(s):
+def parse_timestamp(s:str) -> {datetime.datetime, None}:
     """Parses time from strings like YYYYmmdd-HHMM and YYYYmmdd-HHMMSS.
 
     Valid date-to-time separators are -, _, and ' ' (a single space).
 
-    Handles optional -shortweekday at the end, not long though.  It not match.
+    Handles optional -shortweekday at the end, but not long weekday names.
+
+    Returns the datetime result, or None if the parse failed.
     """
     result = None
 
@@ -925,6 +935,30 @@ def parse_timestamp(s):
         if try_parse(dayless_fmt):
             break
     return result
+
+class ParsedTimestamp(NamedTuple):
+    matchobj: re.Match # note: matchobj.start('timestamp') or .end('weekday')
+    timestamp: datetime.datetime
+    weekday_correct: bool
+
+def extract_timestamp(s:str) -> {ParsedTimestamp, None}:
+    """Finds and parses the timestamp from the given string.
+
+    Looks for timestamps of the form YYYYmmdd-HHMM(SS).
+
+    Returns the datetime result, or None if the parse failed.
+    """
+    if m := Config.timestamp_re.search(s):
+        dt = parse_timestamp(m['timestamp'])
+        expect_weekday = dt.strftime("%a")
+        weekday_correct = m['weekday'].lower() == expect_weekday.lower()
+        return ParsedTimestamp(
+                matchobj=m,
+                timestamp=dt,
+                weekday_correct=weekday_correct)
+    else:
+        return None
+
 
 #============================================================================
 # Audio file processing
@@ -1994,11 +2028,13 @@ async def prompt_for_filename(xinfo:TransferInfo):
                 style=style,
                 default=xinfo.fname_guess,
                 mouse_support=True,
-                bottom_toolbar=None, auto_suggest=AutoSuggestFromHistory())
+                bottom_toolbar=toolbar,
+                auto_suggest=AutoSuggestFromHistory())
+        # TODO validation
 
 
 #===========================================================================
-# Support functinos for the steps
+# Support functions for the steps
 #============================================================================
 
 def act(msg):
@@ -2206,15 +2242,9 @@ class Step:
     async def prompt(cmdargs, worklist, *, token, stepper):
         """The Prompter asks the user for corrections on the guesses from autoname.
         """
-        # TODO gather up the tokens until we find the first one with a timestamp,
-        #  then work backwards to determine the earlier token timestamps
-        #  (also ensure we are processing the tokens in sequence)
-        # TODO --no-prompt should also skip the prompt process
-        # TODO check for in-progress fname_prompted file contents first
-        # TODO write the suggested_filename to a file if act
         xinfo = worklist[token]
         fpath = xinfo.source_wav
-        prompted_fpath = xinfo.wav_progress_dir / xinfo.fname_prompted
+        prompted_fpath = xinfo.wav_progress_dir / Config.provided_fname
         audioinfo = xinfo.audioinfo
 
         if prompted_fpath.exists():
@@ -2235,12 +2265,16 @@ class Step:
             print(f"Speechinizer: {fpath.name} - {audioinfo.recognized_speech!r}"
                   f"-> {xinfo.fname_guess!r}")
             if cmdargs.do_prompt:
-                if act("Prompt for a corrected filename"):
+                if act(f"Prompt for final filename given {xinfo.fname_guess}"):
                     await prompt_for_filename(worklist[token])
+            else:
+                xinfo.fname_prompted = xinfo.fname_guess
 
-        # Parse timestamp out
-        # check
-        # TODO write out fname_prompted after act()/do_prompt-protected prompt recheck loop
+            if act(f"Write prompted filename to progress file {xinfo.fname_prompted}"):
+                prompted_fpath.write_text(xinfo.fname_prompted)
+
+        # TODO Parse timestamp out
+        # TODO @ -? +? tag handling
 
 
     @StepNetwork.stepped

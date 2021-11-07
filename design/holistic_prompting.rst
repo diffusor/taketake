@@ -38,6 +38,7 @@ mockup::
  ------------------------------------------------------------------------------------------------------------------------------------------
  prefix: piano  (alt-p)      inst: sv2  (alt-i)
  Filename:    piano.20211106-111300-Sat.Improv-in-G-,meditative.sv2.audio005.flac [67 chars]  (flac encoding, timestamp is lower bound)
+ Speech2text: [None found in 0:00:08 - 0:00:28]
 
 Status wordset in final Filename line:
 ......................................
@@ -102,3 +103,8 @@ down arrow Select next file.
 enter      Move to next file name row
 ctrl-enter Commit the current file name
 ctrl-alt-enter  Commit all file names
+
+Implementation Notes:
+---------------------
+
+* Use app.invalidate() to redraw when file status updates
