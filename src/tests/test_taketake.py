@@ -1038,15 +1038,16 @@ class Test0_format_dest_filename(unittest.TestCase):
                     tz=datetime.timezone(datetime.timedelta(0))),
                 )
 
-        for extra in "", "bark", "these are extra words":
+        for extra, tag in ("", "+?"), ("bark", "@"), ("these are extra words", ""):
             with self.subTest(extra_speech=extra):
                 extra_list = extra.split()
                 xinfo.audioinfo.extra_speech = extra_list
+                xinfo.timestamp_guess_direction = tag
                 expect = "-".join(extra_list)
                 if expect:
                     expect += "."
                 self.assertEqual(taketake.format_dest_filename(xinfo),
-                        f"piano.19700101-000000-Thu.{expect}4h33m11s.foobuzz.wow")
+                        f"piano.19700101-000000-Thu{tag}.{expect}4h33m11s.foobuzz.wow")
 
 class Test0_parse_timestamp(unittest.TestCase):
     def test_parse_timestamp(self):
@@ -1895,6 +1896,9 @@ class Test6_args(CdTempdirFixture):
                 f"Specified --instrument '{self.base_args['instrument']}' doesn't "
                 f"match contents of '{instfpath}': '{inst}'")
 
+    def test_arg_fallback_timestamp(self):
+        self.assertTrue(False)
+
     def test_no_act_arg(self):
         d = Path("dest_foo")
         d.mkdir()
@@ -1927,6 +1931,9 @@ class Test6_fallback_timestamp(TempdirFixture):
     def test_fallback_timestamp_now(self):
         now = taketake.inject_timestamp("{}")
         self.assertEqual(self.get_stamp("now", now), now)
+
+    def test_fallback_timestamp_prior(self):
+        self.assertEqual(True, False)
 
     def test_fallback_timestamp_filetime_now(self):
         """This is a race condition; could mismatch if the second changes"""

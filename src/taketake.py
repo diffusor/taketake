@@ -127,7 +127,7 @@ class Config:
     audioinfo_fname = ".audioinfo.json"
     guess_fname = ".filename_guess"
     provided_fname = ".filename_provided"
-    dest_fname_fmt = "{prefix}.{datestamp}.{notes}{duration}.{instrument}.{orig_fname}"
+    dest_fname_fmt = "{prefix}.{datestamp}{guess_tag}.{notes}{duration}.{instrument}.{orig_fname}"
     xdelta_fname = ".xdelta"
     transfer_log_fname = "transfer.log"
 
@@ -190,6 +190,7 @@ class TransferInfo:
     fname_guess:str = None
     fname_prompted:str = None
     timestamp:datetime.datetime = None
+    timestamp_guess_direction:str = None
 
     flac_encode_fpath:Path = None
     par_fpaths:list[Path] = field(default_factory=list)
@@ -1448,6 +1449,7 @@ def format_dest_filename(xinfo:TransferInfo) -> str:
     return Config.dest_fname_fmt.format(
             prefix=Config.prefix,
             datestamp=timestamp_str,
+            guess_tag=xinfo.timestamp_guess_direction,
             notes=notes,
             duration=duration_str,
             instrument=xinfo.instrument,
@@ -2071,12 +2073,15 @@ def derive_timestamp(worklist:list[TransferInfo], token:int,
 
     if current.audioinfo.parsed_timestamp:
         current.timestamp = current.audioinfo.parsed_timestamp
+        current.timestamp_guess_direction = "@"
 
     elif prev and prev.timestamp is not None:
         current.timestamp = prev.timestamp + prev.audioinfo.duration_s + delta
+        current.timestamp_guess_direction = "+?"
 
     elif next and next.timestamp is not None:
         current.timestamp = next.timestamp - current.audioinfo.duration_s - delta
+        current.timestamp_guess_direction = "-?"
 
     else:
         current.timestamp = get_fallback_timestamp(
@@ -2086,16 +2091,26 @@ def derive_timestamp(worklist:list[TransferInfo], token:int,
                 )
 
         if next:
-            assert fallback_timestamp_mode in 'prior ctime mtime timestamp+'.split()
+            assert fallback_timestamp_mode in 'prior ctime mtime atime timestamp+'.split()
             assert token == 0
             if fallback_timestamp_mode == 'prior':
                 current.timestamp += delta
+                current.timestamp_guess_direction = "+?"
+            elif fallback_timestamp_mode.endswith('time'):
+                current.timestamp_guess_direction = "?"
+            else:
+                assert fallback_timestamp_mode == 'timestamp+'
+                current.timestamp_guess_direction = ""
 
         else:
             assert fallback_timestamp_mode in 'now timestamp-'.split()
             assert token == len(worklist) - 1
             if fallback_timestamp_mode == 'now':
                 current.timestamp -= delta
+                current.timestamp_guess_direction = "-?"
+            else:
+                assert fallback_timestamp_mode == 'timestamp-'
+                current.timestamp_guess_direction = ""
 
 
 #===========================================================================
@@ -2366,6 +2381,10 @@ def validate_args(parser):
 
     dbg("args pre-val: ", format_args(args))
 
+    # Use the final positional parameter as dest, like mv does
+    if args.sources and args.dest is None:
+        args.dest = args.sources.pop()
+
     # Check and fix --fallback-timestamp
     args.fallback_timestamp_mode = args.fallback_timestamp
     args.fallback_timestamp_dt = None
@@ -2377,15 +2396,12 @@ def validate_args(parser):
         else:
             err(f"Couldn't parse timestamp[+-] from --fallback-timestamp: "
                 f"{args.fallback_timestamp}")
-    elif args.fallback_timestamp not in "prior mtime ctime atime now".split():
+
+    elif args.fallback_timestamp not in 'prior mtime ctime atime now'.split():
         err(f"Invalid --fallback-timestamp: '{args.fallback_timestamp}'"
             f"\n      Expected one of 'prior', 'mtime', 'ctime', 'atime', or 'now'"
             f"\n      or a timestamp like {inject_timestamp('{}')}"
             f"\n      with form YYYYmmdd-HHMMSS+ or - (seconds are optional)")
-
-    # Use the final positional parameter as dest, like mv does
-    if args.sources and args.dest is None:
-        args.dest = args.sources.pop()
 
     # Expand any sources that are directories
     args.wavs = []
@@ -2405,6 +2421,11 @@ def validate_args(parser):
 
         else:
             args.wavs.append(source)
+
+    if args.fallback_timestamp_mode == 'prior' and args.wavs:
+        transfer_log_fpath = args.wavs[0].parent / Config.transfer_log_fname
+        if not transfer_log_fpath.is_file():
+            err("--fallback_timestamp 'prior' given, but {transfer_log_fpath} does not exist")
 
     # Set up dest using continue_from or sources
     if args.continue_from:

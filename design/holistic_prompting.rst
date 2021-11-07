@@ -31,7 +31,7 @@ mockup::
          01                                                                                                                2
   FXC # Original Name Size M  Runtime  File mtime/(ctime)   Guessed Timestamp          Edited Timestamp         Notes
  ------------------------------------------------------------------------------------------------------------------------------------------
- *Vx  0 audio004.wav    41.3  0:04:13  2014-01-01 00:01:23  2021-11-06 10:44:00 Sat    2021-11-06 10:44:00 Sat  Bach Minuet, 93 bpm, issues
+ *Vx  0 audio004.wav    41.3  0:04:13  2014-01-01 00:01:23  2021-11-06 10:44:00 Sat@   2021-11-06 10:44:00 Sat  Bach Minuet, 93 bpm, issues
  >f   1 audio005.wav   298.9  0:29:48  2014-01-01 00:45:42  2021-11-06 10:48:18 Sat+?  2021-11-06 11:13:00 Sat  Improv in G-, meditative
       2 audio006.wav   134.2  0:13:01  2014-01-01 00:00:54  2021-11-07 00:00:54 Sun+?  2021-11-09 20:15:00 Tue  Improv in Eb, noisy
       3 audio007.wav  1938.3  3:13:28  2014-01-01 00:13:54  *listening*                                         Practice, Bach Air, Mozart
