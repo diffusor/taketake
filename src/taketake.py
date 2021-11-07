@@ -2214,23 +2214,34 @@ class Step:
         # TODO write the suggested_filename to a file if act
         xinfo = worklist[token]
         fpath = xinfo.source_wav
+        prompted_fpath = xinfo.wav_progress_dir / xinfo.fname_prompted
         audioinfo = xinfo.audioinfo
 
-        derive_timestamp(worklist=worklist, token=token,
-                fallback_timestamp_mode=cmdargs.fallback_timestamp_mode,
-                fallback_timestamp_dt=cmdargs.fallback_timestamp_dt,
-                delta=datetime.timedelta(seconds=Config.interfile_timestamp_delta_s))
+        if prompted_fpath.exists():
+            xinfo.fname_prompted = prompted_fpath.read_text().strip()
 
-        # Generate the extensionless guessed filename
-        xinfo.fname_guess = format_dest_filename(xinfo)
-        guess_fpath = xinfo.wav_progress_dir / Config.guess_fname
-        if act(f"create {Config.guess_fname} for {fpath.name}:  {xinfo.fname_guess}"):
-            guess_fpath.write_text(xinfo.fname_guess)
+        else:
+            derive_timestamp(worklist=worklist, token=token,
+                    fallback_timestamp_mode=cmdargs.fallback_timestamp_mode,
+                    fallback_timestamp_dt=cmdargs.fallback_timestamp_dt,
+                    delta=datetime.timedelta(seconds=Config.interfile_timestamp_delta_s))
 
-        print(f"Speechinizer: {fpath.name} - {audioinfo.recognized_speech!r} -> {xinfo.fname_guess!r}")
-        if cmdargs.do_prompt:
-            if act("Prompt for a corrected filename"):
-                await prompt_for_filename(worklist[token])
+            # Generate the extensionless guessed filename
+            xinfo.fname_guess = format_dest_filename(xinfo)
+            guess_fpath = xinfo.wav_progress_dir / Config.guess_fname
+            if act(f"create {Config.guess_fname} for {fpath.name}:  {xinfo.fname_guess}"):
+                guess_fpath.write_text(xinfo.fname_guess)
+
+            print(f"Speechinizer: {fpath.name} - {audioinfo.recognized_speech!r}"
+                  f"-> {xinfo.fname_guess!r}")
+            if cmdargs.do_prompt:
+                if act("Prompt for a corrected filename"):
+                    await prompt_for_filename(worklist[token])
+
+        # Parse timestamp out
+        # check
+        # TODO write out fname_prompted after act()/do_prompt-protected prompt recheck loop
+
 
     @StepNetwork.stepped
     async def flacenc(cmdargs, worklist, *, token, stepper):

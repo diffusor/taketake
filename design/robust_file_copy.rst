@@ -105,7 +105,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    Determine timestamp:
 
-   [] **If ``.filename_provided`` exists, set TransferInfo.timestamp from there
+   [-] **If ``.filename_provided`` exists, set TransferInfo.timestamp from there
    and skip this task.**
 
    [-] If AudioInfo.parsed_timestamp does not exist for the current file:
