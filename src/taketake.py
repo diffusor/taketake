@@ -84,6 +84,8 @@ from dataclasses import dataclass, field, is_dataclass
 from typing import Any, List, Dict, Set, NamedTuple, Optional
 from collections.abc import Callable, Coroutine, Sequence, Iterable
 from pathlib import Path
+# Allow Path += str,Path
+Path.__add__ = lambda self, rhs: Path(str(self) + str(rhs))
 
 import speech_recognition
 from word2number import w2n
@@ -106,6 +108,8 @@ class Config:
     epsilon_s = 0.01                # When comparing times, consider +/- epsilon_s the same
     par2_base_blocksize = 4096      # A multiple of this is used to avoid the 32K limit
     par2_max_num_blocks = 10000     # par2 doesn't support more than 32K num blocks, but gets unweildy with a lot of blocks anyway, so limit things a bit
+    par2_num_vol_files = 2
+    par2_redundancy_per_vol = 4
 
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
@@ -149,6 +153,7 @@ class MissingPar2File(TaketakeRuntimeError): ...
 class TimestampGrokError(TaketakeRuntimeError): ...
 class NoSuitableAudioSpan(TaketakeRuntimeError): ...
 class XdeltaMismatch(TaketakeRuntimeError): ...
+class FileFlushError(TaketakeRuntimeError): ...
 
 #============================================================================
 # Dataclasses
@@ -727,7 +732,7 @@ def get_nearest_n(x, n):
     return rounded if rounded else n
 
 
-async def par2_create(f, num_par2_files, percent_redundancy):
+async def par2_create(f, num_par2_files:int, percent_redundancy:float):
     """Create a par2 set with the given constraints, delete the base .par2
 
     Use the default Config.par2_base_blocksize unless the resulting number
@@ -760,7 +765,8 @@ async def par2_verify(f):
 
     f may be a par2 file, or a file with any associated .vol*.par2 or .par2 file
     """
-    proc = await ExtCmd.par2_verify.run_fg(file=get_related_par2file(f))
+    # TODO switch to pathlib.Path
+    proc = await ExtCmd.par2_verify.run_fg(file=get_related_par2file(str(f)))
 
 
 async def par2_repair(f):
@@ -818,14 +824,25 @@ def flush_fs_caches(*files):
     POSIX_FADV_DONTNEED = 4 # (from /usr/include/linux/fadvise.h)
 
     for f in files:
-        with open(f, "rb") as fd:
+        with open(str(f), "rb") as fd:
             fno = fd.fileno()
             offset = 0
             len = 0
             os.fsync(fno)
             ret = libc.posix_fadvise(fno, offset, len, POSIX_FADV_DONTNEED)
         if ret != 0:
-            raise RuntimeError("fadvise failed, could not flush file from cache: " + f)
+            raise FileFlushError(f"fadvise failed with code {ret}"
+                    f"\n  Could not flush file from cache: {f}")
+        if (num_cached_pages := fincore_num_pages(f)) > 0:
+            raise FileFlushError(f"fincore reported non-zero cached page count "
+                    f"{num_cached_pages} after fadvice DONTNEED flush"
+                    f"\n  Could not flush file from cache: {f}")
+
+def fincore_num_pages(fpath: Path):
+    p = subprocess.run(("fincore", "-nb", str(fpath)),
+            capture_output=True, text=True, check=True)
+    bytes, pages, fsize, fname = p.stdout.split()
+    return int(pages)
 
 def get_wavs_in(source, other_wavs=None):
     """Search the given source pathlib.Path instance for wav files.
@@ -2096,7 +2113,7 @@ async def prompt_for_filename(xinfo:TransferInfo):
 
     session = PromptSession(key_bindings=bindings)
     with patch_stdout():
-        xinfo.fname_prompted = await session.prompt_async(HTML(
+        xinfo.fname_prompted = Path(await session.prompt_async(HTML(
                 f"<prompt>* Confirm file rename for</prompt> "
                     f"<fname>{xinfo.source_wav}</fname>"
                 f"\n<prompt>* Recognized speech:</prompt> "
@@ -2109,8 +2126,7 @@ async def prompt_for_filename(xinfo:TransferInfo):
                 default=xinfo.fname_guess,
                 mouse_support=True,
                 bottom_toolbar=toolbar,
-                auto_suggest=AutoSuggestFromHistory())
-        # TODO validation
+                auto_suggest=AutoSuggestFromHistory()))
 
 
 #===========================================================================
@@ -2333,7 +2349,7 @@ class Step:
         audioinfo = xinfo.audioinfo
 
         if prompted_fpath.exists():
-            xinfo.fname_prompted = prompted_fpath.read_text().strip()
+            xinfo.fname_prompted = Path(prompted_fpath.read_text().strip())
 
         else:
             derive_timestamp(worklist=worklist, token=token,
@@ -2345,21 +2361,23 @@ class Step:
             xinfo.fname_guess = format_dest_filename(xinfo)
             guess_fpath = xinfo.wav_progress_dir / Config.guess_fname
             if act(f"create {Config.guess_fname} for {fpath.name}:  {xinfo.fname_guess}"):
-                guess_fpath.write_text(xinfo.fname_guess)
+                guess_fpath.write_text(str(xinfo.fname_guess))
 
             print(f"Speechinizer: {fpath.name} - {audioinfo.recognized_speech!r}"
                   f"-> {xinfo.fname_guess!r}")
             if cmdargs.do_prompt:
-                if act(f"Prompt for final filename given {xinfo.fname_guess}"):
-                    await prompt_for_filename(worklist[token])
+                await prompt_for_filename(worklist[token])
             else:
                 xinfo.fname_prompted = xinfo.fname_guess
 
-            if act(f"Write prompted filename to progress file {xinfo.fname_prompted}"):
-                prompted_fpath.write_text(xinfo.fname_prompted)
+            if not xinfo.fname_prompted.suffix == ".flac":
+                xinfo.fname_prompted += ".flac"
+
+            if act(f"Write prompted filename {xinfo.fname_prompted} to {prompted_fpath}"):
+                prompted_fpath.write_text(str(xinfo.fname_prompted))
 
         # Parse the timestamp out from the filename
-        tsinfo = extract_timestamp_from_str(xinfo.fname_prompted)
+        tsinfo = extract_timestamp_from_str(str(xinfo.fname_prompted))
         if tsinfo.timestamp:
             # Override the guessed timestamp
             xinfo.timestamp = tsinfo.timestamp
@@ -2397,7 +2415,41 @@ class Step:
 
     @StepNetwork.stepped
     async def pargen(cmdargs, worklist, *, token, stepper):
-        pass
+        xinfo = worklist[token]
+
+        final_fpath = xinfo.wav_progress_dir / xinfo.fname_prompted
+        flac_encoded_fpath = xinfo.wav_progress_dir / Config.flac_encoded_fname
+        if not final_fpath.is_symlink():
+            if act(f"Symlink {final_fpath} -> {Config.flac_encoded_fname}"):
+                final_fpath.symlink_to(Config.flac_encoded_fname)
+
+        remaining_pars = 0
+        deleted_pars = 0
+        par2_pattern = f"{xinfo.fname_prompted}.vol*.par2"
+        for par2 in xinfo.wav_progress_dir.glob(par2_pattern):
+            if par2.stat().st_size == 0:
+                if act(f"Delete 0-sized {par2}"):
+                    par2.unlink()
+                    deleted_pars += 1
+                else:
+                    remaining_pars += 1
+        if deleted_pars or not remaining_pars:
+            # TODO convert par2_create to use Path objects
+            if act(f"par2 create {final_fpath}"):
+                await par2_create(str(final_fpath),
+                        Config.par2_num_vol_files,
+                        Config.par2_redundancy_per_vol)
+
+        if act(f"Flushing cache of {flac_encoded_fpath} and par2 files"):
+            fpaths = [flac_encoded_fpath,
+                      *xinfo.wav_progress_dir.glob(par2_pattern)]
+            flush_fs_caches(*fpaths)
+
+        try:
+            await par2_verify(final_fpath)
+        except MissingPar2File as e:
+            if act(f"Raise MissingPar2File exception: {e}"):
+                raise
 
     @StepNetwork.stepped
     async def xdelta(cmdargs, worklist, *, token, stepper):

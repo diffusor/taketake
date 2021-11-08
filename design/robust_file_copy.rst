@@ -172,16 +172,18 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        fadvise DONTNEED src/audio001.wav
 
-6. **pargen**: Rename and par2 dest flac file
+   f. [-] Verify ``fincore src.wav`` is 0
+
+6. [-] **pargen**: Rename and par2 dest flac file
 
    ``prompt,flacenc => [pargen] => cleanup``
 
-   a. Unless ``$filename_provided.flac`` already exists,
+   a. [-] Unless ``$filename_provided.flac`` already exists,
       symlink from the final filename to the ``.encoded.flac``::
 
        symlink $filename_provided.flac -> .encoded.flac
 
-   b. If ``$filename_provided.flac.vol*.par2`` exists:
+   b. [-] If ``$filename_provided.flac.vol*.par2`` exists:
 
        * if any of their sizes are 0, delete them::
 
@@ -189,17 +191,17 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        * otherwise, skip the next step
 
-   c. Create dest flac pars **(if interrupted, 0-sized files will be left)**::
+   c. [-] Create dest flac pars **(if interrupted, 0-sized files will be left)**::
 
        par2 create $filename_provided.flac
 
-   f. Decache the dest flac and par2s::
+   f. [-] Decache the dest flac and par2s::
 
        fadvise DONTNEED .encoded.flac *.par2
 
-   g. Verify ``fincore .encoded.flac`` is 0
+   g. [-] Verify ``fincore .encoded.flac`` is 0
 
-   h. Verify dest flac par2s::
+   h. [-] Verify dest flac par2s::
 
        par2 verify $filename_provided.flac
 
