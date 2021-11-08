@@ -129,11 +129,13 @@ class Config:
     wav_extensions = "wav WAV"
     progress_dir_fmt = ".taketake.{}.tmp"
     source_wav_linkname = ".source.wav"
-    interrupted_flac_fmt = ".interrupted-abandoned.{}.flac"
     audioinfo_fname = ".audioinfo.json"
     guess_fname = ".filename_guess"
     provided_fname = ".filename_provided"
     dest_fname_fmt = "{prefix}.{datestamp}{guess_tag}.{notes}{duration}.{instrument}.{orig_fname}"
+    flac_progress_fname = ".in_progress.flac"
+    flac_interrupted_fname_fmt = ".interrupted-abandoned.{}.flac"
+    flac_encoded_fname = ".encoded.flac"
     xdelta_fname = ".xdelta"
     transfer_log_fname = "transfer.log"
 
@@ -2370,6 +2372,28 @@ class Step:
         """Meanwhile, the flac encoder copies the wav data while encoding it
         to the destination as a temporary file.
         """
+
+        xinfo = worklist[token]
+
+        # If .in_progress.flac exists, rename it
+        flac_progress_fpath = xinfo.wav_progress_dir / Config.flac_progress_fpath
+        if flac_progress_fpath.exists:
+            intr_fname = inject_timestamp(Config.flac_interrupted_fname_fmt)
+            intr_fpath = xinfo.wav_progress_dir / intr_fname
+            if act(f"Earlier flacenc interrupted, rename "
+                   f"{flac_progress_fpath} -> {intr_fname}"):
+                flac_progress_fpath.rename(intr_fname)
+
+        flac_encoded_fpath = xinfo.wav_progress_dir / Config.flac_encoded_fname
+        if not flac_encoded_fpath.exists():
+            if act(f"Flac encode {xinfo.wav_abspath} -> {flac_progress_fpath}"):
+                await flac_encode(xinfo.wav_abspath, flac_progress_fpath)
+            if act(f"Rename {flac_progress_fpath} -> {flac_encoded_fpath}"):
+                flac_progress_fpath.rename(flac_encoded_fpath)
+
+        if act(f"Flushing cache of {xinfo.wav_abspath}"):
+            flush_fs_caches(xinfo.wav_abspath)
+
 
     @StepNetwork.stepped
     async def pargen(cmdargs, worklist, *, token, stepper):

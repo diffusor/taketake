@@ -150,25 +150,25 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        echo $filename_provided > .filename_provided
 
-5. **flacenc**: Flac encode
+5. [-] **flacenc**: Flac encode
 
    ``setup => [flacenc] => pargen``
 
-   a. If ``.in_progress.flac`` exists, rename it to
+   a. [-] If ``.in_progress.flac`` exists, rename it to
       ``.interrupted-abandoned.$datestamp.flac``
 
-   b. If ``.encoded.flac`` exists, skip to the final step in the task (decache
+   b. [-] If ``.encoded.flac`` exists, skip to the final step in the task (decache
       the wav)
 
-   c. Flac encode src wav into dest flac::
+   c. [-] Flac encode src wav into dest flac::
 
        encode src/audio001.wav => .in_progress.flac
 
-   d. Rename encoded flac::
+   d. [-] Rename encoded flac::
 
        rename .in_progress.flac -> .encoded.flac
 
-   e. Decache the src wav, even if the flac already exists::
+   e. [-] Decache the src wav, even if the flac already exists::
 
        fadvise DONTNEED src/audio001.wav
 
