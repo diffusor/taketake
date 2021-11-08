@@ -2376,13 +2376,13 @@ class Step:
         xinfo = worklist[token]
 
         # If .in_progress.flac exists, rename it
-        flac_progress_fpath = xinfo.wav_progress_dir / Config.flac_progress_fpath
-        if flac_progress_fpath.exists:
+        flac_progress_fpath = xinfo.wav_progress_dir / Config.flac_progress_fname
+        if flac_progress_fpath.exists():
             intr_fname = inject_timestamp(Config.flac_interrupted_fname_fmt)
             intr_fpath = xinfo.wav_progress_dir / intr_fname
             if act(f"Earlier flacenc interrupted, rename "
-                   f"{flac_progress_fpath} -> {intr_fname}"):
-                flac_progress_fpath.rename(intr_fname)
+                   f"{flac_progress_fpath} -> {intr_fpath}"):
+                flac_progress_fpath.rename(intr_fpath)
 
         flac_encoded_fpath = xinfo.wav_progress_dir / Config.flac_encoded_fname
         if not flac_encoded_fpath.exists():
