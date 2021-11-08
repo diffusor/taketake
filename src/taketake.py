@@ -1411,6 +1411,9 @@ def format_duration(duration:float, style:str="letters") -> str:
     If any unit is 0, omit it, except if the duration is zero return 0s.
     """
 
+    if isinstance(duration, datetime.timedelta):
+        duration = duration.total_seconds()
+
     parts = []
     if style == "letters":
         intdur = round(duration)     # now an int
@@ -1999,6 +2002,26 @@ def play_media_file(xinfo:TransferInfo) -> subprocess.Popen:
     null = subprocess.DEVNULL
     return subprocess.Popen(args, stdin=null, stdout=null, stderr=null)
 
+# Number of seconds per named unit
+short_timedelta_units = dict(
+        y=3600*24*365.25,
+        mo=3600*24*365.25/12,
+        wk=3600*24*7,
+        day=3600*24,
+        hr=3600,
+        min=60,
+        s=1,
+        ms=0.001,
+)
+
+def short_timedelta(td: datetime.timedelta, prec:int=1) -> str:
+    s = td.total_seconds()
+    for unit, units_per_s in short_timedelta_units.items():
+        if abs(s) >= units_per_s:
+            unit_value = s/units_per_s
+            return f"{s/units_per_s:.1f}{unit}"
+
+    return f"0s"
 
 async def prompt_for_filename(xinfo:TransferInfo):
     from prompt_toolkit import PromptSession, print_formatted_text
@@ -2015,11 +2038,30 @@ async def prompt_for_filename(xinfo:TransferInfo):
         text = get_app().layout.get_buffer_by_name(DEFAULT_BUFFER).text
         tsinfo = extract_timestamp_from_str(text)
         strs = [f"<comment>{len(text)} chars</comment>"]
-        if tsinfo:
+        if tsinfo and tsinfo.timestamp:
             strs.append(f"Parsed {tsinfo.timestamp.strftime('%Y-%m-%d %H:%M:%S %a')}: ")
+            age = datetime.datetime.now() - tsinfo.timestamp
+            if age < datetime.timedelta(0):
+                strs.append("<style fg='ansired'>That's "
+                        f"{short_timedelta(-age)} "
+                        "in the future!</style>")
+            elif age.total_seconds() > short_timedelta_units['y']:
+                strs.append("<style fg='ansired'>That's "
+                        f"{short_timedelta(age)} "
+                        "in the past!</style>")
+            else:
+                strs.append(f"({short_timedelta(age)} ago)")
 
-        if tsinfo is None:
+            ai_timestamp = xinfo.audioinfo.parsed_timestamp
+            if ai_timestamp:
+                delta = tsinfo.timestamp - ai_timestamp
+                strs.append(f"({short_timedelta(delta)} from guess)")
+
+        if not tsinfo:
             strs.append(f"<style fg='ansired'>WARNING:</style> No timestamp found!")
+
+        elif tsinfo.timestamp is None:
+            strs.append(f"<style fg='ansired'>WARNING:</style> Timestamp couldn't be parsed!")
 
         elif tsinfo.matchobj.group('weekday') is None:
             strs.append(f"<style fg='ansired'>WARNING:</style> "
@@ -2314,8 +2356,13 @@ class Step:
             if act(f"Write prompted filename to progress file {xinfo.fname_prompted}"):
                 prompted_fpath.write_text(xinfo.fname_prompted)
 
-        # TODO Parse timestamp out
-        # TODO @ -? +? tag handling
+        # Parse the timestamp out from the filename
+        tsinfo = extract_timestamp_from_str(xinfo.fname_prompted)
+        if tsinfo.timestamp:
+            # Override the guessed timestamp
+            xinfo.timestamp = tsinfo.timestamp
+
+        # Need to handle @ -? +? tag handling?  We already named the file at this point.
 
 
     @StepNetwork.stepped
