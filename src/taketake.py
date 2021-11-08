@@ -81,19 +81,12 @@ import types
 import ctypes
 import dataclasses
 from dataclasses import dataclass, field, is_dataclass
-from typing import Any, List, Dict, Set, NamedTuple
+from typing import Any, List, Dict, Set, NamedTuple, Optional
 from collections.abc import Callable, Coroutine, Sequence, Iterable
 from pathlib import Path
 
 import speech_recognition
 from word2number import w2n
-from prompt_toolkit import PromptSession, print_formatted_text
-from prompt_toolkit.patch_stdout import patch_stdout
-from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.styles import Style
-from prompt_toolkit.application import run_in_terminal
-from prompt_toolkit.key_binding import KeyBindings
 
 # TODO make Config a @dataclass
 class Config:
@@ -118,10 +111,15 @@ class Config:
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
     timestamp_re = re.compile(
             r'(?:^|\D)' # Ensure we don't grab the middle of a number
-            r'(?P<timestamp>\d{8}[- _]\d{4,6})'
-            r'[- _]?'   # timestamp-weekday_name separator
-            r'(?P<weekday>sun|mon|tue|wed|thu|fri|sat)'
-            r'(?:$|day|sday|nesday|rsday|urday|\W|_|\d)'
+            r'(?P<fulltime>'
+                r'(?P<timestamp>\d{8}[- _]\d{4}(?:\d{2})?)'
+                r'[- _]?'   # timestamp-weekday_name separator
+                r'(?P<fullweekday>'
+                    r'(?P<weekday>sun|mon|tue|wed|thu|fri|sat)'
+                    r'(?P<weekdaysuffix>day|sday|nesday|rsday|urday)?'
+                r')?'
+            r')'
+            r'(?:$|\W|_|\d)'
             , flags=re.IGNORECASE)
 
     interfile_timestamp_delta_s = 5 # Assumed minimum time between takes
@@ -211,7 +209,7 @@ class TransferInfo:
 class TaketakeJsonEncoder(json.JSONEncoder):
     def default(self, obj):
         if is_dataclass(obj):
-            d = dataclasses.asdict(obj)
+            d = vars(obj)
             d["__dataclass__"] = obj.__class__.__name__
             return d
         elif isinstance(obj, Path):
@@ -344,7 +342,7 @@ class ExtCmd(metaclass=ExtCmdListMeta):
         proc = await asyncio.create_subprocess_exec(*args,
                 stdin=_stdin, stdout=_stdout, stderr=_stderr)
 
-        def mlfmt(b):
+        def mlfmt(b:bytes):
             lines = b.decode().splitlines()
             return "\n    ".join(lines)
 
@@ -862,8 +860,8 @@ def set_mtime(f, dt):
 def get_fallback_timestamp(
         fpath:Path,
         fallback_timestamp_mode:str,
-        fallback_timestamp_dt:{datetime.datetime, None},
-        ) -> str:
+        fallback_timestamp_dt:datetime.datetime,
+        ) -> datetime.datetime:
     """Returns the mtime, ctime, or atime of the given file in fpath
     if the given fallback_timestamp is one of those words.
     If fallback_timestamp is now, it returns the current time.
@@ -892,9 +890,9 @@ def get_fallback_timestamp(
     else:
         assert False, f"Invalid timestamp mode {fallback_timestamp_mode} for {fpath}"
 
-    return inject_timestamp("{}", dt)
+    return dt
 
-def inject_timestamp(template, when=None):
+def inject_timestamp(template: str, when: datetime.datetime=None) -> str:
     """Format the time into the given template string.
 
     template must contain a single {} which indicates where the timestamp goes.
@@ -906,7 +904,7 @@ def inject_timestamp(template, when=None):
         when = datetime.datetime.now()
     return template.format(when.strftime(Config.timestamp_fmt_with_seconds))
 
-def parse_timestamp(s:str) -> {datetime.datetime, None}:
+def parse_timestamp(s:str) -> Optional[datetime.datetime]:
     """Parses time from strings like YYYYmmdd-HHMM and YYYYmmdd-HHMMSS.
 
     Valid date-to-time separators are -, _, and ' ' (a single space).
@@ -941,7 +939,7 @@ class ParsedTimestamp(NamedTuple):
     timestamp: datetime.datetime
     weekday_correct: bool
 
-def extract_timestamp(s:str) -> {ParsedTimestamp, None}:
+def extract_timestamp_from_str(s:str) -> {ParsedTimestamp, None}:
     """Finds and parses the timestamp from the given string.
 
     Looks for timestamps of the form YYYYmmdd-HHMM(SS).
@@ -949,15 +947,18 @@ def extract_timestamp(s:str) -> {ParsedTimestamp, None}:
     Returns the datetime result, or None if the parse failed.
     """
     if m := Config.timestamp_re.search(s):
-        dt = parse_timestamp(m['timestamp'])
-        expect_weekday = dt.strftime("%a")
-        weekday_correct = m['weekday'].lower() == expect_weekday.lower()
-        return ParsedTimestamp(
-                matchobj=m,
-                timestamp=dt,
-                weekday_correct=weekday_correct)
-    else:
-        return None
+        if dt := parse_timestamp(m['timestamp']):
+            expect_weekday = dt.strftime("%a")
+            if m['weekday'] is not None:
+                weekday_correct = m['weekday'].lower() == expect_weekday.lower()
+            else:
+                weekday_correct = None
+            return ParsedTimestamp(
+                    matchobj=m,
+                    timestamp=dt,
+                    weekday_correct=weekday_correct)
+
+    return None
 
 
 #============================================================================
@@ -1987,7 +1988,7 @@ class StepNetwork:
 def play_media_file(xinfo:TransferInfo) -> subprocess.Popen:
     """Play the given file in a background process."""
 
-    start = 0
+    start = 0.0
     if xinfo.audioinfo.speech_range is not None:
         start = xinfo.audioinfo.speech_range.start
 
@@ -2000,9 +2001,41 @@ def play_media_file(xinfo:TransferInfo) -> subprocess.Popen:
 
 
 async def prompt_for_filename(xinfo:TransferInfo):
+    from prompt_toolkit import PromptSession, print_formatted_text
+    from prompt_toolkit.patch_stdout import patch_stdout
+    from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+    from prompt_toolkit.formatted_text import HTML
+    from prompt_toolkit.styles import Style
+    from prompt_toolkit.application import run_in_terminal
+    from prompt_toolkit.application.current import get_app
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.enums import DEFAULT_BUFFER
 
     def toolbar():
-        return HTML(f"  <style bg='ansired'>{time.monotonic()}</style>")
+        text = get_app().layout.get_buffer_by_name(DEFAULT_BUFFER).text
+        tsinfo = extract_timestamp_from_str(text)
+        strs = [f"<comment>{len(text)} chars</comment>"]
+        if tsinfo:
+            strs.append(f"Parsed {tsinfo.timestamp.strftime('%Y-%m-%d %H:%M:%S %a')}: ")
+
+        if tsinfo is None:
+            strs.append(f"<style fg='ansired'>WARNING:</style> No timestamp found!")
+
+        elif tsinfo.matchobj.group('weekday') is None:
+            strs.append(f"<style fg='ansired'>WARNING:</style> "
+                    f"No weekday in '{tsinfo.matchobj.group('fulltime')}' found!")
+
+        elif tsinfo.weekday_correct:
+            strs.append(f"<style bg='ansigreen'>Weekday matches</style>")
+
+        else:
+            strs.append(f"<style fg='ansired'>WARNING:</style> "
+                    f"Weekday mismatch: timestamp is on a "
+                    f"<style bg='ansigreen'>{tsinfo.timestamp.strftime('%A')}</style>, "
+                    f"but the text says "
+                    f"<style bg='ansired'>{tsinfo.matchobj.group('fullweekday')}</style>")
+
+        return HTML("  ".join(strs))
 
     bindings = KeyBindings()
     @bindings.add('escape', 'h')
@@ -2014,17 +2047,20 @@ async def prompt_for_filename(xinfo:TransferInfo):
         fname="#bb9900",
         comment="#9999ff",
         guess="#dddd11 bold",
-        final="#33ff33 bold",
+        input="#33ff33 bold",
         ))
 
     session = PromptSession(key_bindings=bindings)
     with patch_stdout():
         xinfo.fname_prompted = await session.prompt_async(HTML(
                 f"<prompt>* Confirm file rename for</prompt> "
-                f"<fname>{xinfo.source_wav}</fname>"
+                    f"<fname>{xinfo.source_wav}</fname>"
+                f"\n<prompt>* Recognized speech:</prompt> "
+                    f"'<comment>{xinfo.audioinfo.recognized_speech}</comment>' "
+                    f"@<guess>{xinfo.audioinfo.speech_range}</guess> "
                 f"\n <guess>Guess</guess>: <fname>{xinfo.fname_guess}</fname> "
-                f"<comment>({len(xinfo.fname_guess)} characters)</comment>"
-                f"\n <final>Final&gt;</final> "),
+                f"<comment>({len(xinfo.fname_guess)} chars)</comment>"
+                f"\n <input>Input&gt;</input> "),
                 style=style,
                 default=xinfo.fname_guess,
                 mouse_support=True,
@@ -2081,6 +2117,9 @@ def listen_to_wav(xinfo:TransferInfo, token:int) -> AudioInfo:
     return audioinfo
 
 
+def sec_to_td(sec: float) -> datetime.timedelta:
+    return datetime.timedelta(seconds=sec)
+
 # TODO test this
 def derive_timestamp(worklist:list[TransferInfo], token:int,
         fallback_timestamp_mode:str, fallback_timestamp_dt:datetime.datetime,
@@ -2098,11 +2137,13 @@ def derive_timestamp(worklist:list[TransferInfo], token:int,
         current.timestamp_guess_direction = "@"
 
     elif prev and prev.timestamp is not None:
-        current.timestamp = prev.timestamp + prev.audioinfo.duration_s + delta
+        current.timestamp = prev.timestamp \
+                + sec_to_td(prev.audioinfo.duration_s) + delta
         current.timestamp_guess_direction = "+?"
 
     elif next and next.timestamp is not None:
-        current.timestamp = next.timestamp - current.audioinfo.duration_s - delta
+        current.timestamp = next.timestamp \
+                - sec_to_td(current.audioinfo.duration_s) - delta
         current.timestamp_guess_direction = "-?"
 
     else:
