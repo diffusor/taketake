@@ -205,16 +205,16 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        par2 verify $filename_provided.flac
 
-7. **xdelta**: Xdelta check wavs
+7. [-] **xdelta**: Xdelta check wavs
 
    ``All(flacenc) => [xdelta] => cleanup``
 
-   a. Unless src wav no longer exists or if ``.xdelta`` exists, verify
+   a. [-] Unless src wav no longer exists or if ``.xdelta`` exists, verify
       ``fincore src/.wav`` is 0 and diff the src and decoded wav files::
 
        flac -c -d .encoded.flac | xdelta3 -s src/.wav > .xdelta
 
-   b. Check ``.xdelta`` for actual diffs
+   b. [-] Check ``.xdelta`` for actual diffs
 
 8. **cleanup**: Delete src wav and copy back flac
 
@@ -252,7 +252,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    c. Decache the copied dest files
 
-   d. par2 verified the copied dest files
+   d. par2 verify the copied dest files
 
    e. Move the final flac and par2 files into the dest directory::
 

@@ -198,6 +198,7 @@ class TransferInfo:
     source_link:Path
     instrument:str
 
+    flac_wavsize:int = None
     fstat:os.stat_result = None
     audioinfo:AudioInfo = None
     fname_guess:str = None
@@ -205,8 +206,10 @@ class TransferInfo:
     timestamp:datetime.datetime = None
     timestamp_guess_direction:str = None
 
-    flac_encode_fpath:Path = None
-    par_fpaths:list[Path] = field(default_factory=list)
+    failures: list[Exception] = field(default_factory=list)
+
+    #flac_encode_fpath:Path = None
+    #par_fpaths:list[Path] = field(default_factory=list)
 
 
 #============================================================================
@@ -2409,6 +2412,9 @@ class Step:
             if act(f"Rename {flac_progress_fpath} -> {flac_encoded_fpath}"):
                 flac_progress_fpath.rename(flac_encoded_fpath)
 
+        if flac_encoded_fpath.exists():
+            xinfo.flac_wavsize = await get_flac_wav_size(flac_encoded_fpath)
+
         if act(f"Flushing cache of {xinfo.wav_abspath}"):
             flush_fs_caches(xinfo.wav_abspath)
 
@@ -2424,26 +2430,24 @@ class Step:
                 final_fpath.symlink_to(Config.flac_encoded_fname)
 
         remaining_pars = 0
-        deleted_pars = 0
+        truncated_pars = 0
         par2_pattern = f"{xinfo.fname_prompted}.vol*.par2"
         for par2 in xinfo.wav_progress_dir.glob(par2_pattern):
             if par2.stat().st_size == 0:
                 if act(f"Delete 0-sized {par2}"):
                     par2.unlink()
-                    deleted_pars += 1
-                else:
-                    remaining_pars += 1
-        if deleted_pars or not remaining_pars:
+                    truncated_pars += 1
+            else:
+                remaining_pars += 1
+        if truncated_pars or not remaining_pars:
             # TODO convert par2_create to use Path objects
             if act(f"par2 create {final_fpath}"):
                 await par2_create(str(final_fpath),
                         Config.par2_num_vol_files,
                         Config.par2_redundancy_per_vol)
 
-        if act(f"Flushing cache of {flac_encoded_fpath} and par2 files"):
-            fpaths = [flac_encoded_fpath,
-                      *xinfo.wav_progress_dir.glob(par2_pattern)]
-            flush_fs_caches(*fpaths)
+        if act(f"Flushing cache of par2 files for {xinfo.fname_prompted}"):
+            flush_fs_caches(*xinfo.wav_progress_dir.glob(par2_pattern))
 
         try:
             await par2_verify(final_fpath)
@@ -2453,7 +2457,26 @@ class Step:
 
     @StepNetwork.stepped
     async def xdelta(cmdargs, worklist, *, token, stepper):
-        pass
+        xinfo = worklist[token]
+        xdelta_fpath = xinfo.wav_progress_dir / Config.xdelta_fname
+        wav_fpath = xinfo.wav_abspath
+        flac_encoded_fpath = xinfo.wav_progress_dir / Config.flac_encoded_fname
+
+        if not xdelta_fpath.exists():
+            if act(f"Verify {wav_fpath} ({xinfo.flac_wavsize} bytes "
+                   f"decoded from {flac_encoded_fpath})"):
+                await encode_xdelta_from_flac_to_wav(
+                        flac_file=flac_encoded_fpath,
+                        wav_file=wav_fpath,
+                        xdelta_file=xdelta_fpath)
+
+        if Config.act or xdelta_fpath.exists():
+            # If no-act, if the xdelta exists, we check it.
+            # If act, we always check it
+            await check_xdelta(
+                    xdelta_file=xdelta_fpath,
+                    expected_size=xinfo.flac_wavsize,
+                    target_size=wav_fpath.stat().st_size)
 
     @StepNetwork.stepped
     async def cleanup(cmdargs, worklist, *, token, stepper):
