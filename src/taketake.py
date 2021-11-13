@@ -2620,20 +2620,24 @@ def validate_args(parser):
     # Check and fix --fallback-timestamp
     args.fallback_timestamp_mode = args.fallback_timestamp
     args.fallback_timestamp_dt = None
-    if args.fallback_timestamp[:-1] in "+-":
-        dt = parse_timestamp(args.fallback_timestamp[:-1]) # Omit trailing -+
-        if dt is not None:
+    if args.fallback_timestamp[-1] in "+-" \
+            and (dt := parse_timestamp(args.fallback_timestamp[:-1])): # Omit trailing -+
+        pto = extract_timestamp_from_str(args.fallback_timestamp)
+        assert pto
+        if not pto.weekday_correct:
+            err(f"Mismatched weekday in --fallback-timestamp: "
+                f"{args.fallback_timestamp}, expected {dt.strftime('%a')}")
+
+        else:
             args.fallback_timestamp_mode = "timestamp" + args.fallback_timestamp[-1]
             args.fallback_timestamp_dt = dt
-        else:
-            err(f"Couldn't parse timestamp[+-] from --fallback-timestamp: "
-                f"{args.fallback_timestamp}")
 
     elif args.fallback_timestamp not in 'prior mtime ctime atime now'.split():
         err(f"Invalid --fallback-timestamp: '{args.fallback_timestamp}'"
             f"\n      Expected one of 'prior', 'mtime', 'ctime', 'atime', or 'now'"
             f"\n      or a timestamp like {inject_timestamp('{}')}"
-            f"\n      with form YYYYmmdd-HHMMSS+ or - (seconds are optional)")
+            f"\n      with form YYYYmmdd-HHMMSS+ or - "
+            f"(seconds are optional, separator can be -, _, or a space)")
 
     # Expand any sources that are directories
     args.wavs = []
@@ -2654,10 +2658,13 @@ def validate_args(parser):
         else:
             args.wavs.append(source)
 
+    # Now that we have a source directory, check if transfer.log exists if the
+    # user requested the 'prior' --fallback-timestamp mode.
     if args.fallback_timestamp_mode == 'prior' and args.wavs:
         transfer_log_fpath = args.wavs[0].parent / Config.transfer_log_fname
         if not transfer_log_fpath.is_file():
-            err("--fallback_timestamp 'prior' given, but {transfer_log_fpath} does not exist")
+            err(f"--fallback_timestamp 'prior' given, "
+                f"but '{transfer_log_fpath}' does not exist")
 
     # Set up dest using continue_from or sources
     if args.continue_from:

@@ -1553,7 +1553,7 @@ class Test3_ext_commands_read_only(unittest.TestCase):
 # Test6 - longer external commands
 #===========================================================================
 
-class Test6_args(CdTempdirFixture):
+class CmdArgsFixture(CdTempdirFixture):
     def setUp(self):
         super().setUp()
         self.base_args = dict(
@@ -1575,6 +1575,7 @@ class Test6_args(CdTempdirFixture):
                 sources=[],
                 wavs=[])
         self.cmdline_suffix = "-i inst1"
+        self.maxDiff=None
 
     def mkdir_progress(self, tag, subdir="."):
         name = Path(taketake.Config.progress_dir_fmt.format(tag))
@@ -1628,6 +1629,8 @@ class Test6_args(CdTempdirFixture):
                 wavs=[src],
                 **kwargs)
 
+
+class Test6_args(CmdArgsFixture):
     def test_no_args(self):
         self.check_args("",
                 "No DEST_PATH specified!",
@@ -1916,9 +1919,6 @@ class Test6_args(CdTempdirFixture):
                 f"Specified --instrument '{self.base_args['instrument']}' doesn't "
                 f"match contents of '{instfpath}': '{inst}'")
 
-    def test_arg_fallback_timestamp(self):
-        self.assertTrue(False)
-
     def test_no_act_arg(self):
         d = Path("dest_foo")
         d.mkdir()
@@ -1932,6 +1932,75 @@ class Test6_args(CdTempdirFixture):
         self.check_args_with_prepended_src(f"{d} -d",
                 debug=True,
                 dest=d)
+
+
+class Test6_fallback_timestamp_arg(CmdArgsFixture):
+    def check_fallback(self, mode: str, *args, **kwargs):
+        d = Path("dest_foo")
+        d.mkdir()
+        self.check_args_with_prepended_src(f"{d} --fallback-timestamp {mode}",
+                *args,
+                dest=d,
+                **kwargs)
+
+    def test_arg_fallback_timestamp_mtime(self):
+        self.check_fallback('mtime')
+
+    def test_arg_fallback_timestamp_atime(self):
+        self.check_fallback('atime',
+                fallback_timestamp='atime',
+                fallback_timestamp_mode='atime')
+
+    def test_arg_fallback_timestamp_ctime(self):
+        self.check_fallback('ctime',
+                fallback_timestamp='ctime',
+                fallback_timestamp_mode='ctime')
+
+    def test_arg_fallback_timestamp_now(self):
+        self.check_fallback('now',
+                fallback_timestamp='now',
+                fallback_timestamp_mode='now')
+
+    def test_arg_fallback_timestamp_prior(self):
+        log = Path(taketake.Config.transfer_log_fname)
+        log.touch()
+        self.check_fallback('prior',
+                fallback_timestamp='prior',
+                fallback_timestamp_mode='prior')
+
+    def test_arg_fallback_timestamp_prior_no_transfer_log(self):
+        self.check_fallback('prior',
+                "--fallback_timestamp 'prior' given, but 'transfer.log' does not exist")
+
+    def test_arg_fallback_timestamp_minus(self):
+        tss = "20211223-091134-Thu"
+        self.check_fallback(f"{tss}-",
+                fallback_timestamp=f"{tss}-",
+                fallback_timestamp_dt=datetime.datetime(2021, 12, 23, 9, 11, 34),
+                fallback_timestamp_mode='timestamp-')
+
+    def test_arg_fallback_timestamp_plus(self):
+        tss = "20211223-091134-Thu"
+        self.check_fallback(f"{tss}+",
+                fallback_timestamp=f"{tss}+",
+                fallback_timestamp_dt=datetime.datetime(2021, 12, 23, 9, 11, 34),
+                fallback_timestamp_mode='timestamp+')
+
+    def test_arg_fallback_timestamp_bad_weekday(self):
+        tss = "20211223-091134-Sat"
+        self.check_fallback(f"{tss}-",
+                f"Mismatched weekday in --fallback-timestamp: {tss}-, expected Thu")
+
+    def test_arg_fallback_timestamp_invalid(self):
+        tss = "foobaz"
+        self.check_fallback(f"{tss}",
+                f"Invalid --fallback-timestamp: '{tss}'")
+
+
+class Test6_fallback_timestamp(TempdirFixture, FileAssertions):
+    def setUp(self):
+        super().setUp()
+        self.tempfile = Path(self.tempdir)/'foobarfile'
 
 
 class Test6_fallback_timestamp(TempdirFixture, FileAssertions):
