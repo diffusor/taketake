@@ -1040,6 +1040,47 @@ class Test0_format_duration(unittest.TestCase):
             with self.subTest(start=start, dur=dur, expect=expect):
                 self.assertEqual(f"{taketake.TimeRange(start, dur)}", expect)
 
+
+    def test_short_timedelta(self):
+        def check(expect, **kwargs):
+            with self.subTest(**kwargs, expect=expect):
+                td = datetime.timedelta(**kwargs)
+                shortened_td = taketake.short_timedelta(td)
+                self.assertEqual(shortened_td, expect)
+
+            negargs = {}
+            for k in kwargs:
+                negargs[k] = -kwargs[k]
+            negexpect = expect
+            if expect != "0s":
+                negexpect = "-"+expect
+            with self.subTest(**negargs, negexpect=negexpect):
+                td = datetime.timedelta(**negargs)
+                shortened_td = taketake.short_timedelta(td)
+                self.assertEqual(shortened_td, negexpect)
+
+        check("23.9y", weeks=52*24)
+        check("12.0mo", weeks=52)
+        check("1.0mo", weeks=4.4)
+        check("4.3wk", weeks=4.3)
+        check("1.0wk", days=7.0)
+        check("7.0day", days=6.99)
+        check("6.9day", days=6.9)
+        check("1.0day", hours=24.0)
+        check("24.0hr", hours=23.99)
+        check("1.0hr", minutes=60.0)
+        check("60.0min", minutes=59.99)
+        check("1.0min", seconds=60.0)
+        check("60.0s", seconds=59.99)
+        check("1.0s", milliseconds=1000)
+        check("1000.0ms", milliseconds=999.99)
+        check("1.0ms", microseconds=1000)
+        check("1.0ms", microseconds=999.99) # dt only has usec resolution
+        check("4.0us", microseconds=4.4)
+        check("0s", microseconds=0.1)
+        check("0s", microseconds=0)
+
+
 class Test0_format_dest_filename(unittest.TestCase):
     def test_format_dest_filename(self):
         xinfo = taketake.TransferInfo(
