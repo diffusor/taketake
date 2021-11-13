@@ -1468,7 +1468,7 @@ def format_duration(duration: Union[float, datetime.timedelta], style:str='lette
         if style == 'letters':
             if value or (not parts and intdur == 0):
                 parts.append(f"{value}{unit}")
-        elif style == 'colons':
+        elif style == 'colons': # pragma: no branch
             if unit in "sm":
                 parts.append(f"{value:02}")
             else:
@@ -1477,7 +1477,7 @@ def format_duration(duration: Union[float, datetime.timedelta], style:str='lette
     parts.reverse()
     if style == 'letters':
         return ''.join(parts)
-    elif style == 'colons':
+    elif style == 'colons': # pragma: no branch
         s = ':'.join(parts)
         if frac:
             s += str(frac)[1:]
