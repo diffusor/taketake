@@ -203,7 +203,7 @@ class TransferInfo:
     fstat:os.stat_result = None
     audioinfo:AudioInfo = None
     fname_guess:str = None
-    fname_prompted:str = None
+    fname_prompted:Path = None
     timestamp:datetime.datetime = None
     timestamp_guess_direction:str = None
 
@@ -580,8 +580,7 @@ async def encode_xdelta_from_flac_to_wav(flac_file, wav_file, xdelta_file):
         return p_flacdec, p_xdelta
 
 
-async def check_xdelta(xdelta_file:Path, expected_size:int,
-        target_size:int, xinfo:TransferInfo):
+async def check_xdelta(xdelta_file: Path, expected_size: int, target_size: int):
     """Raise XdeltaMismatch if the given xdelta file shows a difference.
 
     Warning: if the target file size is smaller than the source, then xdelta
@@ -615,8 +614,6 @@ async def check_xdelta(xdelta_file:Path, expected_size:int,
     If these conditions aren't met, the function raises an XdeltaMismatch
     exception describing the point of discovery for the mismatch.
     """
-
-    #def fmt_exception TODO # Add xinfo information.  Put token in xinfo
 
     if expected_size != target_size:
         raise XdeltaMismatch(
@@ -2379,7 +2376,7 @@ class Step:
             if cmdargs.do_prompt:
                 await prompt_for_filename(worklist[token])
             else:
-                xinfo.fname_prompted = xinfo.fname_guess
+                xinfo.fname_prompted = Path(xinfo.fname_guess)
 
             if not xinfo.fname_prompted.suffix == ".flac":
                 xinfo.fname_prompted += ".flac"
@@ -2488,8 +2485,7 @@ class Step:
             await check_xdelta(
                     xdelta_file=xdelta_fpath,
                     expected_size=xinfo.flac_wavsize,
-                    target_size=wav_fpath.stat().st_size,
-                    xinfo=xinfo)
+                    target_size=wav_fpath.stat().st_size)
 
     async def cleanup(cmdargs, worklist, *, stepper):
         failings = [x for x in worklist if x.failures]

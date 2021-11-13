@@ -1043,6 +1043,7 @@ class Test0_format_duration(unittest.TestCase):
 class Test0_format_dest_filename(unittest.TestCase):
     def test_format_dest_filename(self):
         xinfo = taketake.TransferInfo(
+                token=0,
                 source_wav=Path("wow.wav"),
                 wav_abspath=Path("foo/wow008.wav"),
                 dest_dir=Path("dest"),
@@ -2679,6 +2680,7 @@ class Test8_step_reorder(unittest.IsolatedAsyncioTestCase,
                 fallback_timestamp_mode="now",
                 )
         self.worklist = [taketake.TransferInfo(
+                token=i,
                 source_wav=f"w{i}.wav",
                 wav_abspath=f"w{i}.wav",
                 dest_dir=Path(),
