@@ -974,15 +974,28 @@ class Test0_words_to_timestamp(unittest.TestCase):
 
 
 class Test0_format_duration(unittest.TestCase):
-    def check(self, s, expect, expect_colons=None):
-        with self.subTest(s=s, expect=expect):
-            formatted = taketake.format_duration(s)
+    def check(self, s, expect, expect_colons=None, force_style=None):
+        with self.subTest(s=s, expect=expect, force_style=force_style):
+            if force_style:
+                formatted = taketake.format_duration(s, style=force_style)
+            else:
+                formatted = taketake.format_duration(s)
             self.assertEqual(formatted, expect)
         if expect_colons is not None:
             with self.subTest(s=s, expect_colons=expect_colons):
                 formatted = taketake.format_duration(s, style="colons")
                 self.assertEqual(formatted, expect_colons)
 
+    def test_timedelta(self):
+        self.check(datetime.timedelta(seconds=0.5), "0s", '0:00:00.5')
+
+    def test_explicit_letters(self):
+        self.check(0.5, "0s", force_style='letters')
+
+    def test_invalid_style(self):
+        with self.assertRaisesRegex(AssertionError,
+                "Invalid style 'bad', should be 'letters' or 'colons'"):
+            formatted = taketake.format_duration(0.5, style='bad')
 
     def test_seconds(self):
         self.check(0, "0s", '0:00:00')

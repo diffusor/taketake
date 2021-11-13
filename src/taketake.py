@@ -81,7 +81,7 @@ import types
 import ctypes
 import dataclasses
 from dataclasses import dataclass, field, is_dataclass
-from typing import Any, List, Dict, Set, NamedTuple, Optional
+from typing import Any, List, Dict, Set, NamedTuple, Optional, Union
 from collections.abc import Callable, Coroutine, Sequence, Iterable
 from pathlib import Path
 # Allow Path += str,Path
@@ -1425,7 +1425,7 @@ def extract_timestamp_from_audio(fpath:Path, audioinfo:AudioInfo) -> None:
     dbg(f"Speechinizer: {fpath.name} Done - {audioinfo}")
 
 
-def format_duration(duration:float, style:str="letters") -> str:
+def format_duration(duration: Union[float, datetime.timedelta], style:str='letters') -> str:
     """Returns a string of the form XhYmZs given a duration in seconds.
 
     style is one of:
@@ -1440,11 +1440,13 @@ def format_duration(duration:float, style:str="letters") -> str:
         duration = duration.total_seconds()
 
     parts = []
-    if style == "letters":
+    if style == 'letters':
         intdur = round(duration)     # now an int
-    else:
+    elif style == 'colons':
         intdur = int(duration)
         frac = round(duration - intdur, 2)
+    else:
+        assert False, f"Invalid style '{style}', should be 'letters' or 'colons'"
 
     # The unit_map dict maps unit names to their multiple of the next unit
     # The final unit's multiple must be None.
@@ -1463,19 +1465,19 @@ def format_duration(duration:float, style:str="letters") -> str:
         else:
             value = intdur % multiple
             intdur //= multiple  # int division
-        if style == "letters":
+        if style == 'letters':
             if value or (not parts and intdur == 0):
                 parts.append(f"{value}{unit}")
-        elif style == "colons":
+        elif style == 'colons':
             if unit in "sm":
                 parts.append(f"{value:02}")
             else:
                 parts.append(f"{value}")
 
     parts.reverse()
-    if style == "letters":
+    if style == 'letters':
         return ''.join(parts)
-    elif style == "colons":
+    elif style == 'colons':
         s = ':'.join(parts)
         if frac:
             s += str(frac)[1:]
