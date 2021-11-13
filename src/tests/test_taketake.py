@@ -2518,9 +2518,13 @@ class StepSetupBase(unittest.IsolatedAsyncioTestCase,
         )
         self.stepper = DummyStepper()
         self.maxDiff = None
+        self.next_token = 0
 
-    def mk_xinfo(self, wpath, progress_dir):
+    def mk_xinfo(self, wpath, progress_dir, token=None):
+        """When token=None, supply an auto-incremented token."""
+        self.next_token += 1
         return taketake.TransferInfo(
+                token=self.next_token - 1,
                 source_wav=wpath,
                 wav_abspath=Path(os.path.abspath(wpath)),
                 dest_dir=self.destdir,
