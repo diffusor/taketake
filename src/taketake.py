@@ -190,6 +190,7 @@ class TransferInfo:
     These objects are stored in the worklist, which each task indexes into
     based on the tokens it gets from walking its incoming Stepper queues.
     """
+    token:int  # ID
 
     source_wav:Path
     wav_abspath:Path
@@ -579,7 +580,8 @@ async def encode_xdelta_from_flac_to_wav(flac_file, wav_file, xdelta_file):
         return p_flacdec, p_xdelta
 
 
-async def check_xdelta(xdelta_file, expected_size, target_size):
+async def check_xdelta(xdelta_file:Path, expected_size:int,
+        target_size:int, xinfo:TransferInfo):
     """Raise XdeltaMismatch if the given xdelta file shows a difference.
 
     Warning: if the target file size is smaller than the source, then xdelta
@@ -614,10 +616,14 @@ async def check_xdelta(xdelta_file, expected_size, target_size):
     exception describing the point of discovery for the mismatch.
     """
 
+    #def fmt_exception TODO # Add xinfo information.  Put token in xinfo
+
     if expected_size != target_size:
-        raise XdeltaMismatch(f"Xdelta pre-parse check failed:"
-                f"\n  Source filesize {expected_size}"
-                f"\n  Target filesize {target_size}")
+        raise XdeltaMismatch(
+                f"Xdelta check failed - Source and target file sizes don't match"
+                f"\n  xdelta3 file: {xdelta_file}"
+                f"\n  Source filesize: {expected_size:13,}"
+                f"\n  Target filesize: {target_size:13,}")
 
     expected_vcdiffs = {
         "VCDIFF header indicator":      "VCD_APPHEADER",
@@ -2254,9 +2260,10 @@ class Step:
             if act(f"create main progress dir {progress_dir}"):
                 progress_dir.mkdir()
 
-        for wav in cmdargs.wavs:
+        for token, wav in enumerate(cmdargs.wavs):
             assert isinstance(wav, Path)
             xinfo = TransferInfo(
+                    token=token,
                     source_wav=wav,
                     wav_abspath=Path(os.path.abspath(wav)),
                     dest_dir=cmdargs.dest,
@@ -2469,21 +2476,30 @@ class Step:
                         flac_file=flac_encoded_fpath,
                         wav_file=wav_fpath,
                         xdelta_file=xdelta_fpath)
+            else:
+                xinfo.failures.append(
+                        XdeltaMismatch(f"Skipped, forcing no-cleanup for {xinfo.source_wav}"
+                            f"\n  {xinfo}"))
 
-        if Config.act or xdelta_fpath.exists():
+        if xdelta_fpath.exists():
             # If no-act, if the xdelta exists, we check it.
             # If act, we always check it
             await check_xdelta(
                     xdelta_file=xdelta_fpath,
                     expected_size=xinfo.flac_wavsize,
-                    target_size=wav_fpath.stat().st_size)
+                    target_size=wav_fpath.stat().st_size,
+                    xinfo=xinfo)
 
-    @StepNetwork.stepped
-    async def cleanup(cmdargs, worklist, *, token, stepper):
-        pass
+    async def cleanup(cmdargs, worklist, *, stepper):
+        failings = [x for x in worklist if x.failures]
+        if failings:
+            print(f"Skipping cleanup due to {len(failures)} failures:")
+            for xinfo in failings:
+                print(f"  * {xinfo.token}. {xinfo.source_wav}: {len(xinfo.failures)} fail")
+                for f in xinfo.failures:
+                    print(f"      -> {f.splitlines[0]}")
+            return
 
-    async def finish(worklist):
-        dbg("in finish()")
 
 #============================================================================
 # StepNetwork construction
@@ -2515,7 +2531,7 @@ async def run_tasks(args):
 
     network.add(Step.pargen,
             pull_from=[Step.prompt, Step.flacenc],
-            send_to=Step.cleanup)
+            sync_to=Step.cleanup)
 
     network.add(Step.xdelta,
             sync_from=Step.flacenc,
@@ -2523,11 +2539,9 @@ async def run_tasks(args):
             sync_to=Step.cleanup)
 
     network.add(Step.cleanup,
-            sync_from=Step.xdelta,
-            pull_from=Step.pargen)
+            sync_from=[Step.xdelta, Step.pargen])
 
     await network.execute()
-    await Step.finish(worklist)
 
 
 def run_tests_in_subprocess():

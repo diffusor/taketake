@@ -218,7 +218,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
 8. **cleanup**: Delete src wav and copy back flac
 
-   ``All(xdelta),pargen => [cleanup] => finish``
+   ``All(xdelta),pargen => [cleanup]``
 
    **Status of ``.taketake.$datestamp/$wavfilename``**::
 
@@ -233,11 +233,14 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
         $filename_provided.flac.vol0500+499.par2
         .xdelta
 
-   **Skip this task if src modification is disabled**
+   **Skip this task if any failures in any transfers were detected or if
+   src modification is disabled**
 
    a. Remove the source wav file::
 
        delete src/audio001.wav
+
+   **copy-back**
 
    b. Copy flac file and par2s back to src if they each don't already exist
       (use .in_progress copies)::
@@ -268,18 +271,16 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        echo "{timestamp} {src} -> {dest}" >> src/transfer.log >> dest/transfer.log
 
-9. **finish**: *[global]* Wait for all processing to complete
+   **finish**: *[global]* Wait for all processing to complete
 
-   ``All(cleanup) => [finish]``
+   h. Remove top-level progress dir ``.taketake.$datestamp``::
 
-    a. Remove top-level progress dir ``.taketake.$datestamp``::
+       rm .taketake.$datestamp/*/.source.wav
+       rmdir .taketake.$datestamp/*
+       rmdir .taketake.$datestamp
 
-        rm .taketake.$datestamp/*/.source.wav
-        rmdir .taketake.$datestamp/*
-        rmdir .taketake.$datestamp
-
-    b. Write the instrument name to ``src/instrmnt.txt`` if the file doesn't
-       exist
+   i. Write the instrument name to ``src/instrmnt.txt`` if the file doesn't
+      exist
 
 
 Xdelta3 usage
