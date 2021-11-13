@@ -2040,6 +2040,7 @@ short_timedelta_units = dict(
         min=60,
         s=1,
         ms=0.001,
+        us=0.000001,
 )
 
 def short_timedelta(td: datetime.timedelta, prec:int=1) -> str:

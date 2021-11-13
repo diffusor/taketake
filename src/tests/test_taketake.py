@@ -62,6 +62,25 @@ class FileAssertions():
     def assertPathEqual(self, a:Path, b:Path, msg:str=None):
         self.assertEqual(str(a), str(b), msg)
 
+    def assertDatetimesAlmostEqual(self,
+            a: datetime.datetime,
+            b: datetime.datetime,
+            msg: str="",
+            epsilon: float=0.01,
+            ):
+        if abs((a - b).total_seconds()) > epsilon:
+            fmt = "%Y-%m-%d %H:%M:%S.%f"
+            raise AssertionError(f"datetimes not close enough: "
+                    f"{a.strftime(fmt)} - {b.strftime(fmt)} "
+                    f"= {taketake.short_timedelta(a - b)}"
+                    f"\n  Exceeeds epsilon of "
+                    f"{taketake.short_timedelta(datetime.timedelta(seconds=epsilon))} "
+                    f"({epsilon}s)"
+                    f"\n  {msg}"
+                    f"\n  {a=}"
+                    f"\n  {b=}"
+                    f"\n  abs(a-b)={abs(a-b)}")
+
     def mlfmt(self, b):
         if isinstance(b, bytes):
             lines = b.decode().splitlines()
@@ -1914,7 +1933,7 @@ class Test6_args(CdTempdirFixture):
                 dest=d)
 
 
-class Test6_fallback_timestamp(TempdirFixture):
+class Test6_fallback_timestamp(TempdirFixture, FileAssertions):
     def setUp(self):
         super().setUp()
         self.tempfile = Path(self.tempdir)/'foobarfile'
@@ -1929,19 +1948,19 @@ class Test6_fallback_timestamp(TempdirFixture):
         self.assertEqual(self.get_stamp("timestamp-", "bar"), "bar")
 
     def test_fallback_timestamp_now(self):
-        now = taketake.inject_timestamp("{}")
-        self.assertEqual(self.get_stamp("now", now), now)
+        now = datetime.datetime.now()
+        self.assertDatetimesAlmostEqual(self.get_stamp("now", now), now)
 
     def test_fallback_timestamp_prior(self):
         self.assertEqual(True, False)
 
     def test_fallback_timestamp_filetime_now(self):
         """This is a race condition; could mismatch if the second changes"""
-        now = taketake.inject_timestamp("{}")
+        now = datetime.datetime.now()
         self.tempfile.touch()
         for mode in "mca":
             with self.subTest(mode=mode):
-                self.assertEqual(self.get_stamp(f"{mode}time"), now)
+                self.assertDatetimesAlmostEqual(self.get_stamp(f"{mode}time"), now)
 
     def test_fallback_timestamp_filetime_atime_ctime(self):
         self.tempfile.touch()
@@ -1951,10 +1970,9 @@ class Test6_fallback_timestamp(TempdirFixture):
                 ("atime", atime),
                 ("mtime", mtime),
                 ):
-            ts = taketake.inject_timestamp("{}",
-                    when=datetime.datetime.fromtimestamp(seconds))
+            ts=datetime.datetime.fromtimestamp(seconds)
             with self.subTest(mode=mode, seconds=seconds, ts=ts):
-                self.assertEqual(self.get_stamp(mode), ts)
+                self.assertDatetimesAlmostEqual(self.get_stamp(mode), ts)
 
 
 class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
