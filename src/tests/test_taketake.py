@@ -1952,10 +1952,13 @@ class Test6_fallback_timestamp(TempdirFixture, FileAssertions):
         self.assertDatetimesAlmostEqual(self.get_stamp("now", now), now)
 
     def test_fallback_timestamp_prior(self):
-        self.assertEqual(True, False)
+        dt = datetime.datetime.now() - datetime.timedelta(seconds=1000)
+        logfile = Path(self.tempdir) / taketake.Config.transfer_log_fname
+        logfile.touch()
+        taketake.set_mtime(logfile, dt)
+        self.assertDatetimesAlmostEqual(self.get_stamp('prior'), dt)
 
     def test_fallback_timestamp_filetime_now(self):
-        """This is a race condition; could mismatch if the second changes"""
         now = datetime.datetime.now()
         self.tempfile.touch()
         for mode in "mca":
