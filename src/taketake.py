@@ -255,36 +255,13 @@ def read_json(fpath:Path):
 # External command infrastructure
 #============================================================================
 
-# Python 3.9.7 has an issue where asyncio.subprocess internally loses the
-# deprecated loop keyword in some async calls.  This squelches the warning.
-# DeprecationWarning: The loop argument is deprecated since Python 3.8, and scheduled for removal in Python 3.10.
-# https://bugs.python.org/issue45097
-#
-# These warnings show up when running unittest because it explicitly enables
-# warnings by prepending a new filter when running the tests.
-#
-# One can ignore all warnings, but that will cover future issues:
-#       unittest.main(warnings='ignore')
-#
-# Note we wan't use this around unittest.main() because the TestRunner
-# prepends non-ignore filters:
-#
-#        with warnings.catch_warnings():
-#            warnings.filterwarnings("ignore",
-#                    message="The loop argument is deprecated since Python 3.8",
-#                    category=DeprecationWarning)
 async def communicate(p, *args, **kwargs):
     """Call p.communicate with the given args.
 
     Stuff the resulting stdout and stderr bytes objects into new
     stdout_data and stderr_data attributes of the given p object.
     """
-    import warnings
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore",
-                message="The loop argument is deprecated since Python 3.8",
-                category=DeprecationWarning)
-        p.stdout_data, p.stderr_data = await p.communicate(*args, **kwargs)
+    p.stdout_data, p.stderr_data = await p.communicate(*args, **kwargs)
 
 
 class ExtCmdListMeta(type):
