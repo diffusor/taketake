@@ -308,6 +308,7 @@ class Test0_grok_time_words(check_word_list_grok):
 
     def test_0_0_0(self):
         self.expected_value = "0 0 0"
+        self.check("")
         self.check("zero minutes")
         self.check("zero minutes and zero seconds")
         self.check("zero seconds")

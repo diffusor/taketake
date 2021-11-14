@@ -1140,22 +1140,24 @@ def grok_digit_pair(word_list):
     return value
 
 
-def grok_time_words(word_list):
+def grok_time_words(word_list: list[str]) -> tuple[int, int, int, list[str]]:
     """Returns a triplet of (hour, minutes, seconds, extra) from the word_list
 
     The final list contains any unparsed words."""
 
     done = False
-    second = 0
+    second = None
 
     # Parse hour
     hour = grok_digit_pair(word_list)
     if pop_optional_words(word_list, "second seconds"):
+        # ... but that was actually seconds
         second = hour
         hour = 0
         done = True
 
     if not done and pop_optional_words(word_list, "minute minutes"):
+        # ... but that was actually minutes
         minute = hour
         hour = 0
         pop_optional_words(word_list, "and")
@@ -1166,6 +1168,7 @@ def grok_time_words(word_list):
         # Parse minute
         minute = grok_digit_pair(word_list)
         if pop_optional_words(word_list, "second seconds"):
+            # ... but that was actually seconds
             second = minute
             minute = 0
             done = True
@@ -1177,6 +1180,7 @@ def grok_time_words(word_list):
         second = grok_digit_pair(word_list)
         pop_optional_words(word_list, "second seconds")
 
+    assert second is not None
     return hour, minute, second, list(word_list)
 
 
