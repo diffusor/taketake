@@ -82,7 +82,8 @@ import ctypes
 import dataclasses
 from dataclasses import dataclass, field, is_dataclass
 from typing import Any, List, Dict, Set, NamedTuple, Optional
-from collections.abc import Callable, Coroutine, Sequence, Iterable, Hashable
+from collections.abc import Callable, Generator, Coroutine, Sequence, Iterable, Hashable
+from contextlib import contextmanager
 from pathlib import Path
 
 import speech_recognition
@@ -1569,12 +1570,13 @@ class Stepper:
     building a network of tasks with the same set of data flowing through
     each.
     """
+
     def __init__(self, name=None, end=None,
             sync_from=None, pull_from=None,
             send_to=None, sync_to=None,
-            cancellation_exception_type: None | RuntimeError=None,
-            cancellation_checker: None | Callable=None,
-            cancellation_function=None,
+            cancellation_exception_type: None | RuntimeError | tuple[RuntimeError, ...]=None,
+            is_token_canceled: None | Callable=None,
+            cancel_token: None | Callable=None,
             ):
 
         self.name: str = name
@@ -1583,6 +1585,10 @@ class Stepper:
         self.send_to: Sequence[StepperQueue] = listify(send_to)
         self.sync_to: Sequence[StepperQueue] = listify(sync_to)
         self.end: Hashable = end
+
+        self.cancellation_exception_type = cancellation_exception_type
+        self.is_token_canceled = is_token_canceled
+        self.cancel_token = cancel_token
 
         self.value: Hashable = end # last gotten value
         self.pre_sync_met: bool = False
@@ -1722,6 +1728,41 @@ class Stepper:
                 await q.put(token)
             if self.sync_to:
                 self.log(f"[=> sync_to({self.fmtqueues(self.sync_to)})]")
+
+
+    @contextmanager
+    def cancellable(self, token: Any) -> Generator:
+        """Usage:
+
+            with stepper.cancellable(token) as s:
+                s.skip_if_canceled()
+                # Do things that could raise the cancellation_exception_type
+        """
+
+        class SkipExecution(BaseException): ...
+        class NullException(BaseException): ...
+
+        class Skipper:
+            @staticmethod
+            def skip_if_canceled():
+                if self.is_token_canceled and self.is_token_canceled(token):
+                    raise SkipExecution
+
+        if self.cancellation_exception_type:
+            exceptions_to_catch = self.cancellation_exception_type
+        else:
+            exceptions_to_catch = NullException
+
+        try:
+            yield Skipper
+        except SkipExecution:
+            pass
+        except exceptions_to_catch as e: # type: ignore
+            # pyright thinks RuntimeError needs to be iterable here, but only
+            # when passed through a variable?
+            if self.cancel_token:
+                self.cancel_token(token, e)
+
 
     async def step(self):
         """Simplify the standard while loop idiom.
