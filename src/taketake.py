@@ -82,7 +82,7 @@ import ctypes
 import dataclasses
 from dataclasses import dataclass, field, is_dataclass
 from typing import Any, List, Dict, Set, NamedTuple, Optional
-from collections.abc import Callable, Coroutine, Sequence, Iterable
+from collections.abc import Callable, Coroutine, Sequence, Iterable, Hashable
 from pathlib import Path
 
 import speech_recognition
@@ -1531,8 +1531,8 @@ class StepperQueue(asyncio.Queue):
         self.qtype = qtype
         self.src = False
         self.dest = False
-        self.pending:Set = set() # Set of tokens pending for synchronization
-        self.getter = None # Queue.get() task from the last get()
+        self.pending: set = set() # Set of tokens pending for synchronization
+        self.getter: Optional[asyncio.Task] = None # Queue.get() task from the last get()
         self.done = False  # Set True when the end token is seen
         super().__init__()
 
@@ -1564,11 +1564,11 @@ def make_queues(s:str) -> LinkQDict:
         setattr(qdict, qname, qdict[qname])
     return qdict
 
-def listify(arg) -> Sequence:
+def listify(arg) -> Sequence[Any]:
     if arg is None:
         return []
     elif isinstance(arg, str) or isinstance(arg, bytes):
-        return[arg]
+        return [arg]
     elif isinstance(arg, Sequence):
         return arg
     elif isinstance(arg, Iterable):
@@ -1599,15 +1599,20 @@ class Stepper:
             cancellation_function=None,
             ):
 
-        self.name = name
-        self.sync_from = listify(sync_from)
-        self.pull_from = listify(pull_from)
-        self.send_to = listify(send_to)
-        self.sync_to = listify(sync_to)
-        self.end = end
+        self.name: str = name
+        self.sync_from: Sequence[StepperQueue] = listify(sync_from)
+        self.pull_from: Sequence[StepperQueue] = listify(pull_from)
+        self.send_to: Sequence[StepperQueue] = listify(send_to)
+        self.sync_to: Sequence[StepperQueue] = listify(sync_to)
+        self.end: Hashable = end
 
-        self.value = end # last gotten value
-        self.pre_sync_met = False
+        self.value: Hashable = end # last gotten value
+        self.pre_sync_met: bool = False
+
+        # TODO - these get patched in from the StepNetwork, but maybe should
+        # be explicitly passed in through the constructor.
+        self.args: Optional[Sequence[Any]] = None
+        self.kwargs: Optional[dict] = None
 
     def log(self, *args, **kwargs):
         dbg(f"Stepper<{self.name}> :", *args, depth=1, **kwargs)
@@ -1620,7 +1625,7 @@ class Stepper:
     class DesynchronizationError(QueueError): ...
     class DuplicateTokenError(QueueError): ...
 
-    async def _get_across(self, q_list:list[StepperQueue], qtype:str) -> Any:
+    async def _get_across(self, q_list: Sequence[StepperQueue], qtype:str) -> Any:
         """Gets the next token that matches across all the queues in the q_list"""
         if not q_list:
             return None
@@ -1798,7 +1803,7 @@ class Link(collections.namedtuple('Link', 'src dest')):
 
 class StepNetwork:
     """Auto-wired DAG of Steppers and their step coroutines"""
-    side_q_names = {
+    side_q_names: dict[tuple[str, str], str] = {
             ("dest", "sync"): "sync_to",
             ("dest", "token"): "send_to",
             ("src", "token"): "pull_from",
@@ -2041,6 +2046,7 @@ def play_media_file(xinfo:TransferInfo) -> subprocess.Popen:
     """Play the given file in a background process."""
 
     start = 0.0
+    assert xinfo.audioinfo is not None
     if xinfo.audioinfo.speech_range is not None:
         start = xinfo.audioinfo.speech_range.start
 
@@ -2102,6 +2108,7 @@ async def prompt_for_filename(xinfo:TransferInfo):
             else:
                 strs.append(f"({short_timedelta(age)} ago)")
 
+            assert xinfo.audioinfo is not None
             ai_timestamp = xinfo.audioinfo.parsed_timestamp
             if ai_timestamp:
                 delta = tsinfo.timestamp - ai_timestamp
@@ -2231,11 +2238,15 @@ def derive_timestamp(worklist:list[TransferInfo], token:int,
         current.timestamp_guess_direction = "@"
 
     elif prev and prev.timestamp is not None:
+        assert prev.audioinfo is not None
+        assert prev.audioinfo.duration_s is not None
         current.timestamp = prev.timestamp \
                 + sec_to_td(prev.audioinfo.duration_s) + delta
         current.timestamp_guess_direction = "+?"
 
     elif next and next.timestamp is not None:
+        assert next.audioinfo is not None
+        assert current.audioinfo.duration_s is not None
         current.timestamp = next.timestamp \
                 - sec_to_td(current.audioinfo.duration_s) - delta
         current.timestamp_guess_direction = "-?"
@@ -2277,6 +2288,7 @@ def derive_timestamp(worklist:list[TransferInfo], token:int,
 class Step:
     """Namespace class for the step tasks in the taketake StepNetwork"""
 
+    @staticmethod
     async def setup(cmdargs, worklist, stepper):
         if cmdargs.continue_from:
             progress_dir = cmdargs.continue_from
@@ -2315,6 +2327,7 @@ class Step:
         await stepper.put(None)
 
 
+    @staticmethod
     async def listen(cmdargs, worklist, *, stepper):
         """The speech recognizer finds the first span of non-silent audio, passes
         it through PocketSphinx, and attempts to parse a timestamp and comments
@@ -2338,6 +2351,7 @@ class Step:
 
         await stepper.put(None)
 
+    @staticmethod
     async def reorder(cmdargs, worklist, *, stepper):
         """Buffer and emit tokens in a way that autoname
         """
@@ -2374,6 +2388,7 @@ class Step:
 
         await stepper.put(None)
 
+    @staticmethod
     @stepped_task
     async def prompt(cmdargs, worklist, *, token, stepper):
         """The Prompter asks the user for corrections on the guesses from autoname.
@@ -2420,6 +2435,7 @@ class Step:
         # Need to handle @ -? +? tag handling?  We already named the file at this point.
 
 
+    @staticmethod
     @stepped_task
     async def flacenc(cmdargs, worklist, *, token, stepper):
         """Meanwhile, the flac encoder copies the wav data while encoding it
@@ -2451,6 +2467,7 @@ class Step:
             flush_fs_caches(xinfo.wav_abspath)
 
 
+    @staticmethod
     @stepped_task
     async def pargen(cmdargs, worklist, *, token, stepper):
         xinfo = worklist[token]
@@ -2487,6 +2504,7 @@ class Step:
             if act(f"Raise MissingPar2File exception: {e}"):
                 raise
 
+    @staticmethod
     @stepped_task
     async def xdelta(cmdargs, worklist, *, token, stepper):
         xinfo = worklist[token]
@@ -2514,6 +2532,7 @@ class Step:
                     expected_size=xinfo.flac_wavsize,
                     target_size=wav_fpath.stat().st_size)
 
+    @staticmethod
     async def cleanup(cmdargs, worklist, *, stepper):
         failings = [x for x in worklist if x.failures]
         if failings:
