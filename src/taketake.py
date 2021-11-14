@@ -263,7 +263,7 @@ async def communicate(p: asyncio.subprocess.Process, *args, **kwargs) -> subproc
     stdout_data, stderr_data = await p.communicate(*args, **kwargs)
     assert p.returncode is not None # communicate ensures this
     return subprocess.CompletedProcess(
-            args=p.args,
+            args=p.args, # type: ignore
             returncode=p.returncode,
             stdout=stdout_data.decode(),
             stderr=stderr_data.decode(),
@@ -335,8 +335,9 @@ class ExtCmd(metaclass=ExtCmdListMeta):
         proc = await asyncio.create_subprocess_exec(*args,
                 stdin=_stdin, stdout=_stdout, stderr=_stderr)
 
-        # TODO - figure out how not to monkey-patch this
-        proc.args = args
+        # Ignore this monkey-patching - asyncio.subprocess.Process should
+        # match the same interface as subprocess.Popen anyway.
+        proc.args = args # type: ignore
         return proc
 
 
@@ -2604,7 +2605,7 @@ def format_args(args):
     return " ".join(arglist)
 
 
-def validate_args(parser):
+def validate_args(parser: argparse.ArgumentParser, args) -> list[str]:
     """Validates arguments processed by the parser and set in parser.args.
 
     If --target wasn't specified, removes the last item from args.sources
@@ -2615,15 +2616,15 @@ def validate_args(parser):
 
     Builds args.wavs from the remaining args.sources and the args.progress_dir.
 
-    Sets parser.args.dest and check for consistency, including dir existance.
-    Sets parser.errors, which is a list of errors encountered during parsing.
+    Sets args.dest and check for consistency, including dir existance.
+    Returns a list of errors encountered during parsing.
     """
 
-    parser.errors = []
+    errors = []
     def err(*args):
-        parser.errors.append(" ".join(str(a) for a in args))
+        errors.append(" ".join(str(a) for a in args))
 
-    args = parser.args
+    args
     # debug must be set prior to the first call to dbg()
     if args.debug:
         Config.debug = True
@@ -2799,6 +2800,8 @@ def validate_args(parser):
 
     dbg("args post-val:", format_args(args))
 
+    return errors
+
 
 def process_args(argv=None):
     parser = argparse.ArgumentParser(
@@ -2894,22 +2897,22 @@ This directory will also contain the timestamped
 {Config.progress_dir_fmt.format('*')} directory for tracking progress.
     """)
 
-    parser.args = parser.parse_args(argv)
-    validate_args(parser)
-    return parser
+    args = parser.parse_args(argv)
+    errors = validate_args(parser, args)
+    return parser, args, errors
 
 def format_errors(errors):
     return "".join("\n  * {}".format(e) for e in errors)
 
 def main():
-    arg_parser = process_args()
+    parser, args, errors = process_args()
 
     # Report errors
-    if arg_parser.errors:
-        arg_parser.error("Invalid command line options:"
-                + format_errors(arg_parser.errors))
+    if errors:
+        parser.error("Invalid command line options:"
+                + format_errors(errors))
 
-    args = arg_parser.args
+    args
     if not args.skip_tests:
         run_tests_in_subprocess()
 

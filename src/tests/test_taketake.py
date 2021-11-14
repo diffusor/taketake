@@ -1638,9 +1638,8 @@ class CmdArgsFixture(CdTempdirFixture):
         return name
 
     def check_args(self, cmdline, *expected_errors, **kwargs):
-        argparser = taketake.process_args(cmdline.split()
+        argparser, args, errors = taketake.process_args(cmdline.split()
                 + self.cmdline_suffix.split())
-        errors = argparser.errors
         fmterr = taketake.format_errors
 
         if expected_errors:
@@ -1663,9 +1662,9 @@ class CmdArgsFixture(CdTempdirFixture):
             self.assertEqual(len(errors), 0,
                     msg=f"\nUnexpected argparse errors:{fmterr(errors)}")
             # Check args
-            args = vars(argparser.args)
+            argsdict = vars(args)
             self.base_args.update(kwargs)
-            self.assertEqual(args, self.base_args) # got != expected
+            self.assertEqual(argsdict, self.base_args) # got != expected
 
     def check_args_with_prepended_src(self, cmdline, *args, **kwargs):
         """Wrap call to check_args but add a src argument.
