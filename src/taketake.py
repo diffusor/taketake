@@ -1849,14 +1849,14 @@ class StepNetwork:
         return q
 
     def _add_link_queues(self, stepper_qlist, qdict, src, dest):
-        if isinstance(src, types.FunctionType):
+        if isinstance(src, Callable):
             src.targets |= set(dest)
             for item in dest:
                 link = Link(src, item)
                 q = self._map_link_to_queue(link, qdict, "src")
                 stepper_qlist.append(q)
 
-        elif isinstance(dest, types.FunctionType):
+        elif isinstance(dest, Callable):
             for item in src:
                 link = Link(item, dest)
                 q = self._map_link_to_queue(link, qdict, "dest")
