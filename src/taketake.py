@@ -255,13 +255,19 @@ def read_json(fpath:Path):
 # External command infrastructure
 #============================================================================
 
-async def communicate(p, *args, **kwargs):
+async def communicate(p: asyncio.subprocess.Process, *args, **kwargs) -> subprocess.CompletedProcess:
     """Call p.communicate with the given args.
 
-    Stuff the resulting stdout and stderr bytes objects into new
-    stdout_data and stderr_data attributes of the given p object.
+    Returns a subprocess.CompletedProcess with the results.
     """
-    p.stdout_data, p.stderr_data = await p.communicate(*args, **kwargs)
+    stdout_data, stderr_data = await p.communicate(*args, **kwargs)
+    assert p.returncode is not None # communicate ensures this
+    return subprocess.CompletedProcess(
+            args=p.args,
+            returncode=p.returncode,
+            stdout=stdout_data.decode(),
+            stderr=stderr_data.decode(),
+            )
 
 
 class ExtCmdListMeta(type):
@@ -277,6 +283,16 @@ class ExtCmdListMeta(type):
 
     def __getattr__(cls, name):
         return cls.cmds[name]
+
+
+def fmt_process(cp: subprocess.CompletedProcess) -> str:
+    def mlfmt(s):
+        lines = s.splitlines()
+        return "\n    ".join(lines)
+
+    return f"from {cp.args[0]}\n  cmd: '{' '.join(cp.args)}'\n" \
+            f"  stdout:\n    {mlfmt(cp.stdout)}\n" \
+            f"  stderr:\n    {mlfmt(cp.stderr)}"
 
 
 class ExtCmd(metaclass=ExtCmdListMeta):
@@ -308,19 +324,8 @@ class ExtCmd(metaclass=ExtCmdListMeta):
         args = self.construct_args(**kwargs)
         proc = subprocess.run(args, capture_output=True, text=True)
 
-        def mlfmt(s):
-            lines = s.splitlines()
-            return "\n    ".join(lines)
-
-        def exmsg():
-            return f"from {args[0]}\n  cmd: '{' '.join(args)}'\n" \
-                    f"  stdout:\n    {mlfmt(proc.stdout)}\n" \
-                    f"  stderr:\n    {mlfmt(proc.stderr)}"
-
-        proc.exmsg = exmsg
-
         if proc.returncode:
-            raise SubprocessError(f"Got bad exit code {proc.returncode} {proc.exmsg()}")
+            raise SubprocessError(f"Got bad exit code {proc.returncode} {fmt_process(proc)}")
         return proc
 
 
@@ -330,23 +335,10 @@ class ExtCmd(metaclass=ExtCmdListMeta):
         proc = await asyncio.create_subprocess_exec(*args,
                 stdin=_stdin, stdout=_stdout, stderr=_stderr)
 
-        def mlfmt(b:bytes):
-            lines = b.decode().splitlines()
-            return "\n    ".join(lines)
-
-        def exmsg():
-            return f"from {args[0]}\n  cmd: '{' '.join(args)}'\n" \
-                    f"  stdout:\n    {mlfmt(proc.stdout_data)}\n" \
-                    f"  stderr:\n    {mlfmt(proc.stderr_data)}"
-
+        # TODO - figure out how not to monkey-patch this
         proc.args = args
-        proc.exmsg = exmsg
-        # TODO - this is meaningless, since we haven't waited for the process
-        # to complete.
-        proc.stdout_data = repr(proc.stdout)
-        proc.stderr_data = repr(proc.stderr)
-
         return proc
+
 
     async def run_fg(self, **kwargs):
         proc = await self.exec_async(
@@ -354,10 +346,10 @@ class ExtCmd(metaclass=ExtCmdListMeta):
                 _stderr=asyncio.subprocess.PIPE,
                 **kwargs)
 
-        await communicate(proc)
+        cp = await communicate(proc)
 
-        if proc.returncode:
-            raise SubprocessError(f"Got bad exit code {proc.returncode} {proc.exmsg()}")
+        if cp.returncode:
+            raise SubprocessError(f"Got bad exit code {cp.returncode} {fmt_process(cp)}")
 
         return proc
 
@@ -470,6 +462,12 @@ ExtCmd(
         or a file for which {file}.par2 exists.""",
 )
 
+ExtCmd(
+    "byte_count",
+    "Determine the number of bytes in the stdin stream",
+    "wc -c",
+)
+
 
 #============================================================================
 # External command implementation
@@ -499,23 +497,23 @@ async def get_flac_wav_size(flac_file):
             _stderr=asyncio.subprocess.DEVNULL)
     os.close(write_from_flac)  # Allow flac to get a SIGPIPE if wc exits
 
-    p_wc = await asyncio.create_subprocess_exec("wc", "-c",
-            stdin=read_into_wc,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE)
+    p_wc = await ExtCmd.byte_count.exec_async(
+            _stdin=read_into_wc,
+            _stdout=asyncio.subprocess.PIPE,
+            _stderr=asyncio.subprocess.PIPE)
     os.close(read_into_wc)
-    await communicate(p_wc)
+    cp_wc = await communicate(p_wc)
 
     if p_wc.returncode:
         raise SubprocessError(f"Got bad exit code {p_wc.returncode} from wc")
-    if p_wc.stderr_data:
-        raise SubprocessError(f"Got unexpected stderr from wc: '{p_wc.stderr_data.decode()}'")
+    if cp_wc.stderr:
+        raise SubprocessError(f"Got unexpected stderr from wc: '{cp_wc.stderr}'")
 
     await p_flacdec.wait()
     if p_flacdec.returncode:
         raise SubprocessError(f"Got bad exit code {p_flacdec.returncode} from flac")
 
-    return int(p_wc.stdout_data.decode().strip())
+    return int(cp_wc.stdout.strip())
 
 
 async def encode_xdelta_from_flac_to_wav(flac_file, wav_file, xdelta_file):
@@ -677,12 +675,12 @@ async def check_xdelta(xdelta_file: Path, expected_size: int, target_size: int):
         # Wait for the xdelta3 process to finish.  For a matching file
         # (the expected case), this wait will succeed immediately, since we
         # have already confirmed that the output stream is ended.
-        await communicate(p)
+        cp = await communicate(p)
 
-        if p.stderr_data:
-            fail(f"Got non-empty stderr:\n{''.join(p.stderr_data.decode())}")
-        if p.stdout_data:
-            fail(f"Got unexpected stdout after EOF detected:\n{''.join(p.stdout_data.decode())}")
+        if cp.stderr:
+            fail(f"Got non-empty stderr:\n{''.join(cp.stderr)}")
+        if cp.stdout:
+            fail(f"Got unexpected stdout after EOF detected:\n{''.join(cp.stdout)}")
 
         if p.returncode != 0:
             fail(f"Got unexpected {p.returncode=}")
@@ -766,12 +764,12 @@ def get_file_duration(fpath):
     proc = ExtCmd.get_media_duration.run(file=fpath)
 
     if proc.stderr:
-        raise InvalidMediaFile(f"Got extra stderr {proc.exmsg()}")
+        raise InvalidMediaFile(f"Got extra stderr {fmt_process(proc)}")
 
     try:
         duration = float(proc.stdout)
     except ValueError as e:
-        raise InvalidMediaFile(f"Could not parse duration stdout {proc.exmsg()}") from e
+        raise InvalidMediaFile(f"Could not parse duration stdout {fmt_process(proc)}") from e
 
     return duration
 
