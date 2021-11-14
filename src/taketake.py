@@ -1148,6 +1148,7 @@ def grok_time_words(word_list):
     The final list contains any unparsed words."""
 
     done = False
+    second = 0
 
     # Parse hour
     hour = grok_digit_pair(word_list)
@@ -1485,7 +1486,7 @@ def format_duration(duration: float | datetime.timedelta, style:str='letters') -
             return ''.join(parts)
         case 'colons':
             s = ':'.join(parts)
-            frac = round(duration - intdur, 2)
+            frac = round(duration - int(duration), 2)
             if frac:
                 s += str(frac)[1:]
             return s
