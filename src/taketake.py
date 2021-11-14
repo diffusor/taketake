@@ -2803,7 +2803,9 @@ def validate_args(parser: argparse.ArgumentParser, args) -> list[str]:
     return errors
 
 
-def process_args(argv=None):
+def process_args(argv: Optional[list[str]]=None) \
+        -> tuple[argparse.ArgumentParser, argparse.Namespace, list[str]]:
+
     parser = argparse.ArgumentParser(
             description=__doc__,
             formatter_class=argparse.RawTextHelpFormatter) #RawDescriptionHelpFormatter)
