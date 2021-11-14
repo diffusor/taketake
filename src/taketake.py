@@ -84,8 +84,6 @@ from dataclasses import dataclass, field, is_dataclass
 from typing import Any, List, Dict, Set, NamedTuple, Optional
 from collections.abc import Callable, Coroutine, Sequence, Iterable
 from pathlib import Path
-# Monkeypatch to allow Path += str,Path
-Path.__add__ = lambda self, rhs: Path(str(self) + str(rhs)) # type: ignore
 
 import speech_recognition
 from word2number import w2n
@@ -642,26 +640,26 @@ async def check_xdelta(xdelta_file: Path, expected_size: int, target_size: int):
             _stdout=asyncio.subprocess.PIPE,
             _stderr=asyncio.subprocess.PIPE)
 
-    try:
-        line_num = 0
-        lines_read = []
+    line_num = 0
+    lines_read = []
 
+    def fail(msg):
+        lines_joined = "".join(lines_read)
+        raise XdeltaMismatch(
+                f"Xdelta check failed - {msg}"
+                f"\n  Cmd {p.args}"
+                f"\n  Returncode {p.returncode}"
+                f"\n  At line {line_num} in output:"
+                f"\n{lines_joined}"
+            )
+
+    try:
         async def getline():
             nonlocal line_num
             line_num += 1
             line_bytes = await p.stdout.readline()
             lines_read.append(line_bytes.decode())
             return lines_read[-1].strip()
-
-        def fail(msg):
-            lines_joined = "".join(lines_read)
-            raise XdeltaMismatch(
-                    f"Xdelta check failed - {msg}"
-                    f"\n  Cmd {p.args}"
-                    f"\n  Returncode {p.returncode}"
-                    f"\n  At line {line_num} in output:"
-                    f"\n{lines_joined}"
-                )
 
         def expect(line_type, expect, got):
             if got != expect:
@@ -883,8 +881,8 @@ def find_duplicate_basenames(paths):
 
 def set_mtime(f, dt):
     """Update the timestamp of the given file f to the given datetime dt"""
-    seconds = dt.timestamp()
-    os.utime(f, (seconds,)*2)
+    seconds: int = dt.timestamp()
+    os.utime(f, (seconds, seconds))
 
 def get_fallback_timestamp(
         fpath:Path,
@@ -966,7 +964,7 @@ def parse_timestamp(s:str) -> Optional[datetime.datetime]:
 class ParsedTimestamp(NamedTuple):
     matchobj: re.Match # note: matchobj.start('timestamp') or .end('weekday')
     timestamp: datetime.datetime
-    weekday_correct: bool
+    weekday_correct: Optional[bool]
 
 def extract_timestamp_from_str(s:str) -> Optional[ParsedTimestamp]:
     """Finds and parses the timestamp from the given string.
@@ -2140,6 +2138,8 @@ async def prompt_for_filename(xinfo:TransferInfo):
         input="#33ff33 bold",
         ))
 
+    assert xinfo.fname_guess is not None
+    assert xinfo.audioinfo is not None
     session: PromptSession = PromptSession(key_bindings=bindings)
     with patch_stdout():
         xinfo.fname_prompted = Path(await session.prompt_async(HTML(
@@ -2220,6 +2220,7 @@ def derive_timestamp(worklist:list[TransferInfo], token:int,
     next = worklist[token + 1] if token < (len(worklist) - 1) else None
 
     assert current.timestamp == None
+    assert current.audioinfo is not None
 
     if current.audioinfo.parsed_timestamp:
         current.timestamp = current.audioinfo.parsed_timestamp
@@ -2401,7 +2402,7 @@ class Step:
                 xinfo.fname_prompted = Path(xinfo.fname_guess)
 
             if not xinfo.fname_prompted.suffix == ".flac":
-                xinfo.fname_prompted += ".flac"
+                xinfo.fname_prompted = Path(str(xinfo.fname_prompted) + ".flac")
 
             if act(f"Write prompted filename {xinfo.fname_prompted} to {prompted_fpath}"):
                 prompted_fpath.write_text(str(xinfo.fname_prompted))
