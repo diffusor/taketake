@@ -364,6 +364,8 @@ class ExtCmd(metaclass=ExtCmdListMeta):
 
         proc.args = args
         proc.exmsg = exmsg
+        # TODO - this is meaningless, since we haven't waited for the process
+        # to complete.
         proc.stdout_data = repr(proc.stdout)
         proc.stderr_data = repr(proc.stderr)
 
@@ -2759,6 +2761,7 @@ def validate_args(parser):
             tempwavdir = args.continue_from / wav.name
 
         if args.continue_from and tempwavdir.exists:
+            assert tempwavdir is not None
             srclink = tempwavdir / Config.source_wav_linkname
             if not tempwavdir.is_dir():
                 err("temp wavfile exists in progress dir",
