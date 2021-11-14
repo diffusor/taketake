@@ -1651,7 +1651,9 @@ class Stepper:
                                 f"{sorted(tokens_done - {None})}"
                                 f"{bad_str}")
 
-            if tokens_done:
+            # Emit all tokens that are ready across all queues
+            # TODO - add testing that we loop here before waiting again - this was an "if"
+            while tokens_done:
                 self.log(f"[[[ready tokens: {tokens_done}]]]")
                 token = tokens_done.pop()
                 if token == self.end and tokens_done:
@@ -1667,20 +1669,30 @@ class Stepper:
                     token = task.result()
                     q = tasks.pop(task)
                     q.task_done()
+
                     if token == self.end:
                         q.getter = None
                         q.done = True
                     else:
+                        # Set up non-finished queues for subsequent getting
+                        # the next time around.
                         q.getter = asyncio.create_task(q.get())
                         tasks[q.getter] = q
+
                     if token in q.pending:
                         raise Stepper.DuplicateTokenError(
                                 f"Duplicate token {token} from {qtype}-queue "
                                 f"{q.name} detected in Stepper({self.name})"
                                 f"\n  tokens still pending in {q.name}: "
                                 f"{sorted(q.pending - {None})}")
-                    q.pending.add(token)
-                    self.log(f"[[[got {token} <= {q}]]]")
+
+                    if self.is_token_canceled and self.is_token_canceled(token):
+                        self.log(f"[[[got canceled token {token}; expunging...]]]")
+                        for q in q_list:
+                            q.pending.remove(token)
+                    else:
+                        q.pending.add(token)
+                        self.log(f"[[[got {token} <= {q}]]]")
 
 
     async def pre_sync(self):
@@ -1713,11 +1725,15 @@ class Stepper:
         return self.value
 
 
-    async def put(self, token):
+    async def put(self, token: Hashable):
         """Put token into each send_to queue.
 
         If the token is the end token, put it in the sync_to queue.
         """
+        if self.is_token_canceled and self.is_token_canceled(token):
+            self.log(f"[put {token} => SQUASHED (token has been canceled)]")
+            return
+
         for q in self.send_to:
             await q.put(token)
         if self.send_to:
@@ -1731,7 +1747,7 @@ class Stepper:
 
 
     @contextmanager
-    def cancellable(self, token: Any) -> Generator:
+    def cancellable(self, token: Hashable) -> Generator:
         """Usage:
 
             with stepper.cancellable(token) as s:
@@ -1787,6 +1803,7 @@ class Stepper:
             self.log(f"[Executing step {self.value!r}]")
         return not done
 
+
     async def walk(self, coro, *args, **kwargs):
         """Repeatedly await the given coro using step().
 
@@ -1797,7 +1814,9 @@ class Stepper:
             * stepper: the stepper instance used for the walk
         """
         while await self.step():
-            await coro(*args, **kwargs, token=self.value, stepper=self)
+            with self.cancellable(token=self.value) as s:
+                s.skip_if_canceled()
+                await coro(*args, **kwargs, token=self.value, stepper=self)
 
 
 class Link(collections.namedtuple('Link', 'src dest')):
@@ -1829,10 +1848,19 @@ class StepNetwork:
             ("src", "sync"): "sync_from",
         }
 
-    def __init__(self, name, end=None):
+    def __init__(self, name: str, end: Hashable=None,
+            cancellation_exception_type: None | RuntimeError | tuple[RuntimeError, ...]=None,
+            is_token_canceled: None | Callable=None,
+            cancel_token: None | Callable=None,
+            ):
+
         self.name = name
         self.end = end
-        self.common_kwargs = {}
+        self.common_kwargs: dict[str, Any] = {}
+
+        self.cancellation_exception_type = cancellation_exception_type
+        self.is_token_canceled = is_token_canceled
+        self.cancel_token = cancel_token
 
         # Coroutine to Stepper instance maps
         self.tasks = {}
@@ -1924,7 +1952,11 @@ class StepNetwork:
         """
         self.seen_coroutines.add(coro)
 
-        stepper = Stepper(name=coro.__name__, end=self.end)
+        stepper = Stepper(name=coro.__name__, end=self.end,
+            cancellation_exception_type=self.cancellation_exception_type,
+            is_token_canceled=self.is_token_canceled,
+            cancel_token=self.cancel_token,
+            )
         stepper.args = args
         stepper.kwargs = kwargs
         coro._stepper = stepper # for testing
