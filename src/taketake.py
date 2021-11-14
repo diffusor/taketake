@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.10
 
 # TODO support transfering from flac files?
 
@@ -81,14 +81,16 @@ import types
 import ctypes
 import dataclasses
 from dataclasses import dataclass, field, is_dataclass
-from typing import Any, List, Dict, Set, NamedTuple, Optional, Union
+from typing import Any, List, Dict, Set, NamedTuple, Optional
 from collections.abc import Callable, Coroutine, Sequence, Iterable
 from pathlib import Path
-# Allow Path += str,Path
-Path.__add__ = lambda self, rhs: Path(str(self) + str(rhs))
+# Monkeypatch to allow Path += str,Path
+Path.__add__ = lambda self, rhs: Path(str(self) + str(rhs)) # type: ignore
 
 import speech_recognition
 from word2number import w2n
+
+# MyType: typing.TypeAlias=Classname (or "Classname" for forward reference)
 
 # TODO make Config a @dataclass
 class Config:
@@ -172,10 +174,10 @@ class TimeRange:
 
 @dataclass
 class AudioInfo:
-    duration_s:float = None
-    speech_range:TimeRange = None
-    recognized_speech:str = None # Was orig_speech
-    parsed_timestamp:datetime.datetime = None
+    duration_s: Optional[float] = None
+    speech_range: Optional[TimeRange] = None
+    recognized_speech: Optional[str] = None # Was orig_speech
+    parsed_timestamp: Optional[datetime.datetime] = None
     extra_speech:list[str] = field(default_factory=list)
 
 
@@ -199,13 +201,13 @@ class TransferInfo:
     source_link:Path
     instrument:str
 
-    flac_wavsize:int = None
-    fstat:os.stat_result = None
-    audioinfo:AudioInfo = None
-    fname_guess:str = None
-    fname_prompted:Path = None
-    timestamp:datetime.datetime = None
-    timestamp_guess_direction:str = None
+    flac_wavsize: Optional[int] = None
+    fstat: Optional[os.stat_result] = None
+    audioinfo: Optional[AudioInfo] = None
+    fname_guess: Optional[str] = None
+    fname_prompted: Optional[Path] = None
+    timestamp: Optional[datetime.datetime] = None
+    timestamp_guess_direction: Optional[str] = None
 
     failures: list[Exception] = field(default_factory=list)
 
@@ -622,7 +624,9 @@ async def check_xdelta(xdelta_file: Path, expected_size: int, target_size: int):
                 f"\n  Source filesize: {expected_size:13,}"
                 f"\n  Target filesize: {target_size:13,}")
 
-    expected_vcdiffs = {
+    # Track each required key,value pair.  When a given key,value pair is
+    # discovered, the parser sets the value to None so it can't match again.
+    expected_vcdiffs: dict[str, Optional[str]] = {
         "VCDIFF header indicator":      "VCD_APPHEADER",
         "VCDIFF copy window length":    str(expected_size),
         "VCDIFF copy window offset":    "0",
@@ -964,7 +968,7 @@ class ParsedTimestamp(NamedTuple):
     timestamp: datetime.datetime
     weekday_correct: bool
 
-def extract_timestamp_from_str(s:str) -> {ParsedTimestamp, None}:
+def extract_timestamp_from_str(s:str) -> Optional[ParsedTimestamp]:
     """Finds and parses the timestamp from the given string.
 
     Looks for timestamps of the form YYYYmmdd-HHMM(SS).
@@ -1043,7 +1047,7 @@ def find_likely_audio_span(fpath: Path, scan_to_s: float) -> TimeRange:
 # Speech recognition and parsing
 #============================================================================
 
-def process_speech(fpath: Path, speech_range: TimeRange) -> {str, None}:
+def process_speech(fpath: Path, speech_range: TimeRange) -> Optional[str]:
     """Uses the PocketSphinx speech recognizer to decode the spoken timestamp
     and any notes.
 
@@ -1415,6 +1419,7 @@ def extract_timestamp_from_audio(fpath:Path, audioinfo:AudioInfo) -> None:
 
     # Only scan the first bit of the file to avoid transfering a lot of data.
     # This means we can prompt the user for any corrections sooner.
+    assert audioinfo.duration_s is not None
     scan_duration = min(audioinfo.duration_s, Config.file_scan_duration_s)
 
     audioinfo.speech_range = find_likely_audio_span(fpath, scan_duration)
@@ -1425,7 +1430,7 @@ def extract_timestamp_from_audio(fpath:Path, audioinfo:AudioInfo) -> None:
     dbg(f"Speechinizer: {fpath.name} Done - {audioinfo}")
 
 
-def format_duration(duration: Union[float, datetime.timedelta], style:str='letters') -> str:
+def format_duration(duration: float | datetime.timedelta, style:str='letters') -> str:
     """Returns a string of the form XhYmZs given a duration in seconds.
 
     style is one of:
@@ -1439,14 +1444,14 @@ def format_duration(duration: Union[float, datetime.timedelta], style:str='lette
     if isinstance(duration, datetime.timedelta):
         duration = duration.total_seconds()
 
-    parts = []
-    if style == 'letters':
-        intdur = round(duration)     # now an int
-    elif style == 'colons':
-        intdur = int(duration)
-        frac = round(duration - intdur, 2)
-    else:
-        assert False, f"Invalid style '{style}', should be 'letters' or 'colons'"
+    parts: list[str] = []
+    match style:
+        case 'letters':
+            intdur = round(duration)     # now an int
+        case 'colons':
+            intdur = int(duration)
+        case _:
+            assert False, f"Invalid style '{style}', should be 'letters' or 'colons'"
 
     # The unit_map dict maps unit names to their multiple of the next unit
     # The final unit's multiple must be None.
@@ -1475,17 +1480,26 @@ def format_duration(duration: Union[float, datetime.timedelta], style:str='lette
                 parts.append(f"{value}")
 
     parts.reverse()
-    if style == 'letters':
-        return ''.join(parts)
-    elif style == 'colons': # pragma: no branch
-        s = ':'.join(parts)
-        if frac:
-            s += str(frac)[1:]
-        return s
+    match style:
+        case 'letters':
+            return ''.join(parts)
+        case 'colons':
+            s = ':'.join(parts)
+            frac = round(duration - intdur, 2)
+            if frac:
+                s += str(frac)[1:]
+            return s
+        case _:
+            assert False
 
 
 def format_dest_filename(xinfo:TransferInfo) -> str:
     """Returns an extensionless pathless filename string."""
+
+    assert xinfo.timestamp is not None
+    assert xinfo.audioinfo is not None
+    assert xinfo.audioinfo.duration_s is not None
+    assert xinfo.audioinfo.extra_speech is not None
 
     timestamp_str = xinfo.timestamp.strftime(Config.timestamp_fmt_with_seconds)
     duration_str = format_duration(xinfo.audioinfo.duration_s)
@@ -1547,7 +1561,7 @@ def make_queues(s:str) -> LinkQDict:
         setattr(qdict, qname, qdict[qname])
     return qdict
 
-def listify(arg) -> list:
+def listify(arg) -> Sequence:
     if arg is None:
         return []
     elif isinstance(arg, str) or isinstance(arg, bytes):
@@ -1574,8 +1588,13 @@ class Stepper:
     building a network of tasks with the same set of data flowing through
     each.
     """
-    def __init__(self, name=None, sync_from=None, pull_from=None,
-            send_to=None, sync_to=None, end=None):
+    def __init__(self, name=None, end=None,
+            sync_from=None, pull_from=None,
+            send_to=None, sync_to=None,
+            cancellation_exception_type: None | RuntimeError=None,
+            cancellation_checker: None | Callable=None,
+            cancellation_function=None,
+            ):
 
         self.name = name
         self.sync_from = listify(sync_from)
@@ -1866,7 +1885,7 @@ class StepNetwork:
             send_to=None, sync_to=None, **kwargs):
         """Add a task coroutine to the StepNetwork.
 
-        If the given coro is marked with the @StepNetwork.stepped decorator,
+        If the given coro is marked with the @stepped_task decorator,
         then it will be automatically stepped via Stepper.walk.
 
         The [sync/pull/send]_[to/_from] arguments specify a single
@@ -2005,10 +2024,10 @@ class StepNetwork:
 
         await asyncio.gather(*tasks)
 
-    def stepped(coro:Callable) -> Callable:
-        """Decorator to mark coro as stepped task."""
-        coro.is_stepped = True
-        return coro
+def stepped_task(coro:Callable) -> Callable:
+    """Decorator to mark coro as stepped task."""
+    coro.is_stepped = True # type: ignore
+    return coro
 
 
 #============================================================================
@@ -2120,7 +2139,7 @@ async def prompt_for_filename(xinfo:TransferInfo):
         input="#33ff33 bold",
         ))
 
-    session = PromptSession(key_bindings=bindings)
+    session: PromptSession = PromptSession(key_bindings=bindings)
     with patch_stdout():
         xinfo.fname_prompted = Path(await session.prompt_async(HTML(
                 f"<prompt>* Confirm file rename for</prompt> "
@@ -2349,7 +2368,7 @@ class Step:
 
         await stepper.put(None)
 
-    @StepNetwork.stepped
+    @stepped_task
     async def prompt(cmdargs, worklist, *, token, stepper):
         """The Prompter asks the user for corrections on the guesses from autoname.
         """
@@ -2395,7 +2414,7 @@ class Step:
         # Need to handle @ -? +? tag handling?  We already named the file at this point.
 
 
-    @StepNetwork.stepped
+    @stepped_task
     async def flacenc(cmdargs, worklist, *, token, stepper):
         """Meanwhile, the flac encoder copies the wav data while encoding it
         to the destination as a temporary file.
@@ -2426,7 +2445,7 @@ class Step:
             flush_fs_caches(xinfo.wav_abspath)
 
 
-    @StepNetwork.stepped
+    @stepped_task
     async def pargen(cmdargs, worklist, *, token, stepper):
         xinfo = worklist[token]
 
@@ -2462,7 +2481,7 @@ class Step:
             if act(f"Raise MissingPar2File exception: {e}"):
                 raise
 
-    @StepNetwork.stepped
+    @stepped_task
     async def xdelta(cmdargs, worklist, *, token, stepper):
         xinfo = worklist[token]
         xdelta_fpath = xinfo.wav_progress_dir / Config.xdelta_fname

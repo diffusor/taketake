@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.10
 #
 # TODO - test derive_timestamp
 # TODO - test get_fallback_timestamp
@@ -1318,7 +1318,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             await stepper.put("nomatch")
             await stepper.put(None)
 
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def sink(token, stepper): ...
 
         network = taketake.StepNetwork("net")
@@ -1399,13 +1399,13 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
                 runlist.append(f"src2:{e}")
             await stepper.put(None)
 
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def w1(token, stepper): update(stepper)
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def w2(token, stepper): update(stepper)
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def w3(token, stepper): update(stepper)
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def w4(token, stepper): update(stepper)
 
         async def f1(token, stepper): update(stepper)
@@ -1443,13 +1443,13 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
                 await stepper.put(e)
                 runlist.append(f"src:{e}")
             await stepper.put(None)
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def w1(token, stepper): update(stepper)
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def w2(token, stepper): update(stepper)
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def w3(token, stepper): update(stepper)
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def w4(token, stepper): update(stepper)
 
         network = taketake.StepNetwork("net")
@@ -1462,7 +1462,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
 
     async def test_add_step_with_no_source(self):
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def s(): pass
 
         network = taketake.StepNetwork("net")
@@ -1471,9 +1471,9 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             network.add(s)
 
     async def test_add_step_with_sync_but_no_source(self):
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def s(): pass
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def s2(): pass
         network = taketake.StepNetwork("net")
         with self.assertRaisesRegex(AssertionError,
@@ -1481,9 +1481,9 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             network.add(s, sync_from=s2)
 
     async def test_add_step_identical_sources(self):
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def s(): pass
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def s2(): pass
         network = taketake.StepNetwork("net")
         with self.assertRaisesRegex(AssertionError,
@@ -1492,9 +1492,9 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
     async def test_add_step_missing_source(self):
         async def p(): pass
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def s1(): pass
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def s2(): pass
 
         network = taketake.StepNetwork("net")
@@ -1505,9 +1505,9 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_missing_source(self):
         async def p(): pass
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def s1(): pass
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def s2(): pass
 
         network = taketake.StepNetwork("net")
@@ -1519,7 +1519,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_selfloop_src(self):
         async def p(): pass
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def s(): pass
         network = taketake.StepNetwork("net")
         network.add(p, send_to=s)
@@ -1529,11 +1529,11 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_cycle(self):
         async def p(): pass
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def s1(): pass
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def s2(): pass
-        @taketake.StepNetwork.stepped
+        @taketake.stepped_task
         async def s3(): pass
 
         network = taketake.StepNetwork("net")
