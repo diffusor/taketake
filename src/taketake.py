@@ -2428,7 +2428,7 @@ class Step:
 
         # Parse the timestamp out from the filename
         tsinfo = extract_timestamp_from_str(str(xinfo.fname_prompted))
-        if tsinfo.timestamp:
+        if tsinfo and tsinfo.timestamp:
             # Override the guessed timestamp
             xinfo.timestamp = tsinfo.timestamp
 
@@ -2536,7 +2536,7 @@ class Step:
     async def cleanup(cmdargs, worklist, *, stepper):
         failings = [x for x in worklist if x.failures]
         if failings:
-            print(f"Skipping cleanup due to {len(failures)} failures:")
+            print(f"Skipping cleanup due to {len(failings)} failed transfers:")
             for xinfo in failings:
                 print(f"  * {xinfo.token}. {xinfo.source_wav}: {len(xinfo.failures)} fail")
                 for f in xinfo.failures:
@@ -2669,7 +2669,8 @@ def validate_args(parser):
     if args.fallback_timestamp[-1] in "+-" \
             and (dt := parse_timestamp(args.fallback_timestamp[:-1])): # Omit trailing -+
         pto = extract_timestamp_from_str(args.fallback_timestamp)
-        assert pto
+        assert pto, f"parse_timestamp should already have ensured "\
+                    f"'{args.fallback_timestamp}' contains a timestamp!"
         if not pto.weekday_correct:
             err(f"Mismatched weekday in --fallback-timestamp: "
                 f"{args.fallback_timestamp}, expected {dt.strftime('%a')}")
@@ -2753,6 +2754,7 @@ def validate_args(parser):
 
     # Check wavs exist, or are in the progress_dirs
     for wav in args.wavs:
+        tempwavdir = None
         if args.continue_from:
             tempwavdir = args.continue_from / wav.name
 
