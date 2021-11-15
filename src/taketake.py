@@ -264,7 +264,7 @@ async def communicate(p: asyncio.subprocess.Process, *args, **kwargs) -> subproc
     stdout_data, stderr_data = await p.communicate(*args, **kwargs)
     assert p.returncode is not None # communicate ensures this
     return subprocess.CompletedProcess(
-            args=p.args, # type: ignore
+            args=p.args, # type: ignore - monkeypatched asyncio.subprocess.Process
             returncode=p.returncode,
             stdout=stdout_data.decode(),
             stderr=stderr_data.decode(),
@@ -336,9 +336,8 @@ class ExtCmd(metaclass=ExtCmdListMeta):
         proc = await asyncio.create_subprocess_exec(*args,
                 stdin=_stdin, stdout=_stdout, stderr=_stderr)
 
-        # Ignore this monkey-patching - asyncio.subprocess.Process should
-        # match the same interface as subprocess.Popen anyway.
-        proc.args = args # type: ignore
+        # Make asyncio's Process match the interface of subprocess.Popen
+        proc.args = args # type: ignore - monkeypatched asyncio.subprocess.Process
         return proc
 
 
@@ -1576,7 +1575,7 @@ class Stepper:
     def __init__(self, name=None, end='END',
             sync_from=None, pull_from=None,
             send_to=None, sync_to=None,
-            cancellation_exception_type: None | RuntimeError | tuple[RuntimeError, ...]=None,
+            cancellation_exception_type: None | type[RuntimeError] | tuple[type[RuntimeError], ...]=None,
             cancel_check_fn: None | Callable=None,
             cancel_token_fn: None | Callable=None,
             squash_canceled_tokens: bool=False,
@@ -1742,7 +1741,7 @@ class Stepper:
 
     def is_canceled(self, token: Hashable) -> bool:
         assert token is not None, f"{self}"
-        return self.cancel_check_fn \
+        return isinstance(self.cancel_check_fn, Callable) \
             and token != self.end \
             and self.cancel_check_fn(token)
 
@@ -1823,9 +1822,11 @@ class Stepper:
 
         try:
             yield Skipper
+
         except SkipExecution:
-            pass
-        except exceptions_to_catch as e: # type: ignore
+            self.log(f"[SKIPPED canceled token {token}]")
+
+        except exceptions_to_catch as e:
             # pyright thinks RuntimeError needs to be iterable here, but only
             # when passed through a variable?
             if self.cancel_token_fn:
@@ -1901,7 +1902,7 @@ class StepNetwork:
         }
 
     def __init__(self, name: str, end: Hashable='END',
-            cancellation_exception_type: None | RuntimeError | tuple[RuntimeError, ...]=None,
+            cancellation_exception_type: None | type[RuntimeError] | tuple[type[RuntimeError], ...]=None,
             cancel_check_fn: None | Callable=None,
             cancel_token_fn: None | Callable=None,
             squash_canceled_tokens: bool=False,
@@ -2140,7 +2141,7 @@ class StepNetwork:
 
 def stepped_task(coro:Callable) -> Callable:
     """Decorator to mark coro as stepped task."""
-    coro.is_stepped = True # type: ignore
+    coro.is_stepped = True
     return coro
 
 
