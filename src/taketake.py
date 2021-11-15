@@ -1599,7 +1599,7 @@ class Stepper:
         self.kwargs: Optional[dict] = None
 
     def log(self, *args, **kwargs):
-        dbg(f"Stepper<{self.name}> :", *args, depth=1, **kwargs)
+        dbg(f"Stepper<{self.name}:{self.value}> :", *args, depth=1, **kwargs)
 
     def fmtqueues(self, queues):
         return ", ".join(q.name for q in queues)
@@ -1686,7 +1686,9 @@ class Stepper:
                                 f"\n  tokens still pending in {q.name}: "
                                 f"{sorted(q.pending - {None})}")
 
-                    if self.is_token_canceled and self.is_token_canceled(token):
+                    if token != self.end \
+                            and self.is_token_canceled \
+                            and self.is_token_canceled(token):
                         self.log(f"[[[got canceled token {token}; expunging...]]]")
                         for q in q_list:
                             q.pending.remove(token)
@@ -1695,7 +1697,7 @@ class Stepper:
                         self.log(f"[[[got {token} <= {q}]]]")
 
 
-    async def pre_sync(self):
+    async def sync_end(self):
         """Wait for end on all sync_from Queues.
 
         raises Stepper.DesynchronizationError if the sync_from queues emit
@@ -1719,7 +1721,7 @@ class Stepper:
         Raises Stepper.DesynchronizationError if the pull_from queues don't
         all report matching tokens.
         """
-        await self.pre_sync()
+        await self.sync_end()
         self.value = await self._get_across(self.pull_from, 'token')
         self.log(f"[got {self.value} <= pull_from({self.fmtqueues(self.pull_from)})]")
         return self.value
@@ -1730,7 +1732,9 @@ class Stepper:
 
         If the token is the end token, put it in the sync_to queue.
         """
-        if self.is_token_canceled and self.is_token_canceled(token):
+        if token != self.end \
+                and self.is_token_canceled \
+                and self.is_token_canceled(token):
             self.log(f"[put {token} => SQUASHED (token has been canceled)]")
             return
 
@@ -1777,7 +1781,7 @@ class Stepper:
             # pyright thinks RuntimeError needs to be iterable here, but only
             # when passed through a variable?
             if self.cancel_token:
-                self.cancel_token(token, e)
+                self.cancel_token(token, e, self)
 
 
     async def step(self):
@@ -2571,9 +2575,8 @@ class Step:
                         wav_file=wav_fpath,
                         xdelta_file=xdelta_fpath)
             else:
-                xinfo.failures.append(
-                        XdeltaMismatch(f"Skipped, forcing no-cleanup for {xinfo.source_wav}"
-                            f"\n  {xinfo}"))
+                raise XdeltaMismatch(f"Skipped, forcing no-cleanup for {xinfo.source_wav}"
+                                     f"\n  {xinfo}")
 
         if xdelta_fpath.exists():
             # If no-act, if the xdelta exists, we check it.
@@ -2585,13 +2588,15 @@ class Step:
 
     @staticmethod
     async def cleanup(cmdargs, worklist, *, stepper):
+        await stepper.sync_end()
+        stepper.log(f"Cleaning up ...............................................")
         failings = [x for x in worklist if x.failures]
         if failings:
             print(f"Skipping cleanup due to {len(failings)} failed transfers:")
             for xinfo in failings:
                 print(f"  * {xinfo.token}. {xinfo.source_wav}: {len(xinfo.failures)} fail")
                 for f in xinfo.failures:
-                    print(f"      -> {f.splitlines[0]}")
+                    print(f"      -> {str(f).splitlines()[0]}")
             return
 
 
@@ -2603,7 +2608,19 @@ async def run_tasks(args):
     """Connect up the various tasks with queues and run them."""
     worklist = []
 
-    network = StepNetwork("wavflacer")
+    def is_canceled(token: int) -> bool:
+        return len(worklist[token].failures) > 0
+
+    def cancel(token: int, e: TaketakeRuntimeError, stepper: Stepper):
+        worklist[token].failures.append(e)
+        stepper.log(f"Canceling item due to {e}")
+
+
+    network = StepNetwork("wavflacer",
+            cancellation_exception_type=TaketakeRuntimeError,
+            is_token_canceled=is_canceled,
+            cancel_token=cancel,
+            )
     network.update_common_kwargs(cmdargs=args, worklist=worklist)
 
     network.add(Step.setup,
