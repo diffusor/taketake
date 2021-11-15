@@ -1579,6 +1579,7 @@ class Stepper:
             cancellation_exception_type: None | RuntimeError | tuple[RuntimeError, ...]=None,
             cancel_check_fn: None | Callable=None,
             cancel_token_fn: None | Callable=None,
+            squash_canceled_tokens: bool=False,
             ):
 
         self.name: str = name
@@ -1591,6 +1592,7 @@ class Stepper:
         self.cancellation_exception_type = cancellation_exception_type
         self.cancel_check_fn = cancel_check_fn
         self.cancel_token_fn = cancel_token_fn
+        self.squash_canceled_tokens = squash_canceled_tokens
 
         self.value: Hashable = None # last gotten value
         self.pre_sync_met: bool = False
@@ -1675,7 +1677,8 @@ class Stepper:
             if tokens_done:
                 self.log(f"[[[ready tokens: {tokens_done}]]]")
                 token = tokens_done.pop()
-                assert not self.is_canceled(token), f"{token=}, {self}"
+                if self.squash_canceled_tokens:
+                    assert not self.is_canceled(token), f"{token=}, {self}"
 
                 if token == self.end:
                     if tokens_done:
@@ -1720,7 +1723,7 @@ class Stepper:
                     q.pending.add(token)
                     self.log(f"[[[got {token} <= {q}]]]")
 
-                if len(done) > 0:
+                if self.squash_canceled_tokens and len(done) > 0:
                     self._expunge_canceled_tokens(q_list)
 
     def _expunge_canceled_tokens(self, q_list):
@@ -1779,7 +1782,7 @@ class Stepper:
 
         If the token is the end token, put it in the sync_to queue.
         """
-        if self.is_canceled(token):
+        if self.squash_canceled_tokens and self.is_canceled(token):
             self.log(f"[put {token} => SQUASHED (token has been canceled)]")
             return
 
@@ -1901,6 +1904,7 @@ class StepNetwork:
             cancellation_exception_type: None | RuntimeError | tuple[RuntimeError, ...]=None,
             cancel_check_fn: None | Callable=None,
             cancel_token_fn: None | Callable=None,
+            squash_canceled_tokens: bool=False,
             ):
 
         self.name = name
@@ -1910,6 +1914,7 @@ class StepNetwork:
         self.cancellation_exception_type = cancellation_exception_type
         self.cancel_check_fn = cancel_check_fn
         self.cancel_token_fn = cancel_token_fn
+        self.squash_canceled_tokens = squash_canceled_tokens
 
         # Coroutine to Stepper instance maps
         self.tasks = {}
@@ -2005,6 +2010,7 @@ class StepNetwork:
             cancellation_exception_type=self.cancellation_exception_type,
             cancel_check_fn=self.cancel_check_fn,
             cancel_token_fn=self.cancel_token_fn,
+            squash_canceled_tokens=self.squash_canceled_tokens,
             )
         stepper.args = args
         stepper.kwargs = kwargs
