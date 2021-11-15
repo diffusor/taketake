@@ -1192,13 +1192,13 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(d[n], asyncio.Queue)
             self.assertEqual(d[n].name, n)
 
-    async def test_pre_sync(self):
+    async def test_sync_end(self):
         d = taketake.make_queues("coms coms_sync")
         runlist = []
 
         async def finisher(stepper):
             runlist.append("finisher")
-            await stepper.pre_sync()
+            await stepper.sync_end()
             runlist.append("done")
 
         async def goer(stepper):
@@ -1228,6 +1228,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
                 ['finisher', 'goer', '-0', '+0', '-1', '+1', '-None', '+None', 'done'])
 
     async def test_join(self):
+        #taketake.Config.debug = True
         d = taketake.make_queues("q1 q2 q3")
         num_tokens = 3
 
@@ -1280,10 +1281,12 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(
                 taketake.Stepper.DesynchronizationError,
                 "Mismatching tokens between token-queues detected in Stepper\(joiner\).*"
-                "\n.*"
-                "\n  Tokens that matched across queues: \[\]"
-                "\n  Mismatches in q1: \['s0'\]"
-                "\n  Mismatches in q1: \['s1'\]"):
+                "\n *Got the end token None from all input queues."
+                "\n *Un-emitted tokens matching across all input queues: \[\]"
+                "\n *Extra tokens only in some queues: \['s0', 's1'\]"
+                "\n *Extra tokens in each input queue:"
+                "\n *q1\[any\]: \['s0'\]"
+                "\n *q2\[any\]: \['s1'\]"):
 
             await asyncio.gather(
                     joiner(taketake.Stepper(name="joiner", pull_from=d.values())),
@@ -1329,7 +1332,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaisesRegex(
                 taketake.Stepper.DuplicateTokenError,
-                "Duplicate token dup from token-queue dupsrc->sink detected"):
+                "Duplicate token dup from dupsrc->sink\[token\] queue detected"):
             await network.execute()
 
     async def test_send_post(self):
@@ -1354,7 +1357,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
         async def finisher(stepper):
             log("-f")
-            await asyncio.wait_for(stepper.pre_sync(), timeout=1)
+            await asyncio.wait_for(stepper.sync_end(), timeout=1)
             log("+f")
 
         async def sender(name, stepper):
@@ -2537,6 +2540,7 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture, FileAssert
     @unittest.skipUnless(dontskip, "Takes 1s per wav")
     async def test_empty_runtasks(self):
         taketake.Config.act = False
+        taketake.Config.debug = True
         dest = Path("dest_foo")
         dest.mkdir()
         src = Path("src")

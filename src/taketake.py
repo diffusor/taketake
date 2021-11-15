@@ -1515,9 +1515,11 @@ class StepperQueue(asyncio.Queue):
         self.done = False  # Set True when the end token is seen
         super().__init__()
 
+    def info(self):
+        return f"{self.name}[{self.qtype}]"
+
     def __str__(self):
-        return f"StepperQueue({self.qtype}:{self.name}, " \
-                f"src={self.src}, dest={self.dest})"
+        return f"StepperQueue({self.info()}, src={self.src}, dest={self.dest})"
 
 class LinkQDict(collections.UserDict):
     """named dictionary mapping coro->coro links to queues"""
@@ -1598,6 +1600,13 @@ class Stepper:
         self.args: Optional[Sequence[Any]] = None
         self.kwargs: Optional[dict] = None
 
+    def __str__(self):
+        q_info = []
+        for qname in 'sync_from pull_from send_to sync_to'.split():
+            q_info.append(f"{qname}=[{self.fmtqueues(getattr(self, qname))}]")
+        return f"Stepper({self.name}:{self.value}, " \
+                f"{', '.join(q_info)})"
+
     def log(self, *args, **kwargs):
         dbg(f"Stepper<{self.name}:{self.value}> :", *args, depth=1, **kwargs)
 
@@ -1631,37 +1640,53 @@ class Stepper:
             tokens_done = set.intersection(*[q.pending for q in q_list])
 
             if self.end in tokens_done:
-                # We do this check every time after the None is received
-                # across all queues, but that's probably fine.  It's not an
-                # expected case.
+                # We do this check every time after an end token is received
+                # across all queues, but that's probably fine perf-wise.
+                # It's not an expected case.
                 for q in q_list:
                     if tokens_done != q.pending:
-                        bad_queue_strs = []
-                        for badq in q_list:
-                            extra_tokens = badq.pending - tokens_done
-                            if extra_tokens:
-                                bad_queue_strs.append(
-                                        f"\n  Mismatches in {q.name}: {sorted(extra_tokens)}")
-                        bad_str = "".join(bad_queue_strs)
+                        # Check failed - gather mismatch info across all queues
+                        queue_tokens = []
+                        all_extras = set()
+                        for check_q in q_list:
+                            extra_tokens = check_q.pending - tokens_done
+                            queue_tokens.append(
+                                    f"\n      {check_q.info()}: {sorted(extra_tokens)}")
+                            all_extras |= extra_tokens
+                        queue_report_str = "".join(queue_tokens)
+
                         raise Stepper.DesynchronizationError(
                                 f"Mismatching tokens between {qtype}-queues detected in "
                                 f"Stepper({self.name})"
-                                f"\n  (Got an end token from all queues)"
-                                f"\n  Tokens that matched across queues: "
-                                f"{sorted(tokens_done - {None})}"
-                                f"{bad_str}")
+                                f"\n  Got the end token {self.end} from all input queues."
+                                f"\n  Un-emitted tokens matching across all input queues: "
+                                f"{sorted(tokens_done - {self.end})}"
+                                f"\n  Extra tokens only in some queues: {sorted(all_extras)}"
+                                f"\n  Extra tokens in each input queue:"
+                                f"{queue_report_str}")
 
-            # Emit all tokens that are ready across all queues
-            # TODO - add testing that we loop here before waiting again - this was an "if"
-            while tokens_done:
+            # If there is a token ready across all queues, emit it
+            if tokens_done:
                 self.log(f"[[[ready tokens: {tokens_done}]]]")
                 token = tokens_done.pop()
-                if token == self.end and tokens_done:
+                assert not self.is_canceled(token), f"{token=}, {self}"
+
+                if token == self.end:
+                    if tokens_done:
+                        # Don't emit the end-token before emiting all other tokens
                         token = tokens_done.pop()
+
+                # Clean out the token we're emiting across all input queues' pending lists
                 for q in q_list:
                     q.pending.remove(token)
+
+                # TODO - we need to emit tokens in the order they are received,
+                # Though this is probably already assured assuming all input
+                # queues operate in the same order, which is good enough.
                 return token
 
+            # Wait the get() tasks queued up on all non-finished input queues,
+            # pushing any tokens retrieved into the pending token lists for its input queue
             self.log(f"[[[waiting for {len(tasks)} tasks]]]")
             if tasks:
                 done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -1681,21 +1706,33 @@ class Stepper:
 
                     if token in q.pending:
                         raise Stepper.DuplicateTokenError(
-                                f"Duplicate token {token} from {qtype}-queue "
-                                f"{q.name} detected in Stepper({self.name})"
-                                f"\n  tokens still pending in {q.name}: "
-                                f"{sorted(q.pending - {None})}")
+                                f"Duplicate token {token} from {q.info()} "
+                                f"queue detected in Stepper({self.name})"
+                                f"\n  tokens still pending in {q.info()}: "
+                                f"{sorted(q.pending - {self.end})}")
 
-                    if token != self.end \
-                            and self.is_token_canceled \
-                            and self.is_token_canceled(token):
-                        self.log(f"[[[got canceled token {token}; expunging...]]]")
-                        for q in q_list:
-                            q.pending.remove(token)
-                    else:
-                        q.pending.add(token)
-                        self.log(f"[[[got {token} <= {q}]]]")
+                    q.pending.add(token)
+                    self.log(f"[[[got {token} <= {q}]]]")
 
+                if len(done) > 0:
+                    self._expunge_canceled_tokens(q_list)
+
+    def _expunge_canceled_tokens(self, q_list):
+        # Expunge canceled tokens.  Not super efficient, this...  TODO
+        pending = set().union(*(q.pending for q in q_list))
+        # TODO build a global persistent set of canceled tokens instead?
+        canceled = set(token for token in pending if self.is_canceled(token))
+        if len(canceled) > 0:
+            for q in q_list:
+                q_canceled = canceled & q.pending
+                if len(q_canceled) > 0:
+                    q.pending -= q_canceled
+                    self.log(f"[[[EXPUNGING canceled tokens {sorted(q_canceled)} "
+                             f"from {q.info()}, leaving "
+                             f"{sorted(q.pending - {self.end})}]]]")
+
+    def is_canceled(self, token: Hashable) -> bool:
+        return self.is_token_canceled and token != self.end and self.is_token_canceled(token)
 
     async def sync_end(self):
         """Wait for end on all sync_from Queues.
@@ -1732,9 +1769,7 @@ class Stepper:
 
         If the token is the end token, put it in the sync_to queue.
         """
-        if token != self.end \
-                and self.is_token_canceled \
-                and self.is_token_canceled(token):
+        if self.is_canceled(token):
             self.log(f"[put {token} => SQUASHED (token has been canceled)]")
             return
 
@@ -1765,7 +1800,7 @@ class Stepper:
         class Skipper:
             @staticmethod
             def skip_if_canceled():
-                if self.is_token_canceled and self.is_token_canceled(token):
+                if self.is_canceled(token):
                     raise SkipExecution
 
         if self.cancellation_exception_type:
@@ -1791,7 +1826,7 @@ class Stepper:
             while (i := await stepper.get()) is not None:
                 # Do task work
                 await stepper.put(i)
-            await stepper.put(None)
+            await stepper.put(stepper.end)
         """
         if self.value != self.end:
             # Put the value from the last iteration
@@ -2275,7 +2310,7 @@ def listen_to_wav(xinfo:TransferInfo, token:int) -> AudioInfo:
 def sec_to_td(sec: float) -> datetime.timedelta:
     return datetime.timedelta(seconds=sec)
 
-# TODO test this
+# TODO test this, make it handle canceled tokens
 def derive_timestamp(worklist:list[TransferInfo], token:int,
         fallback_timestamp_mode:str, fallback_timestamp_dt:datetime.datetime,
         delta:datetime.timedelta) -> None:
@@ -2406,9 +2441,11 @@ class Step:
 
         await stepper.put(None)
 
+
+    # TODO - canceled tokens break our reordering AND our fallback_timestamp!
     @staticmethod
     async def reorder(cmdargs, worklist, *, stepper):
-        """Buffer and emit tokens in a way that autoname
+        """Buffer and emit tokens in a way that autoname can handle
         """
         token_cursor = 0
         seen = set() # Set of all gotten tokens that are > token_cursor
@@ -2440,8 +2477,8 @@ class Step:
                 for i in range(token_cursor):
                     await stepper.put(i)
 
-
         await stepper.put(None)
+
 
     @staticmethod
     @stepped_task
