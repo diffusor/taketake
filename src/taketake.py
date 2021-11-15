@@ -1577,8 +1577,8 @@ class Stepper:
             sync_from=None, pull_from=None,
             send_to=None, sync_to=None,
             cancellation_exception_type: None | RuntimeError | tuple[RuntimeError, ...]=None,
-            is_token_canceled: None | Callable=None,
-            cancel_token: None | Callable=None,
+            cancel_check_fn: None | Callable=None,
+            cancel_token_fn: None | Callable=None,
             ):
 
         self.name: str = name
@@ -1589,8 +1589,8 @@ class Stepper:
         self.end: Hashable = end
 
         self.cancellation_exception_type = cancellation_exception_type
-        self.is_token_canceled = is_token_canceled
-        self.cancel_token = cancel_token
+        self.cancel_check_fn = cancel_check_fn
+        self.cancel_token_fn = cancel_token_fn
 
         self.value: Hashable = None # last gotten value
         self.pre_sync_met: bool = False
@@ -1739,9 +1739,9 @@ class Stepper:
 
     def is_canceled(self, token: Hashable) -> bool:
         assert token is not None, f"{self}"
-        return self.is_token_canceled \
+        return self.cancel_check_fn \
             and token != self.end \
-            and self.is_token_canceled(token)
+            and self.cancel_check_fn(token)
 
     async def sync_end(self):
         """Wait for end on all sync_from Queues.
@@ -1825,8 +1825,8 @@ class Stepper:
         except exceptions_to_catch as e: # type: ignore
             # pyright thinks RuntimeError needs to be iterable here, but only
             # when passed through a variable?
-            if self.cancel_token:
-                self.cancel_token(token, e, self)
+            if self.cancel_token_fn:
+                self.cancel_token_fn(token, e, self)
 
 
     async def step(self):
@@ -1899,8 +1899,8 @@ class StepNetwork:
 
     def __init__(self, name: str, end: Hashable='END',
             cancellation_exception_type: None | RuntimeError | tuple[RuntimeError, ...]=None,
-            is_token_canceled: None | Callable=None,
-            cancel_token: None | Callable=None,
+            cancel_check_fn: None | Callable=None,
+            cancel_token_fn: None | Callable=None,
             ):
 
         self.name = name
@@ -1908,8 +1908,8 @@ class StepNetwork:
         self.common_kwargs: dict[str, Any] = {}
 
         self.cancellation_exception_type = cancellation_exception_type
-        self.is_token_canceled = is_token_canceled
-        self.cancel_token = cancel_token
+        self.cancel_check_fn = cancel_check_fn
+        self.cancel_token_fn = cancel_token_fn
 
         # Coroutine to Stepper instance maps
         self.tasks = {}
@@ -2003,8 +2003,8 @@ class StepNetwork:
 
         stepper = Stepper(name=coro.__name__, end=self.end,
             cancellation_exception_type=self.cancellation_exception_type,
-            is_token_canceled=self.is_token_canceled,
-            cancel_token=self.cancel_token,
+            cancel_check_fn=self.cancel_check_fn,
+            cancel_token_fn=self.cancel_token_fn,
             )
         stepper.args = args
         stepper.kwargs = kwargs
@@ -2665,8 +2665,8 @@ async def run_tasks(args):
 
     network = StepNetwork("wavflacer",
             cancellation_exception_type=TaketakeRuntimeError,
-            is_token_canceled=is_canceled,
-            cancel_token=cancel,
+            cancel_check_fn=is_canceled,
+            cancel_token_fn=cancel,
             )
     network.update_common_kwargs(cmdargs=args, worklist=worklist)
 
