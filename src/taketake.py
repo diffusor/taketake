@@ -1573,7 +1573,7 @@ class Stepper:
     each.
     """
 
-    def __init__(self, name=None, end=None,
+    def __init__(self, name=None, end='END',
             sync_from=None, pull_from=None,
             send_to=None, sync_to=None,
             cancellation_exception_type: None | RuntimeError | tuple[RuntimeError, ...]=None,
@@ -1592,7 +1592,7 @@ class Stepper:
         self.is_token_canceled = is_token_canceled
         self.cancel_token = cancel_token
 
-        self.value: Hashable = end # last gotten value
+        self.value: Hashable = None # last gotten value
         self.pre_sync_met: bool = False
 
         # TODO - these get patched in from the StepNetwork, but maybe should
@@ -1614,12 +1614,18 @@ class Stepper:
         return ", ".join(q.name for q in queues)
 
     class QueueError(RuntimeError): ...
+    class GetError(QueueError): ...
     class PreSyncTokenError(QueueError): ...
     class DesynchronizationError(QueueError): ...
     class DuplicateTokenError(QueueError): ...
 
     async def _get_across(self, q_list: Sequence[StepperQueue], qtype:str) -> Any:
         """Gets the next token that matches across all the queues in the q_list"""
+        if self.value == self.end:
+            raise self.GetError(f"Step task '{self.name}' called get(), but it "
+                    f"already saw the end token {self.end}"
+                    f"\n    in _get_across({qtype}) in {self}")
+
         if not q_list:
             return None
         # Gather up all the queues' get() tasks into a dict mapping the task
@@ -1732,7 +1738,10 @@ class Stepper:
                              f"{sorted(q.pending - {self.end})}]]]")
 
     def is_canceled(self, token: Hashable) -> bool:
-        return self.is_token_canceled and token != self.end and self.is_token_canceled(token)
+        assert token is not None, f"{self}"
+        return self.is_token_canceled \
+            and token != self.end \
+            and self.is_token_canceled(token)
 
     async def sync_end(self):
         """Wait for end on all sync_from Queues.
@@ -1744,10 +1753,11 @@ class Stepper:
         token.
         """
         if not self.pre_sync_met:
-            while (token := await self._get_across(self.sync_from, 'sync')) != self.end:
-                raise Stepper.PreSyncTokenError(
-                        f"Got non-end token {token!r} from sync_from queues"
-                        f" {self.fmtqueues(self.sync_from)}")
+            if len(self.sync_from) > 0:
+                while (token := await self._get_across(self.sync_from, 'sync')) != self.end:
+                    raise Stepper.PreSyncTokenError(
+                            f"Got non-end token {token!r} from sync_from queues"
+                            f" [{self.fmtqueues(self.sync_from)}]\n    {self}")
             self.log(f"[<= sync_from({self.fmtqueues(self.sync_from)})]")
             self.pre_sync_met = True
 
@@ -1828,7 +1838,7 @@ class Stepper:
                 await stepper.put(i)
             await stepper.put(stepper.end)
         """
-        if self.value != self.end:
+        if self.value is not None and self.value != self.end:
             # Put the value from the last iteration
             await self.put(self.value)
 
@@ -1887,7 +1897,7 @@ class StepNetwork:
             ("src", "sync"): "sync_from",
         }
 
-    def __init__(self, name: str, end: Hashable=None,
+    def __init__(self, name: str, end: Hashable='END',
             cancellation_exception_type: None | RuntimeError | tuple[RuntimeError, ...]=None,
             is_token_canceled: None | Callable=None,
             cancel_token: None | Callable=None,
@@ -2414,7 +2424,7 @@ class Step:
             await stepper.put(len(worklist) - 1)
             await asyncio.sleep(0) # Let the work begin
 
-        await stepper.put(None)
+        await stepper.put(stepper.end)
 
 
     @staticmethod
@@ -2429,7 +2439,7 @@ class Step:
                 max_workers=Config.num_listener_tasks) as executor:
             future_to_token = {}
             # Submit the listeners to the executor
-            while (token := await stepper.get()) is not None:
+            while (token := await stepper.get()) is not stepper.end:
                 stepper.log(f"****** got {token} *******")
                 future_to_token[executor.submit(
                     listen_to_wav, worklist[token], token)] = token
@@ -2439,7 +2449,7 @@ class Step:
                 worklist[token].audioinfo = future.result()
                 await stepper.put(token)
 
-        await stepper.put(None)
+        await stepper.put(stepper.end)
 
 
     # TODO - canceled tokens break our reordering AND our fallback_timestamp!
@@ -2451,7 +2461,7 @@ class Step:
         seen = set() # Set of all gotten tokens that are > token_cursor
         found_first_timestamp = False
 
-        while (token := await stepper.get()) is not None:
+        while (token := await stepper.get()) is not stepper.end:
             seen.add(token)
             # If we now have a contiguous span from token_cursor through
             # token, emit them once we've found one with a timestamp.
@@ -2477,7 +2487,7 @@ class Step:
                 for i in range(token_cursor):
                     await stepper.put(i)
 
-        await stepper.put(None)
+        await stepper.put(stepper.end)
 
 
     @staticmethod

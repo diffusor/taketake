@@ -1212,7 +1212,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0)
             runlist.append(f"-None")
             await asyncio.sleep(0)
-            await stepper.put(None)
+            await stepper.put(stepper.end)
             await asyncio.sleep(0)
             runlist.append(f"+None")
             await asyncio.sleep(0)
@@ -1234,14 +1234,14 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
         async def joiner(stepper):
             r = ""
-            while (token := await stepper.get()) is not None:
+            while (token := await stepper.get()) is not stepper.end:
                 r += str(token)
             return r
 
         async def sender(name, stepper):
             for i in range(num_tokens):
                 await stepper.put(i)
-            await stepper.put(None)
+            await stepper.put(stepper.end)
             return i
 
         senders = []
@@ -1263,7 +1263,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
         async def joiner(stepper):
             log("-j")
-            while (token := await stepper.get()) is not None:
+            while (token := await stepper.get()) is not stepper.end:
                 log(f"j{token}")
             log("+j")
 
@@ -1271,7 +1271,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             log(f"-{name}")
             await stepper.put(name)
             log(f"1{name}")
-            await stepper.put(None)
+            await stepper.put(stepper.end)
             log(f"+{name}")
 
         senders = []
@@ -1281,7 +1281,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(
                 taketake.Stepper.DesynchronizationError,
                 "Mismatching tokens between token-queues detected in Stepper\(joiner\).*"
-                "\n *Got the end token None from all input queues."
+                "\n *Got the end token END from all input queues."
                 "\n *Un-emitted tokens matching across all input queues: \[\]"
                 "\n *Extra tokens only in some queues: \['s0', 's1'\]"
                 "\n *Extra tokens in each input queue:"
@@ -1308,19 +1308,19 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaisesRegex(
                 taketake.Stepper.PreSyncTokenError,
-                "Got non-end token 'dup' from sync_from queues badsrc->sink"):
+                "Got non-end token 'dup' from sync_from queues \[badsrc->sink\]"):
             await network.execute()
 
     async def test_queue_dup_token_error(self):
         async def dupsrc(stepper):
             await stepper.put("dup")
             await stepper.put("dup")
-            await stepper.put(None)
+            await stepper.put(stepper.end)
 
         async def consrc(stepper):
             await stepper.put("confound")
             await stepper.put("nomatch")
-            await stepper.put(None)
+            await stepper.put(stepper.end)
 
         @taketake.stepped_task
         async def sink(token, stepper): ...
@@ -1346,13 +1346,13 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             i = 0
             log("-j")
             stepper.log(f"** j{i} waiting for tokens**")
-            while (token := await stepper.get()) is not None:
+            while (token := await stepper.get()) is not stepper.end:
                 i += 1
                 log(f"j{i}")
                 stepper.log(f"** got token={token} : j{i} **")
                 self.assertEqual(token, i)
             log("jNone")
-            await stepper.put(None)
+            await stepper.put(stepper.end)
             log("+j")
 
         async def finisher(stepper):
@@ -1367,7 +1367,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.0005) # Allow the joiner to run
             await stepper.put(2)
             log(f"2{name}")
-            await stepper.put(None)
+            await stepper.put(stepper.end)
             log(f"+{name}")
 
         r = await asyncio.gather(
@@ -1395,13 +1395,13 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             for e in worklist:
                 await stepper.put(e)
                 runlist.append(f"src1:{e}")
-            await stepper.put(None)
+            await stepper.put(stepper.end)
 
         async def src2(stepper):
             for e in worklist:
                 await stepper.put(e)
                 runlist.append(f"src2:{e}")
-            await stepper.put(None)
+            await stepper.put(stepper.end)
 
         @taketake.stepped_task
         async def w1(token, stepper): update(stepper)
@@ -1446,7 +1446,7 @@ class Test1_stepper(unittest.IsolatedAsyncioTestCase):
             for e in worklist:
                 await stepper.put(e)
                 runlist.append(f"src:{e}")
-            await stepper.put(None)
+            await stepper.put(stepper.end)
         @taketake.stepped_task
         async def w1(token, stepper): update(stepper)
         @taketake.stepped_task
@@ -2611,10 +2611,11 @@ class DummyStepper:
             tokens=[]
         elif isinstance(tokens, int):
             tokens=list(range(tokens))
-            tokens.append(None)
+            tokens.append('DUMMY_END')
         self.tokens = list(reversed(tokens))
         self.output = []
         self.loglist = []
+        self.end = 'DUMMY_END'
 
     async def get(self):
         return self.tokens.pop()
@@ -2649,7 +2650,7 @@ class StepSetupBase(unittest.IsolatedAsyncioTestCase,
         self.next_token = 0
 
     def mk_xinfo(self, wpath, progress_dir, token=None):
-        """When token=None, supply an auto-incremented token."""
+        """When token='DUMMY_END', supply an auto-incremented token."""
         self.next_token += 1
         return taketake.TransferInfo(
                 token=self.next_token - 1,
@@ -2677,7 +2678,7 @@ class Test8_step_setup(StepSetupBase):
 
         with self.subTest(phase="check_stepper"):
             self.assertEqual(self.stepper.output,
-                    list(range(len(self.wavpaths))) + [None])
+                    list(range(len(self.wavpaths))) + ['DUMMY_END'])
 
         with self.subTest(phase="progress_dir"):
             if taketake.Config.act:
@@ -2754,7 +2755,7 @@ class Test8_step_listen(StepSetupBase):
                 self.assertDataclassesEqual(loaded_ai, ai_expect)
 
         self.assertEqual(len(self.stepper.output), self.num_wavs+1)
-        self.assertEqual(set(self.stepper.output), set(range(self.num_wavs)) | set([None]))
+        self.assertEqual(set(self.stepper.output), set(range(self.num_wavs)) | set(['DUMMY_END']))
 
     @unittest.skipUnless(dontskip, "Takes 4s for 12 wavs with 6 workers.")
     async def test_step_listen_recognize(self):
@@ -2827,7 +2828,7 @@ class Test8_step_reorder(unittest.IsolatedAsyncioTestCase,
                 cmdargs=self.cmdargs,
                 worklist=self.worklist,
                 stepper=self.stepper)
-        self.assertEqual(self.stepper.output, list(expected_order) + [None])
+        self.assertEqual(self.stepper.output, list(expected_order) + ['DUMMY_END'])
 
     async def test_step_reorder_empty_worklist(self):
         self.init_worklist()
