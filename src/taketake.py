@@ -2444,7 +2444,7 @@ class Step:
             done_processing_fpath = xinfo.wav_progress_dir / Config.done_processing_fname
             if done_processing_fpath.exists():
                 prompted_fpath = xinfo.wav_progress_dir / Config.provided_fname
-                xinfo.fname_prompted = prompted_fpath.read_text().strip()
+                xinfo.fname_prompted = Path(prompted_fpath.read_text().strip())
                 load_xinfo_timestamp_from_fname(xinfo)
 
                 stepper.log(f"{wav} already completed processing on a prior run, canceling")
@@ -2691,7 +2691,7 @@ class Step:
             else:
                 stepper.log(f"Source {xinfo.source_wav} alread deleted")
 
-            src_flacs_dirpath = xnifo.source_wav.parent / Config.src_flacs_dirname
+            src_flacs_dirpath = xinfo.source_wav.parent / Config.src_flacs_dirname
             if act(f"mkdir {src_flacs_dirpath}"):
                 src_flacs_dirpath.mkdir(exist_ok=True)
 
@@ -2726,12 +2726,12 @@ class Step:
                 ts = now.strftime(Config.timestamp_fmt_long)
                 wav_abspath = Path(os.path.abspath(xinfo.source_wav))
                 dest_abspath = Path(os.path.abspath(dest_flac_fpath))
-                transfer_log_msg = f"{ts} : {wav_abspath} -> {dest_abspath}\n"
+                msg = f"{ts} : {wav_abspath} -> {dest_abspath}\n"
                 for dirpath in xinfo.source_wav.parent, xinfo.dest_dir:
                     log_fpath = dirpath / Config.transfer_log_fname
-                    if act(f"append '{msg}' to {log_fpath}")
-                    with open(log_fpath, "a") as f:
-                        myfile.write(msg)
+                    if act(f"append '{msg}' to {log_fpath}"):
+                        with open(log_fpath, "a") as f:
+                            f.write(msg)
 
             elif flac_encoded_fpath.exists():
                 raise FileExists(f"Both {flac_encoded_fpath} and {dest_flac_fpath} exist!")
@@ -2765,12 +2765,12 @@ class Step:
                     xinfo.fname_prompted,
                     ):
                 fpath = xinfo.wav_progress_dir / f
-                if act(f"deleting {fpath}")
+                if act(f"deleting {fpath}"):
                     fpath.unlink()
 
             intr_glob = Config.flac_interrupted_fname_fmt.format('*')
             for fpath in xinfo.wav_progress_dir.glob(intr_glob):
-                if act(f"deleting {fpath}")
+                if act(f"deleting {fpath}"):
                     fpath.unlink()
 
             if act(f"rmdir {xinfo.wav_progress_dir}"):
