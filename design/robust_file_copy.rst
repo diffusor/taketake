@@ -65,6 +65,12 @@ there are no more items to process.
 
    e. [] Create ``.fstat.json`` if it doesn't exist
 
+   f. [.] Mark the TransferInfo as done_processing if ``.done_processing``
+      already exists in the wav progress dir.  This prevents taketake from
+      re-encoding the flac, reprompting for the filename, and generating par2
+      files again if the flow completed on a prior run and those files have
+      already been moved to their destinations.
+
 *Perform the following steps for each wav, assuming each non-src filename is
 relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory*
 
@@ -220,8 +226,11 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    ``All(xdelta),pargen => [cleanup]``
 
-   **Status of ``.taketake.$datestamp/$wavfilename``**::
+   a. Touch ``.done_processing"
 
+      **Status of ``.taketake.$datestamp/$wavfilename``**::
+
+        .done_processing
         .source.wav -> /absolute/path/to/source/audio001.wav
         .audioinfo.json
         .filename_guess
@@ -236,13 +245,13 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
    **Skip this task if any failures in any transfers were detected or if
    src modification is disabled**
 
-   a. Remove the source wav file::
+   b. Remove the source wav file::
 
        delete src/audio001.wav
 
    **copy-back**
 
-   b. Copy flac file and par2s back to src if they each don't already exist
+   c. Copy flac file and par2s back to src if they each don't already exist
       (use .in_progress copies)::
 
        mkdir src/flacs
@@ -253,21 +262,17 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
            $filename_provided.flac.vol0500+499.par2
         -> src/flacs
 
-   c. Decache the copied dest files
+   d. Decache the copied dest files
 
-   d. par2 verify the copied dest files
+   e. par2 verify the copied dest files
 
-   e. Move the final flac and par2 files into the dest directory::
+   f. Move the final flac and par2 files into the dest directory::
 
        mkdir dest/.par2
        move .encoded.flac dest/$filename_provided.flac
        ln -s ../$filename_provided.flac dest/.par2/$filename_provided.flac
        update_mtime src/flacs/$filename_provided.flac
        move $filename_provided.flac.*par2 dest/.par2
-
-   f. Remove the temporary dest directory contents except for the ``.source.wav`` symlink::
-
-       rm .taketake.$datestamp/$wavfilename/* (except .source.wav)
 
    g. Update the transfer log on src and dest::
 
@@ -277,7 +282,9 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    h. Remove top-level progress dir ``.taketake.$datestamp``::
 
-       rm .taketake.$datestamp/*/.source.wav
+       rm .taketake.$datestamp/*/{.done_processing,.source.wav,.audioinfo.json,
+            .filename_guess,.filename_provided,
+            .interrupted-abandoned.*.flac,$filename_provided.flac,.xdelta}
        rmdir .taketake.$datestamp/*
        rmdir .taketake.$datestamp
 

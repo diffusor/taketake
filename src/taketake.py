@@ -70,6 +70,7 @@ import concurrent.futures
 import time
 import sys
 import os
+import shutil
 import re
 import json
 import glob # TODO replace with Path.glob everywhere
@@ -114,6 +115,7 @@ class Config:
 
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
+    timestamp_fmt_long = "%Y-%m-%d %H:%M:%S %a"
     timestamp_re = re.compile(
             r'(?:^|\D)' # Ensure we don't grab the middle of a number
             r'(?P<fulltime>'
@@ -143,6 +145,9 @@ class Config:
     flac_encoded_fname = ".encoded.flac"
     xdelta_fname = ".xdelta"
     transfer_log_fname = "transfer.log"
+    src_flacs_dirname = "flacs"
+    dest_par2_dirname = ".par2"
+    done_processing_fname = ".done_processing"
 
 
 # Exceptions
@@ -155,6 +160,7 @@ class TimestampGrokError(TaketakeRuntimeError): ...
 class NoSuitableAudioSpan(TaketakeRuntimeError): ...
 class XdeltaMismatch(TaketakeRuntimeError): ...
 class FileFlushError(TaketakeRuntimeError): ...
+class FileExists(TaketakeRuntimeError): ...
 
 #============================================================================
 # Dataclasses
@@ -198,18 +204,19 @@ class TransferInfo:
     wav_progress_dir:Path
     instrument:str
 
-    flac_wavsize: Optional[int] = None
-    fstat: Optional[os.stat_result] = None
-    audioinfo: Optional[AudioInfo] = None
-    fname_guess: Optional[str] = None
-    fname_prompted: Optional[Path] = None
-    timestamp: Optional[datetime.datetime] = None
-    timestamp_guess_direction: Optional[str] = None
-
+    done_processing: bool = False  # TODO test this
     failures: list[Exception] = field(default_factory=list)
 
-    #flac_encode_fpath:Path = None
-    #par_fpaths:list[Path] = field(default_factory=list)
+    # Read from files on resume
+    audioinfo: Optional[AudioInfo] = None     # Config.audioinfo_fname
+    #fstat: Optional[os.stat_result] = None
+    fname_prompted: Optional[Path] = None     # Config.provided_fname
+    timestamp: Optional[datetime.datetime] = None  # from fname_prompted
+
+    # Used only between tasks that are skipped when done_processing
+    flac_wavsize: Optional[int] = None
+    fname_guess: Optional[str] = None
+    timestamp_guess_direction: Optional[str] = None
 
 
 #============================================================================
@@ -2200,7 +2207,7 @@ async def prompt_for_filename(xinfo:TransferInfo):
         tsinfo = extract_timestamp_from_str(text)
         strs = [f"<comment>{len(text)} chars</comment>"]
         if tsinfo and tsinfo.timestamp:
-            strs.append(f"Parsed {tsinfo.timestamp.strftime('%Y-%m-%d %H:%M:%S %a')}: ")
+            strs.append(f"Parsed {tsinfo.timestamp.strftime(Config.timestamp_fmt_long)}: ")
             age = datetime.datetime.now() - tsinfo.timestamp
             if age < datetime.timedelta(0):
                 strs.append("<style fg='ansired'>That's "
@@ -2386,6 +2393,14 @@ def derive_timestamp(worklist:list[TransferInfo], token:int,
                 current.timestamp_guess_direction = ""
 
 
+def load_xinfo_timestamp_from_fname(xinfo: TransferInfo):
+    # Parse the timestamp out from the filename
+    tsinfo = extract_timestamp_from_str(str(xinfo.fname_prompted))
+    if tsinfo and tsinfo.timestamp:
+        # Override the guessed timestamp
+        xinfo.timestamp = tsinfo.timestamp
+
+
 #===========================================================================
 # step coroutines for the StepNetwork
 #============================================================================
@@ -2425,6 +2440,15 @@ class Step:
 
             # TODO - pull the .fstat.json file if it exists, otherwise build
             # it and write it if act.  Fill in xinfo.fstat.
+
+            done_processing_fpath = xinfo.wav_progress_dir / Config.done_processing_fname
+            if done_processing_fpath.exists():
+                prompted_fpath = xinfo.wav_progress_dir / Config.provided_fname
+                xinfo.fname_prompted = prompted_fpath.read_text().strip()
+                load_xinfo_timestamp_from_fname(xinfo)
+
+                stepper.log(f"{wav} already completed processing on a prior run, canceling")
+                xinfo.done_processing = True
 
             worklist.append(xinfo)
             await stepper.put(len(worklist) - 1)
@@ -2534,11 +2558,7 @@ class Step:
             if act(f"Write prompted filename {xinfo.fname_prompted} to {prompted_fpath}"):
                 prompted_fpath.write_text(str(xinfo.fname_prompted))
 
-        # Parse the timestamp out from the filename
-        tsinfo = extract_timestamp_from_str(str(xinfo.fname_prompted))
-        if tsinfo and tsinfo.timestamp:
-            # Override the guessed timestamp
-            xinfo.timestamp = tsinfo.timestamp
+        load_xinfo_timestamp_from_fname(xinfo)
 
         # Need to handle @ -? +? tag handling?  We already named the file at this point.
 
@@ -2585,6 +2605,8 @@ class Step:
         if not final_fpath.is_symlink():
             if act(f"Symlink {final_fpath} -> {Config.flac_encoded_fname}"):
                 final_fpath.symlink_to(Config.flac_encoded_fname)
+            if act(f"Update timestamp of {flac_encoded_fpath}"):
+                set_mtime(flac_encoded_fpath, xinfo.timestamp)
 
         remaining_pars = 0
         truncated_pars = 0
@@ -2645,26 +2667,125 @@ class Step:
         stepper.log(f"Cleaning up ...............................................")
 
         # Check for failures, stop if any are found
-        failings = [x for x in worklist if x.failures]
-        if failings:
-            print(f"Skipping cleanup due to {len(failings)} failed transfers:")
-            for xinfo in failings:
+        failed_xinfos = [x for x in worklist if x.failures]
+        if failed_xinfos:
+            print(f"Skipping cleanup due to {len(failed_xinfos)} failed transfers:")
+            for xinfo in failed_xinfos:
                 print(f"  * {xinfo.token}. {xinfo.source_wav}: {len(xinfo.failures)} fail")
                 for f in xinfo.failures:
                     print(f"      -> {str(f).splitlines()[0]}")
             return
 
         for xinfo in worklist:
-            # a. delete source wav
+            # a. Touch .done_processing
+            if not xinfo.done_processing:
+                done_processing_fpath = xinfo.wav_progress_dir / Config.done_processing_fname
+                if act(f"touch {done_processing_fpath}"):
+                    done_processing_fpath.touch()
+
+            # b. delete source wav
             stepper.log(f"{xinfo.token}")
             if xinfo.source_wav.exists():
                 if act(f"Deleting {xinfo.source_wav}"):
                     xinfo.source_wav.unlink()
             else:
-                dbg(f"Source {xinfo.source_wav} alread deleted")
+                stepper.log(f"Source {xinfo.source_wav} alread deleted")
 
-            # b. copy back
+            src_flacs_dirpath = xnifo.source_wav.parent / Config.src_flacs_dirname
+            if act(f"mkdir {src_flacs_dirpath}"):
+                src_flacs_dirpath.mkdir(exist_ok=True)
 
+            for f in xinfo.wav_progress_dir.glob(f"{xinfo.fname_prompted}*"):
+                # c. copy back
+                if act(f"cp -a {f} {src_flacs_dirpath}"):
+                    shutil.copy2(f, src_flacs_dirpath)
+
+                # d. decache
+                copied_fpath = src_flacs_dirpath / f.name
+                if act(f"Flushing cache of {copied_fpath}"):
+                    flush_fs_caches(copied_fpath)
+
+            # e. par2 verify
+            if act(f"par2 check {src_flacs_dirpath / xinfo.fname_prompted}"):
+                await par2_verify(src_flacs_dirpath / xinfo.fname_prompted)
+
+            # f. move flac and .par2s to final location
+            dest_par2_dirpath = xinfo.dest_dir / Config.dest_par2_dirname
+            if act(f"mkdir {dest_par2_dirpath}"):
+                dest_par2_dirpath.mkdir(exist_ok=True)
+
+            flac_encoded_fpath = xinfo.wav_progress_dir / Config.flac_encoded_fname
+            dest_flac_fpath = xinfo.dest_dir / xinfo.fname_prompted
+            if not dest_flac_fpath.exists():
+                if act(f"mv {flac_encoded_fpath} {dest_flac_fpath}"):
+                    flac_encoded_fpath.rename(dest_flac_fpath)
+                    # TODO assert the mtime matches the xinfo.timestamp
+
+                # g. Log the flac to transfer.log in src and dest
+                now = datetime.datetime.now()
+                ts = now.strftime(Config.timestamp_fmt_long)
+                wav_abspath = Path(os.path.abspath(xinfo.source_wav))
+                dest_abspath = Path(os.path.abspath(dest_flac_fpath))
+                transfer_log_msg = f"{ts} : {wav_abspath} -> {dest_abspath}\n"
+                for dirpath in xinfo.source_wav.parent, xinfo.dest_dir:
+                    log_fpath = dirpath / Config.transfer_log_fname
+                    if act(f"append '{msg}' to {log_fpath}")
+                    with open(log_fpath, "a") as f:
+                        myfile.write(msg)
+
+            elif flac_encoded_fpath.exists():
+                raise FileExists(f"Both {flac_encoded_fpath} and {dest_flac_fpath} exist!")
+
+            # Move over the par2 files
+            par2_flac_fpath = dest_par2_dirpath / xinfo.fname_prompted # dest/.par2
+            flac_symlink_target = Path("..") / xinfo.fname_prompted
+            if par2_flac_fpath.exists():
+                stepper.log(f"par2 flac symlink {par2_flac_fpath} already created")
+            elif act(f"symlink par2 flac {par2_flac_fpath} -> {flac_symlink_target}"):
+                par2_flac_fpath.symlink_to(flac_symlink_target)
+
+            par2_pattern = f"{xinfo.fname_prompted}.vol*.par2"
+            for par2 in xinfo.wav_progress_dir.glob(par2_pattern):
+                dest_par2_fpath = dest_par2_dirpath / par2.name
+                if dest_par2_dirpath.exists():
+                    raise FileExists(f"Both {par2} and {dest_par2_fpath} exist!")
+                elif act(f"mv {par2} {dest_par2_fpath}"):
+                    par2.rename(dest_par2_fpath)
+
+
+        for xinfo in worklist:
+
+            for f in (
+                    Config.done_processing_fname,
+                    Config.source_wav_linkname,
+                    Config.audioinfo_fname,
+                    Config.guess_fname,
+                    Config.provided_fname,
+                    Config.xdelta_fname,
+                    xinfo.fname_prompted,
+                    ):
+                fpath = xinfo.wav_progress_dir / f
+                if act(f"deleting {fpath}")
+                    fpath.unlink()
+
+            intr_glob = Config.flac_interrupted_fname_fmt.format('*')
+            for fpath in xinfo.wav_progress_dir.glob(intr_glob):
+                if act(f"deleting {fpath}")
+                    fpath.unlink()
+
+            if act(f"rmdir {xinfo.wav_progress_dir}"):
+                xinfo.wav_progress_dir.rmdir()
+
+            if act(f"attempting rmdir {xinfo.wav_progress_dir.parent}"):
+                try:
+                    xinfo.wav_progress_dir.parent.rmdir()
+                except OSError:
+                    pass
+
+        instrument_fpath = worklist[0].source_wav.parent / Config.instrument_fname
+        instrument = worklist[0].instrument
+        if act(f"writing '{instrument}' to {instrument_fpath}"):
+            instrument_fpath.write_text(instrument)
 
 
 #============================================================================
@@ -2676,7 +2797,8 @@ async def run_tasks(args):
     worklist = []
 
     def is_canceled(token: int) -> bool:
-        return len(worklist[token].failures) > 0
+        xinfo = worklist[token]
+        return len(xinfo.failures) > 0 or xinfo.done_processing
 
     def cancel(token: int, e: TaketakeRuntimeError, stepper: Stepper):
         worklist[token].failures.append(e)
@@ -2893,7 +3015,7 @@ def validate_args(parser: argparse.ArgumentParser, args) -> list[str]:
         if args.continue_from:
             tempwavdir = args.continue_from / wav.name
 
-        if args.continue_from and tempwavdir.exists:
+        if args.continue_from and tempwavdir.exists():
             assert tempwavdir is not None
             srclink = tempwavdir / Config.source_wav_linkname
             if not tempwavdir.is_dir():
