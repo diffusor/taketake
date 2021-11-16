@@ -2699,8 +2699,6 @@ class Step:
                 # c. copy back
                 if act(f"cp -a {f} {src_flacs_dirpath}"):
                     shutil.copy2(f, src_flacs_dirpath)
-                    # TODO - this breaks on resume because the symlink doesn't
-                    # get removed
 
                 # d. decache
                 copied_fpath = src_flacs_dirpath / f.name
@@ -2719,6 +2717,10 @@ class Step:
             flac_encoded_fpath = xinfo.wav_progress_dir / Config.flac_encoded_fname
             dest_flac_fpath = xinfo.dest_dir / xinfo.fname_prompted
             if not dest_flac_fpath.exists():
+                prompted_flac_fpath = xinfo.wav_progress_dir / xinfo.fname_prompted
+                if act(f"deleting soon-to-be-broken symlink {prompted_flac_fpath}"):
+                    prompted_flac_fpath.unlink()
+
                 if act(f"mv {flac_encoded_fpath} {dest_flac_fpath}"):
                     flac_encoded_fpath.rename(dest_flac_fpath)
                     # TODO assert the mtime matches the xinfo.timestamp
@@ -2764,7 +2766,6 @@ class Step:
                     Config.guess_fname,
                     Config.provided_fname,
                     Config.xdelta_fname,
-                    xinfo.fname_prompted,
                     ):
                 fpath = xinfo.wav_progress_dir / f
                 if act(f"deleting {fpath}"):
