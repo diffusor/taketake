@@ -2676,6 +2676,10 @@ class Step:
                     print(f"      -> {str(f).splitlines()[0]}")
             return
 
+        if cmdargs.skip_cleanup:
+            print(f"Skipping cleanup of {cmdargs.continue_from} due to --skip-cleanup")
+            return
+
         for xinfo in worklist:
             # a. Touch .done_processing
             if not xinfo.done_processing:
@@ -2896,7 +2900,7 @@ def validate_args(parser: argparse.ArgumentParser, args) -> list[str]:
     If args.continue_from isn't set, sets it to the progress dir in dest if it
     exists.
 
-    Builds args.wavs from the remaining args.sources and the args.progress_dir.
+    Builds args.wavs from the remaining args.sources and the args.continue_from.
 
     Sets args.dest and check for consistency, including dir existance.
     Returns a list of errors encountered during parsing.
@@ -3134,11 +3138,22 @@ Valid choices are:
     arg('-S', '--skip-speech-to-text', action='store_true',
         help=f"Use the given --fallback-timestamp instead.")
 
-    arg('-k', '--keep-wavs', action='store_true',
-        help="Don't delete processed source wav files")
+    #arg('-k', '--keep-wavs', action='store_true',
+        #help="Don't delete processed source wav files")
 
-    arg('--skip-copyback', action='store_true',
-        help="Don't copy the encoded flacs back to their source wav dir")
+    #arg('--skip-copyback', action='store_true',
+        #help="Don't copy the encoded flacs back to their source wav dir")
+
+    arg('--skip-cleanup', action='store_true',
+        help="""Don't perform any cleanup actions.
+
+ * Don't remove the original src wavfile
+ * Don't copy the encoded flac or par2 files back to the src/flacs directory
+ * Leave the encoded flac and par2 files in the per-wav dest temp directories
+ * Don't remove the temp directories
+ * Don't write src/instrmnt.txt
+ * Don't update src,dest/transfer.log
+    """)
 
     arg('--skip-tests', action='store_true',
         help="""Do not run unit tests prior to starting the transfer.
