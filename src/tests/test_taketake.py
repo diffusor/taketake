@@ -1100,10 +1100,8 @@ class Test0_format_dest_filename(unittest.TestCase):
         xinfo = taketake.TransferInfo(
                 token=0,
                 source_wav=Path("wow.wav"),
-                wav_abspath=Path("foo/wow008.wav"),
                 dest_dir=Path("dest"),
                 wav_progress_dir=Path("dest/baz"),
-                source_link=Path(),
                 instrument="foobuzz",
                 audioinfo=taketake.AudioInfo(
                     duration_s=16391,
@@ -2655,11 +2653,8 @@ class StepSetupBase(unittest.IsolatedAsyncioTestCase,
         return taketake.TransferInfo(
                 token=self.next_token - 1,
                 source_wav=wpath,
-                wav_abspath=Path(os.path.abspath(wpath)),
                 dest_dir=self.destdir,
                 wav_progress_dir=progress_dir / wpath.name,
-                source_link=progress_dir / wpath.name
-                    / taketake.Config.source_wav_linkname,
                 instrument="foobaz",
             )
 
@@ -2700,11 +2695,13 @@ class Test8_step_setup(StepSetupBase):
                     self.assertNoFile(expected_xinfo.wav_progress_dir)
 
             with self.subTest(i=i, w=w, phase="source_link"):
+                source_link_fpath = expected_xinfo.wav_progress_dir \
+                        / taketake.Config.source_wav_linkname
+                wav_abspath = Path(os.path.abspath(expected_xinfo.source_wav))
                 if taketake.Config.act:
-                    self.assertSymlinkTo(expected_xinfo.source_link,
-                            expected_xinfo.wav_abspath)
+                    self.assertSymlinkTo(source_link_fpath, wav_abspath)
                 else:
-                    self.assertNoFile(expected_xinfo.source_link)
+                    self.assertNoFile(source_link_fpath)
 
     async def test_step_setup_act_no_progressdir(self):
         await self.do_step_setup_test()
@@ -2810,10 +2807,8 @@ class Test8_step_reorder(unittest.IsolatedAsyncioTestCase,
         self.worklist = [taketake.TransferInfo(
                 token=i,
                 source_wav=f"w{i}.wav",
-                wav_abspath=f"w{i}.wav",
                 dest_dir=Path(),
                 wav_progress_dir=Path(),
-                source_link=Path(),
                 audioinfo=taketake.AudioInfo(),
                 instrument="foobuzz",
                 )

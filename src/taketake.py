@@ -194,10 +194,8 @@ class TransferInfo:
     token:int  # ID
 
     source_wav:Path
-    wav_abspath:Path
     dest_dir:Path
     wav_progress_dir:Path
-    source_link:Path
     instrument:str
 
     flac_wavsize: Optional[int] = None
@@ -2409,20 +2407,21 @@ class Step:
             xinfo = TransferInfo(
                     token=token,
                     source_wav=wav,
-                    wav_abspath=Path(os.path.abspath(wav)),
                     dest_dir=cmdargs.dest,
                     wav_progress_dir=progress_dir / wav.name,
-                    source_link=progress_dir / wav.name / Config.source_wav_linkname,
                     instrument=cmdargs.instrument,
                 )
 
             # TODO - test cases where the wav dir or symlink doesn't exist
             if not xinfo.wav_progress_dir.exists():
-                if act(f"create progress dir for {wav.name}; symlink to {xinfo.wav_abspath}"):
+                if act(f"create progress dir for {wav.name}"):
                     xinfo.wav_progress_dir.mkdir()
-            if not xinfo.source_link.is_symlink():
-                if act(f"create symlink from {xinfo.source_link} to {xinfo.wav_abspath}"):
-                    xinfo.source_link.symlink_to(xinfo.wav_abspath)
+
+            source_link_fpath = xinfo.wav_progress_dir / Config.source_wav_linkname
+            if not source_link_fpath.is_symlink():
+                wav_abspath = Path(os.path.abspath(xinfo.source_wav))
+                if act(f"symlink {source_link_fpath} -> {wav_abspath}"):
+                    source_link_fpath.symlink_to(wav_abspath)
 
             # TODO - pull the .fstat.json file if it exists, otherwise build
             # it and write it if act.  Fill in xinfo.fstat.
@@ -2564,16 +2563,16 @@ class Step:
 
         flac_encoded_fpath = xinfo.wav_progress_dir / Config.flac_encoded_fname
         if not flac_encoded_fpath.exists():
-            if act(f"Flac encode {xinfo.wav_abspath} -> {flac_progress_fpath}"):
-                await flac_encode(xinfo.wav_abspath, flac_progress_fpath)
+            if act(f"Flac encode {xinfo.source_wav} -> {flac_progress_fpath}"):
+                await flac_encode(xinfo.source_wav, flac_progress_fpath)
             if act(f"Rename {flac_progress_fpath} -> {flac_encoded_fpath}"):
                 flac_progress_fpath.rename(flac_encoded_fpath)
 
         if flac_encoded_fpath.exists():
             xinfo.flac_wavsize = await get_flac_wav_size(flac_encoded_fpath)
 
-        if act(f"Flushing cache of {xinfo.wav_abspath}"):
-            flush_fs_caches(xinfo.wav_abspath)
+        if act(f"Flushing cache of {xinfo.source_wav}"):
+            flush_fs_caches(xinfo.source_wav)
 
 
     @staticmethod
@@ -2618,7 +2617,7 @@ class Step:
     async def xdelta(cmdargs, worklist, *, token, stepper):
         xinfo = worklist[token]
         xdelta_fpath = xinfo.wav_progress_dir / Config.xdelta_fname
-        wav_fpath = xinfo.wav_abspath
+        wav_fpath = xinfo.source_wav
         flac_encoded_fpath = xinfo.wav_progress_dir / Config.flac_encoded_fname
 
         if not xdelta_fpath.exists():
@@ -2644,6 +2643,8 @@ class Step:
     async def cleanup(cmdargs, worklist, *, stepper):
         await stepper.sync_end()
         stepper.log(f"Cleaning up ...............................................")
+
+        # Check for failures, stop if any are found
         failings = [x for x in worklist if x.failures]
         if failings:
             print(f"Skipping cleanup due to {len(failings)} failed transfers:")
@@ -2652,6 +2653,18 @@ class Step:
                 for f in xinfo.failures:
                     print(f"      -> {str(f).splitlines()[0]}")
             return
+
+        for xinfo in worklist:
+            # a. delete source wav
+            stepper.log(f"{xinfo.token}")
+            if xinfo.source_wav.exists():
+                if act(f"Deleting {xinfo.source_wav}"):
+                    xinfo.source_wav.unlink()
+            else:
+                dbg(f"Source {xinfo.source_wav} alread deleted")
+
+            # b. copy back
+
 
 
 #============================================================================

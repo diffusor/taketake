@@ -259,9 +259,11 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
    e. Move the final flac and par2 files into the dest directory::
 
+       mkdir dest/.par2
        move .encoded.flac dest/$filename_provided.flac
+       ln -s ../$filename_provided.flac dest/.par2/$filename_provided.flac
        update_mtime src/flacs/$filename_provided.flac
-       move $filename_provided.flac.*par2 dest/
+       move $filename_provided.flac.*par2 dest/.par2
 
    f. Remove the temporary dest directory contents except for the ``.source.wav`` symlink::
 
