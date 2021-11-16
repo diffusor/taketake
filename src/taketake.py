@@ -2699,6 +2699,8 @@ class Step:
                 # c. copy back
                 if act(f"cp -a {f} {src_flacs_dirpath}"):
                     shutil.copy2(f, src_flacs_dirpath)
+                    # TODO - this breaks on resume because the symlink doesn't
+                    # get removed
 
                 # d. decache
                 copied_fpath = src_flacs_dirpath / f.name
@@ -2747,7 +2749,7 @@ class Step:
             par2_pattern = f"{xinfo.fname_prompted}.vol*.par2"
             for par2 in xinfo.wav_progress_dir.glob(par2_pattern):
                 dest_par2_fpath = dest_par2_dirpath / par2.name
-                if dest_par2_dirpath.exists():
+                if dest_par2_fpath.exists():
                     raise FileExists(f"Both {par2} and {dest_par2_fpath} exist!")
                 elif act(f"mv {par2} {dest_par2_fpath}"):
                     par2.rename(dest_par2_fpath)
