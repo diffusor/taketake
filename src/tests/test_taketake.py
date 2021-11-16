@@ -1935,7 +1935,18 @@ class Test6_args(CmdArgsFixture):
                 "--continue was specified, but so were SOURCE_WAVs: foosrc",
                 "--continue was specified, but so was DEST_PATH: foodest",
                 "PROGRESS_DIR does not exist! Got: --continue nodir",
-                "temp wavfile exists in progress dir but is not a directory! nodir/foosrc")
+                "SOURCE_WAV not found: foosrc")
+
+    def test_progress_dir_wav_progress_dir_is_a_file(self):
+        progress = Path("progressdir")
+        progress.mkdir()
+        src = "foosrc"
+        src_fpath = progress / src
+        src_fpath.touch()
+        self.check_args(f"{src} foodest -c {progress}",
+                f"--continue was specified, but so were SOURCE_WAVs: {src}",
+                "--continue was specified, but so was DEST_PATH: foodest",
+                f"temp wavfile exists in progress dir but is not a directory! {src_fpath}")
 
     def test_duplicate_wavnames(self):
         self.check_args(f"a/1.wav b/1.wav c/2.wav c/2.wav dest",
