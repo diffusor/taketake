@@ -113,6 +113,13 @@ class Config:
     par2_num_vol_files = 2
     par2_redundancy_per_vol = 4
 
+    # Fincore check fails if
+    #   fincore_bytes * fincore_rate_vs_fs > file_size
+    # fincore runs at ~10ms/GB, SSDs do ~1GB/s -> 1% fincore rate.
+    # So we can expect at most about 1% of a file's blocks to be read back in
+    # after a flush before the fincore operation completes.
+    fincore_rate_vs_fs = 100  # fincore runs at 100x filesystem read speed
+
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
     timestamp_fmt_long = "%Y-%m-%d %H:%M:%S %a"
@@ -673,16 +680,32 @@ def flush_fs_caches(*files):
         if ret != 0:
             raise FileFlushError(f"fadvise failed with code {ret}"
                     f"\n  Could not flush file from cache: {f}")
-        if (num_cached_pages := fincore_num_pages(f)) > 0:
-            raise FileFlushError(f"fincore reported non-zero cached page count "
-                    f"{num_cached_pages} after fadvice DONTNEED flush"
-                    f"\n  Could not flush file from cache: {f}")
 
-def fincore_num_pages(fpath: Path):
+        bytes, pages, fsize, fname = fincore_num_pages(f)
+
+        if pages > 0:
+            print(f"*** WARNING *** flushing {f} left {pages} pages in fs caches!""")
+
+        if bytes * Config.fincore_rate_vs_fs > fsize:
+            raise FileFlushError(f"After flush, fincore reported more cached bytes "
+                    f"than could be read in the time to run fincore!"
+                    f"\n  {fname=}"
+                    f"\n  {pages} 4KB pages still cached"
+                    f"\n  {bytes} bytes still cached"
+                    f"\n  {fsize} total file size in bytes"
+                    f"\n  {bytes * Config.fincore_rate_vs_fs=}"
+                    f"\n  {Config.fincore_rate_vs_fs=}")
+
+def fincore_num_pages(fpath: Path) -> tuple[int, int, int, str]:
+    """On an Intel i7-4770, this takes about 6ms per gigabyte.
+
+    At 1GB/s SSD read rate, 6MB could be read in that time.
+    That's 1500 4KB pages.
+    """
     p = subprocess.run(("fincore", "-nb", str(fpath)),
             capture_output=True, text=True, check=True)
     bytes, pages, fsize, fname = p.stdout.split()
-    return int(pages)
+    return int(bytes), int(pages), int(fsize), fname
 
 def get_wavs_in(source, other_wavs=None):
     """Search the given source pathlib.Path instance for wav files.
@@ -2487,6 +2510,7 @@ class Step:
             await par2_verify(final_fpath)
         except MissingPar2File as e:
             if act(f"Raise MissingPar2File exception: {e}"):
+                # When in no-act, we expect the par2s to be missing
                 raise
 
     @staticmethod

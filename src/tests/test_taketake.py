@@ -2189,23 +2189,24 @@ class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
 
 
     def test_flush(self):
-        def get_cached_pages_for_flacfile():
-            p = subprocess.run(("fincore", "-nb", testflacpath),
-                    capture_output=True, text=True, check=True)
-            bytes, pages, fsize, fname = p.stdout.split()
-            return int(pages)
-
         with open(testflacpath, "rb") as f:
             data = f.read()
 
         self.assertGreater(len(data), 100000)
 
-        num_pages_cached_pre = get_cached_pages_for_flacfile()
-        self.assertGreater(num_pages_cached_pre, 1) # 67 4K pages
+        bytes, pages, fsize, fname = taketake.fincore_num_pages(testflacpath)
+        self.assertGreater(bytes, 1) # 67 4K pages
+        self.assertGreater(pages, 1) # 67 4K pages
+        self.assertEqual(fsize, flacsize)
+        self.assertEqual(fname, testflacpath)
+
         taketake.flush_fs_caches(testflacpath)
 
-        num_pages_cached_post = get_cached_pages_for_flacfile()
-        self.assertEqual(num_pages_cached_post, 0)
+        bytes, pages, fsize, fname = taketake.fincore_num_pages(testflacpath)
+        self.assertEqual(bytes, 0)
+        self.assertEqual(pages, 0)
+        self.assertEqual(fsize, flacsize)
+        self.assertEqual(fname, testflacpath)
 
 
 class CmpStringBase(TempdirFixture, FileAssertions):
