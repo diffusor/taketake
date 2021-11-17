@@ -28,7 +28,7 @@ External tools required:
 * par2
 * mpv (for auditioning files to check speech recognition)
 * ffmpeg
-* xdelta3
+* cmp
 """
 
 
@@ -143,7 +143,7 @@ class Config:
     flac_progress_fname = ".in_progress.flac"
     flac_interrupted_fname_fmt = ".interrupted-abandoned.{}.flac"
     flac_encoded_fname = ".encoded.flac"
-    xdelta_fname = ".xdelta"
+    cmp_results_fname = ".cmp_results"
     transfer_log_fname = "transfer.log"
     src_flacs_dirname = "flacs"
     dest_par2_dirname = ".par2"
@@ -158,7 +158,7 @@ class InvalidMediaFile(TaketakeRuntimeError): ...
 class MissingPar2File(TaketakeRuntimeError): ...
 class TimestampGrokError(TaketakeRuntimeError): ...
 class NoSuitableAudioSpan(TaketakeRuntimeError): ...
-class XdeltaMismatch(TaketakeRuntimeError): ...
+class CmpMismatch(TaketakeRuntimeError): ...
 class FileFlushError(TaketakeRuntimeError): ...
 class FileExists(TaketakeRuntimeError): ...
 
@@ -420,19 +420,11 @@ ExtCmd(
 )
 
 ExtCmd(
-    "xdelta_encode_from_source",
-    "Encode an xdelta file to stdout from the given source using the stdin as the dest.",
-    "xdelta3 -s {source}",
+    "cmp_from_stdin",
+    "Run cmp to compare source vs. stdin.",
+    "cmp {source} -",
 
-    source="Input source file to generate the xdelta from",
-)
-
-ExtCmd(
-    "xdelta_printdelta",
-    "Print the delta represented by the given xdelta file",
-    "xdelta3 printdelta {xdelta}",
-
-    xdelta="xdelta file to print the delta for",
+    source="Input source file to compare against stdin",
 )
 
 ExtCmd(
@@ -490,7 +482,7 @@ async def flac_decode(flac_encode_fpath, wav_fpath):
     #print(f"Decoded to {wav_fpath}:", proc.stderr_data.decode())
 
 
-async def get_flac_wav_size(flac_file):
+async def get_flac_wav_size(flac_fpath: Path) -> int:
     """Decode the flac file to count the number of bytes of the resulting wav.
 
     Does not actually write the wav to disk.
@@ -498,7 +490,7 @@ async def get_flac_wav_size(flac_file):
     read_into_wc, write_from_flac = os.pipe()
 
     p_flacdec = await ExtCmd.flac_decode_stdout.exec_async(
-            infile=flac_file,
+            infile=flac_fpath,
             _stdout=write_from_flac,
             _stderr=asyncio.subprocess.DEVNULL)
     os.close(write_from_flac)  # Allow flac to get a SIGPIPE if wc exits
@@ -522,209 +514,56 @@ async def get_flac_wav_size(flac_file):
     return int(cp_wc.stdout.strip())
 
 
-async def encode_xdelta_from_flac_to_wav(flac_file, wav_file, xdelta_file):
-    """Encode an xdelta_file from the wav_file to the decoded flac_file.
+async def cmp_flac_vs_wav(
+        flac_fpath: Path,
+        wav_fpath: Path,
+        cmp_results_fpath: Path,
+) -> bool:
+    """Run cmp on the decoded flac_fpath vs the given wav_fpath.
 
-    This results in an xdelta that can repair the wav decoded from the given
-    flac_file to match the contents read from the wav_file.
+    Write the stdout to cmp_results_fpath.
 
-    In the normal context of taketake copying files from a USB drive, the
-    wav_file will be being read a second time from USB.  This would result in
-    different contents than what was read the first time while encoding into
-    the flac file if there are data issues with the USB drive.
+    This results in an empty file if the comparison succeeds, but an
+    indication of the failure if the comparison finds a difference in the
+    data.
 
-    The xdelta_file represents the differences between the two separate read
-    attempts from the USB drive.
-
-    Runs flac -c -d flac_file | xdelta3 -s wav_file > xdelta_file
-
-    Return (flac, xdelta) Process functions"""
-    with open(xdelta_file, "wb") as f:
+    Returns True if there is no difference, False on failure.
+    """
+    with open(cmp_results_fpath, "wb") as f:
         # asyncio subprocess uses StreamReader for asyncio.subprocess.PIPE,
         # so we need to create a pipe manually to link up the subprocesses.
         # See https://stackoverflow.com/a/36666420
-        read_into_xdelta, write_from_flac = os.pipe()
+        read_into_cmp, write_from_flac = os.pipe()
 
         p_flacdec = await ExtCmd.flac_decode_stdout.exec_async(
-                infile=flac_file,
+                infile=flac_fpath,
                 _stdout=write_from_flac,
                 _stderr=asyncio.subprocess.DEVNULL)
-        os.close(write_from_flac)  # Allow flac to get a SIGPIPE if xdelta exits
+        os.close(write_from_flac)  # Allow flac to get a SIGPIPE if cmp exits
 
-        p_xdelta = await ExtCmd.xdelta_encode_from_source.exec_async(
-                source=wav_file,
-                _stdin=read_into_xdelta,
+        p_cmp = await ExtCmd.cmp_from_stdin.exec_async(
+                source=wav_fpath,
+                _stdin=read_into_cmp,
                 _stdout=f,
-                _stderr=asyncio.subprocess.DEVNULL)
-        os.close(read_into_xdelta)
+                _stderr=asyncio.subprocess.STDOUT)
+        os.close(read_into_cmp)
 
-        await p_xdelta.wait()
+        await p_cmp.wait()
         await p_flacdec.wait()
-        return p_flacdec, p_xdelta
+        return p_cmp.returncode == 0
 
 
-async def check_xdelta(xdelta_file: Path, expected_size: int, target_size: int):
-    """Raise XdeltaMismatch if the given xdelta file shows a difference.
-
-    Warning: if the target file size is smaller than the source, then xdelta
-    will simply encode a copy for the number of bytes in the target, and the
-    xdelta file will appear to express a match if that size is passed in as
-    the expected_size!  Thus it is imperative that both expected_size and
-    target_size be passed in for checking.
-
-    Note: this fails for matching files smaller than 18 bytes, where xdelta
-    just encodes the contents of the target file directly into the xdelta
-    file.
-
-    When the source and dest files match during an xdelta encode, the
-    resulting xdelta files will contain a single CPY_0 command instructing
-    xdelta to reconstruct the target file by simply copying the entirety of
-    the source file.
-
-    When they do not match, additional instructions are required to patch the
-    source file into the state of the target file.
-
-    Thus, this function reads only the header and first few instructions,
-    checking for the following parameters:
-
-        VCDIFF copy window length:    22670
-        VCDIFF copy window offset:    0
-        VCDIFF target window length:  22670
-        VCDIFF data section length:   0
-          Offset Code Type1 Size1 @Addr1 + Type2 Size2 @Addr2
-          000000 019  CPY_0 22670 @0     
-
-    If these conditions aren't met, the function raises an XdeltaMismatch
-    exception describing the point of discovery for the mismatch.
+def check_cmp_results_file(cmp_results_fpath: Path):
+    """Raise CmpMismatch if the given cmp_results_fpath file shows a difference.
     """
+    if not cmp_results_fpath.exists():
+        raise CmpMismatch(
+                f"cmp check failed - {cmp_results_fpath} does not exist!")
 
-    if expected_size != target_size:
-        raise XdeltaMismatch(
-                f"Xdelta check failed - Source and target file sizes don't match"
-                f"\n  xdelta3 file: {xdelta_file}"
-                f"\n  Source filesize: {expected_size:13,}"
-                f"\n  Target filesize: {target_size:13,}")
-
-    # Track each required key,value pair.  When a given key,value pair is
-    # discovered, the parser sets the value to None so it can't match again.
-    expected_vcdiffs: dict[str, Optional[str]] = {
-        "VCDIFF window number":        0,
-
-        # offset, code, type1, size1, addr1, *rest = instr.split()
-        # fail if *rest is not empty, code=019, type1=CPY_0, addr1=@0
-        # offset must equal the two offsets below
-        # size1 must equal the two window lengths below
-        # offset + size1 -> expected offset for next window, or total size
-
-        "VCDIFF window at offset":     0, # not present in window 0
-        "VCDIFF copy window offset":   0,
-
-        "VCDIFF copy window length":   0,
-        "VCDIFF target window length": 0,
-
-        "VCDIFF data section length":  0,
-    }
-
-    header_line = "Offset Code Type1 Size1 @Addr1 + Type2 Size2 @Addr2"
-    expected_instr = f"000000 019  CPY_0 {expected_size} @0".split()
-
-    p = await ExtCmd.xdelta_printdelta.exec_async(
-            xdelta=xdelta_file,
-            _stdout=asyncio.subprocess.PIPE,
-            _stderr=asyncio.subprocess.PIPE)
-
-    line_num = 0
-    lines_read = []
-
-    def fail(msg):
-        lines_joined = "".join(lines_read)
-        raise XdeltaMismatch(
-                f"Xdelta check failed - {msg}"
-                f"\n  Cmd {p.args}"
-                f"\n  Returncode {p.returncode}"
-                f"\n  At line {line_num} in output:"
-                f"\n{lines_joined}"
-            )
-
-    try:
-        async def getline():
-            nonlocal line_num
-            line_num += 1
-            line_bytes = await p.stdout.readline()
-            lines_read.append(line_bytes.decode())
-            return lines_read[-1].strip()
-
-        def expect(line_type, expect, got):
-            if got != expect:
-                fail(f"Mismatched {line_type}:"
-                        f"\n  Expected: '{expect}'"
-                        f"\n  Got:      '{got}'")
-
-        # Read line-by-line ensuring the file contains the expected headers
-        while line := await getline():
-            if ":" not in line:
-                break
-            key, value = line.split(":", maxsplit=1)
-            value = value.strip()
-            if key in expected_vcdiffs:
-                if expected_vcdiffs[key] == value:
-                    # Found this one, make sure we don't get a second one
-                    expected_vcdiffs[key] = None
-                else:
-                    fail(f"key '{key}' value '{value}' != '{expected_vcdiffs[key]}'")
-
-        # Ensure we found every expected VCDIFF line
-        for key, value in expected_vcdiffs.items():
-            if value is not None:
-                fail(f"Couldn't find key '{key}'")
-
-        # Still have a line out from the while loop
-        expect("header", header_line, line)
-        line = await getline()
-        expect("instruction", expected_instr, line.split())
-        line = await getline()
-        expect("empty", "", line)
-
-        if not p.stdout.at_eof():
-            fail(f"Expected EOF")
-
-        # Wait for the xdelta3 process to finish.  For a matching file
-        # (the expected case), this wait will succeed immediately, since we
-        # have already confirmed that the output stream is ended.
-        cp = await communicate(p)
-
-        if cp.stderr:
-            fail(f"Got non-empty stderr:\n{''.join(cp.stderr)}")
-        if cp.stdout:
-            fail(f"Got unexpected stdout after EOF detected:\n{''.join(cp.stdout)}")
-
-        if p.returncode != 0:
-            fail(f"Got unexpected {p.returncode=}")
-
-    except XdeltaMismatch:
-        raise
-
-    except:
-        fail(f"Got unexpected exception")
-
-    finally:
-        # terminate(): will sometimes emit a warning
-        # 'Unknown child process pid 266074, will report returncode 255'
-        # See https://bugs.python.org/issue43578
-        #
-        # As a workaround to minimize the number of times we see this in
-        # testing, add a 2ms wait to allow the process to complete on its own.
-        #
-        # Note using wait_for() results in event cancellation on timeout, and
-        # 'RuntimeError: Event loop is closed'
-        if p.returncode is None:
-            pwait_task = asyncio.create_task(p.wait())
-            done, pending = await asyncio.wait({pwait_task}, timeout=0.002)
-            if not done:
-                #print("forcing a terminate")
-                p.terminate()
-        # Wait even if we called terminate(), in order to clean up resources
-        await p.wait()
+    elif (contents := cmp_results_fpath.read_text().strip()) != "":
+        raise CmpMismatch(
+                f"cmp check failed - Source and target files don't match:"
+                f"\n  {contents}")
 
 
 def get_nearest_n(x, n):
@@ -2652,30 +2491,31 @@ class Step:
 
     @staticmethod
     @stepped_task
-    async def xdelta(cmdargs, worklist, *, token, stepper):
+    async def cmp(cmdargs, worklist, *, token, stepper):
         xinfo = worklist[token]
-        xdelta_fpath = xinfo.wav_progress_dir / Config.xdelta_fname
+        cmp_results_fpath = xinfo.wav_progress_dir / Config.cmp_results_fname
         wav_fpath = xinfo.source_wav
         flac_encoded_fpath = xinfo.wav_progress_dir / Config.flac_encoded_fname
 
-        if not xdelta_fpath.exists():
+        success = None
+        if not cmp_results_fpath.exists():
             if act(f"Verify {wav_fpath} ({xinfo.flac_wavsize} bytes "
                    f"decoded from {flac_encoded_fpath})"):
-                await encode_xdelta_from_flac_to_wav(
-                        flac_file=flac_encoded_fpath,
-                        wav_file=wav_fpath,
-                        xdelta_file=xdelta_fpath)
-            else:
-                raise XdeltaMismatch(f"Skipped, forcing no-cleanup for {xinfo.source_wav}"
-                                     f"\n  {xinfo}")
+                success = await cmp_flac_vs_wav(
+                        flac_fpath=flac_encoded_fpath,
+                        wav_fpath=wav_fpath,
+                        cmp_results_fpath=cmp_results_fpath)
+                if not success:
+                    check_cmp_results_file(cmp_results_fpath)
+                    raise CmpMismatch(
+                            f"cmp failed, but check_cmp_results_file did not detect it!"
+                            f"\n  {cmp_results_fpath}"
+                            f"\n  {xinfo.source_wav}")
 
-        if xdelta_fpath.exists():
-            # If no-act, if the xdelta exists, we check it.
-            # If act, we always check it
-            await check_xdelta(
-                    xdelta_file=xdelta_fpath,
-                    expected_size=xinfo.flac_wavsize,
-                    target_size=wav_fpath.stat().st_size)
+        if cmp_results_fpath.exists():
+            # When resuming, make sure .cmp_results represents a successful check
+            check_cmp_results_file(cmp_results_fpath)
+
 
     @staticmethod
     async def cleanup(cmdargs, worklist, *, stepper):
@@ -2785,7 +2625,7 @@ class Step:
                     Config.audioinfo_fname,
                     Config.guess_fname,
                     Config.provided_fname,
-                    Config.xdelta_fname,
+                    Config.cmp_results_fname,
                     ):
                 fpath = xinfo.wav_progress_dir / f
                 if act(f"deleting {fpath}"):
@@ -2849,20 +2689,20 @@ async def run_tasks(args):
 
     network.add(Step.flacenc,
             pull_from=Step.setup,
-            send_to=[Step.pargen, Step.xdelta],
-            sync_to=Step.xdelta)
+            send_to=[Step.pargen, Step.cmp],
+            sync_to=Step.cmp)
 
     network.add(Step.pargen,
             pull_from=[Step.prompt, Step.flacenc],
             sync_to=Step.cleanup)
 
-    network.add(Step.xdelta,
+    network.add(Step.cmp,
             sync_from=Step.flacenc,
             pull_from=Step.flacenc,
             sync_to=Step.cleanup)
 
     network.add(Step.cleanup,
-            sync_from=[Step.xdelta, Step.pargen])
+            sync_from=[Step.cmp, Step.pargen])
 
     await network.execute()
 

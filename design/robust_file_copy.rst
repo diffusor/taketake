@@ -211,20 +211,20 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        par2 verify $filename_provided.flac
 
-7. [-] **xdelta**: Xdelta check wavs
+7. [-] **cmp**: Verify wav vs. flac
 
-   ``All(flacenc) => [xdelta] => cleanup``
+   ``All(flacenc) => [cmp] => cleanup``
 
-   a. [-] Unless src wav no longer exists or if ``.xdelta`` exists, verify
+   a. [-] Unless src wav no longer exists or if ``.cmp_results`` exists, verify
       ``fincore src/.wav`` is 0 and diff the src and decoded wav files::
 
-       flac -c -d .encoded.flac | xdelta3 -s src/.wav > .xdelta
+       flac -c -d .encoded.flac | cmp src/.wav > .cmp_results
 
-   b. [-] Check ``.xdelta`` for actual diffs
+   b. [-] Check ``.cmp_results`` for actual diffs
 
 8. **cleanup**: Delete src wav and copy back flac
 
-   ``All(xdelta),pargen => [cleanup]``
+   ``All(cmp),pargen => [cleanup]``
 
    a. Touch ``.done_processing"
 
@@ -240,7 +240,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
         $filename_provided.flac -> .encoded.flac
         $filename_provided.flac.vol0000+500.par2
         $filename_provided.flac.vol0500+499.par2
-        .xdelta
+        .cmp_results
 
    **Skip this task if any failures in any transfers were detected or if
    src modification is disabled**
@@ -284,7 +284,7 @@ relative to the wav's* ``.taketake.$datestamp/$wavfilename`` *progress directory
 
        rm .taketake.$datestamp/*/{.done_processing,.source.wav,.audioinfo.json,
             .filename_guess,.filename_provided,
-            .interrupted-abandoned.*.flac,$filename_provided.flac,.xdelta}
+            .interrupted-abandoned.*.flac,$filename_provided.flac,.cmp_results}
        rmdir .taketake.$datestamp/*
        rmdir .taketake.$datestamp
 

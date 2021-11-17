@@ -32,7 +32,6 @@ import json
 
 keeptemp = int(os.environ.get("TEST_TAKETAKE_KEEPTEMP", "0"))
 dontskip = int(os.environ.get("TEST_TAKETAKE_DONTSKIP", "0"))
-min_xdelta_target_size_for_match = 19
 testflac = "testdata/audio.20210318-2020-Thu.timestamp-wrong-weekday-Monday.flac"
 testpath = os.path.dirname(os.path.abspath(__file__))
 testflacpath = os.path.join(testpath, testflac)
@@ -140,19 +139,13 @@ class FileAssertions():
         if p.returncode == 0:
             raise AssertionError(f"md5sum check unexpectedly passed:{self.poutfmt(p)}")
 
-    def gen_xdelta_from_flac(self, flac, wav, xdelta):
-        flac_p, xdelta_p = asyncio.run(
-                taketake.encode_xdelta_from_flac_to_wav(flac, wav, xdelta))
-        self.assertExitCode(flac_p, 0)
-        self.assertExitCode(xdelta_p, 0)
+    def gen_cmp_results_from_flac(self, flac: Path, wav: Path, cmp_results: Path) -> bool:
+        success = asyncio.run(
+                taketake.cmp_flac_vs_wav(flac, wav, cmp_results))
+        return success
 
-    def check_xdelta(self, xdelta_file, source_file, target_file):
-        """Pull out the size from the file itself and run the checker"""
-        if not isinstance(source_file, int):
-            source_file = os.path.getsize(source_file)
-        if not isinstance(target_file, int):
-            target_file = os.path.getsize(target_file)
-        asyncio.run(taketake.check_xdelta(xdelta_file, source_file, target_file))
+    def check_cmp_results(self, cmp_results_file: Path):
+        taketake.check_cmp_results_file(Path(cmp_results_file))
 
 
 class TempdirFixture(unittest.TestCase):
@@ -218,10 +211,11 @@ def make_md5sum_file(fname, md5file):
     with open(md5file, "w") as f:
         subprocess.run(("md5sum", "-b", fname), stdout=f, check=True, text=True)
 
-def encode_xdelta(source, input, xdelta):
-    assert xdelta.endswith(".xdelta")
-    subprocess.run(("xdelta3", "-f", "-s", source, input, xdelta),
-            capture_output=True, check=True, text=True)
+def gen_cmp_results_file(a: Path, b: Path, cmp_results_file: Path):
+    assert cmp_results_file.endswith(".cmp_results")
+    p = subprocess.run(("cmp", str(a), str(b)),
+            capture_output=True, check=False, text=True)
+    Path(cmp_results_file).write_text(p.stdout + p.stderr)
 
 def cleandir(d):
     if keeptemp:
@@ -2214,54 +2208,10 @@ class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
         self.assertEqual(num_pages_cached_post, 0)
 
 
-class Test7_check_xdelta_basic(TempdirFixture, FileAssertions):
-    runcount = 50
-
-    def test_xdelta_good(self):
-        xdelta = self.tempfile("test.xdelta")
-        encode_xdelta(testflacpath, testflacpath, xdelta)
-        self.check_xdelta(xdelta, flacsize, flacsize)
-        return xdelta
-
-    def test_xdelta_good_many_asyncio_loops(self):
-        xdelta = self.test_xdelta_good()
-        for x in range(self.runcount):
-            asyncio.run(taketake.check_xdelta(xdelta, flacsize, flacsize))
-
-    def test_xdelta_good_many_in_same_loop(self):
-        xdelta = self.test_xdelta_good()
-        async def check_xdelta_many():
-            for x in range(self.runcount):
-                await taketake.check_xdelta(xdelta, flacsize, flacsize)
-
-        asyncio.run(check_xdelta_many())
-
-    def test_xdelta_good_many_in_parallel(self):
-        xdelta = self.test_xdelta_good()
-        num_workers = 8
-        max_checks = self.runcount
-        num_checks = 0
-
-        async def xdelta_checker():
-            nonlocal num_checks
-            while num_checks < max_checks:
-                #await asyncio.sleep(0.0001)
-                await taketake.check_xdelta(xdelta, flacsize, flacsize)
-                num_checks += 1
-
-        async def check_xdelta_many():
-            tasks = []
-            for i in range(num_workers):
-                tasks.append(asyncio.create_task(xdelta_checker()))
-            await asyncio.gather(*tasks)
-
-        asyncio.run(check_xdelta_many())
-        self.assertGreaterEqual(num_checks, max_checks)
-
-class XdeltaStringBase(TempdirFixture, FileAssertions):
+class CmpStringBase(TempdirFixture, FileAssertions):
     teststrings = ["asnt3709oiznat2f-i.",
-            "x"*min_xdelta_target_size_for_match,
-            "\n"*min_xdelta_target_size_for_match,
+            "x"*10,
+            "\n"*10,
             "a"*40,
             "b"*80,
             "the quick red fox jumped over the lazy brown dog"]
@@ -2270,111 +2220,102 @@ class XdeltaStringBase(TempdirFixture, FileAssertions):
         with open(fname, "w") as f:
             f.write(s)
 
-    def assertXdeltaMatch(self, s):
-        xdelta = self.tempfile("test.xdelta")
+    def assertCmpMatch(self, s):
+        cmp_results = self.tempfile("test.cmp_results")
         source = self.tempfile("source")
         target = self.tempfile("target")
 
         self.set_file_contents(source, s)
         self.set_file_contents(target, s)
 
-        encode_xdelta(source, target, xdelta)
+        gen_cmp_results_file(source, target, cmp_results)
         try:
-            self.check_xdelta(xdelta, source, target)
-        except taketake.XdeltaMismatch:
-            raise AssertionError(f"Xdelta reports string mismatches itself: '{s}'")
+            self.check_cmp_results(cmp_results)
+        except taketake.CmpMismatch:
+            raise AssertionError(f"Cmp reports string mismatches itself: '{s}'")
 
-    def assertXdeltaMismatch(self, source_string, target_string):
-        xdelta = self.tempfile("test.xdelta")
+    def assertCmpMismatch(self, source_string, target_string):
+        cmp_results = self.tempfile("test.cmp_results")
         source = self.tempfile("source")
         target = self.tempfile("target")
 
         self.set_file_contents(source, source_string)
         self.set_file_contents(target, target_string)
 
-        encode_xdelta(source, target, xdelta)
-        with self.assertRaises(taketake.XdeltaMismatch):
-            self.check_xdelta(xdelta, source, target)
+        gen_cmp_results_file(source, target, cmp_results)
+        with self.assertRaises(taketake.CmpMismatch):
+            self.check_cmp_results(cmp_results)
 
 
-class Test7_check_xdelta_string_match(XdeltaStringBase):
-    def test_xdelta_fails_matching_short_strings(self):
-        """The xdelta file contains the entirety of the data if it's small enough.
+class Test7_check_cmp_string_match(CmpStringBase):
 
-        In that case, there's no good way to determine if the file actually
-        matches using just the xdelta.  It's best to compare the files
-        manually in that case.
-        """
-        for i in range(min_xdelta_target_size_for_match):
-            with self.subTest(i=i):
-                self.assertXdeltaMismatch("x"*i, "x"*i)
-
-    def test_xdelta_matching_strings(self):
+    def test_cmp_matching_strings(self):
         for s in self.teststrings:
             with self.subTest(s=s):
-                self.assertXdeltaMatch(s)
+                self.assertCmpMatch(s)
 
-class Test7_check_xdelta_string_mismatch(XdeltaStringBase):
-    def test_xdelta_mismatch_vs_empty(self):
+
+class Test7_check_cmp_string_mismatch(CmpStringBase):
+    def test_cmp_mismatch_vs_empty(self):
         for s in self.teststrings:
             with self.subTest(s=s, type="first_empty"):
-                self.assertXdeltaMismatch("", s)
+                self.assertCmpMismatch("", s)
             with self.subTest(s=s, type="second_empty"):
-                self.assertXdeltaMismatch(s, "")
+                self.assertCmpMismatch(s, "")
 
-    def test_xdelta_mismatch_vs_newline(self):
+    def test_cmp_mismatch_vs_newline(self):
         for s in self.teststrings:
             with self.subTest(s=s, type="first_is_newline"):
-                self.assertXdeltaMismatch("\n", s)
+                self.assertCmpMismatch("\n", s)
             with self.subTest(s=s, type="second_is_newline"):
-                self.assertXdeltaMismatch(s, "\n")
+                self.assertCmpMismatch(s, "\n")
 
-    def test_xdelta_mismatch_vs_reverse(self):
+    def test_cmp_mismatch_vs_reverse(self):
         for i, s1 in enumerate(self.teststrings):
             s2 = self.teststrings[-i-1]
             if s1 != s2:
                 with self.subTest(s1=s1, s2=s2):
-                    self.assertXdeltaMismatch(s1, s2)
+                    self.assertCmpMismatch(s1, s2)
 
-    def test_xdelta_mismatch_one_more_byte(self):
+    def test_cmp_mismatch_one_more_byte(self):
         for s in self.teststrings:
             with self.subTest(s=s, type="at_end_of_first"):
-                self.assertXdeltaMismatch(s+"_", s)
+                self.assertCmpMismatch(s+"_", s)
             with self.subTest(s=s, type="at_start_of_first"):
-                self.assertXdeltaMismatch("_"+s, s)
+                self.assertCmpMismatch("_"+s, s)
             with self.subTest(s=s, type="in_middle_of_first"):
                 idx = len(s) // 2
-                self.assertXdeltaMismatch(s[:idx]+"_"+s[idx:], s)
+                self.assertCmpMismatch(s[:idx]+"_"+s[idx:], s)
 
             with self.subTest(s=s, type="at_end_of_second"):
-                self.assertXdeltaMismatch(s, s+"_")
+                self.assertCmpMismatch(s, s+"_")
             with self.subTest(s=s, type="at_start_of_second"):
-                self.assertXdeltaMismatch(s, "_"+s)
+                self.assertCmpMismatch(s, "_"+s)
             with self.subTest(s=s, type="in_middle_of_second"):
                 idx = len(s) // 2
-                self.assertXdeltaMismatch(s, s[:idx]+"_"+s[idx:])
+                self.assertCmpMismatch(s, s[:idx]+"_"+s[idx:])
 
-    def test_xdelta_mismatch_one_changed_byte(self):
+    def test_cmp_mismatch_one_changed_byte(self):
         for s in self.teststrings:
             with self.subTest(s=s, type="at_end_of_first"):
-                self.assertXdeltaMismatch(s[:-1]+"_", s)
+                self.assertCmpMismatch(s[:-1]+"_", s)
             with self.subTest(s=s, type="at_start_of_first"):
-                self.assertXdeltaMismatch("_"+s[1:], s)
+                self.assertCmpMismatch("_"+s[1:], s)
             with self.subTest(s=s, type="in_middle_of_first"):
                 idx = len(s) // 2
-                self.assertXdeltaMismatch(s[:idx-1]+"_"+s[idx:], s)
+                self.assertCmpMismatch(s[:idx-1]+"_"+s[idx:], s)
 
             with self.subTest(s=s, type="at_end_of_second"):
-                self.assertXdeltaMismatch(s, s[:-1]+"_")
+                self.assertCmpMismatch(s, s[:-1]+"_")
             with self.subTest(s=s, type="at_start_of_second"):
-                self.assertXdeltaMismatch(s, "_"+s[1:])
+                self.assertCmpMismatch(s, "_"+s[1:])
             with self.subTest(s=s, type="in_middle_of_second"):
                 idx = len(s) // 2
-                self.assertXdeltaMismatch(s, s[:idx-1]+"_"+s[idx:])
+                self.assertCmpMismatch(s, s[:idx-1]+"_"+s[idx:])
 
 
-class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
-    """Test taketake's wrapping of xdelta3.
+class Test7_cmp_flac_decoder(unittest.TestCase, FileAssertions):
+    """Test taketake's wrapping of cmp.
 
     Each test corrupts a wav file in some way, then the tearDown checks it can
     be repaired.  Failures will be reported from tearDown() - this design
@@ -2425,33 +2366,16 @@ class Test7_xdelta_flac_decoder(unittest.TestCase, FileAssertions):
         # Verify the test's copy of the wav was indeed corrupted
         self.assertMd5FileBad(self.wavpath_test_md5)
 
-        # Generate an xdelta patch to the stdout of the decoded flac,
+        # Generate cmp results to the stdout of the decoded flac,
         # using the corrupted wav file as the source
-        wavpath_test_xdelta = self.wavpath_test + ".xdelta"
-        self.gen_xdelta_from_flac(testflacpath, self.wavpath_test, wavpath_test_xdelta)
+        wavpath_test_cmp_results = self.wavpath_test + ".cmp_results"
+        self.gen_cmp_results_from_flac(testflacpath,
+                self.wavpath_test, wavpath_test_cmp_results)
 
-        # Ensure that check_xdelta() discovers that the files mismatch
-        with self.assertRaises(taketake.XdeltaMismatch):
-            self.check_xdelta(wavpath_test_xdelta, self.wavsize, self.wavpath_test)
+        # Ensure that check_cmp_results discovers that the files mismatch
+        with self.assertRaises(taketake.CmpMismatch):
+            self.check_cmp_results(wavpath_test_cmp_results)
 
-        # Apply the xdelta patch to the corrupted wav file to generate a
-        # repaired wav file
-        wavpath_repaired = os.path.join(self.test_tempdir, "repaired.wav")
-        p = subprocess.run(("xdelta3", "-d", "-s", self.wavpath_test,
-            wavpath_test_xdelta, wavpath_repaired),
-            capture_output=True, text=True, check=True)
-        self.assertEqual(p.stdout, "")
-        self.assertIn(p.stderr, ["", "xdelta3: warning: output window 0 does not copy source\n"])
-
-        # Check that the repaired wav equals the src wav
-        self.assertEqualFiles(self.wavpath_src, wavpath_repaired)
-
-        # Generate a new xdelta for the repaired wav and check it matches
-        wavpath_repaired_xdelta = wavpath_repaired + ".xdelta"
-        self.gen_xdelta_from_flac(testflacpath, wavpath_repaired, wavpath_repaired_xdelta)
-        self.check_xdelta(wavpath_repaired_xdelta, self.wavsize, wavpath_repaired)
-
-        #subprocess.run(("xdelta3", "printdelta", wavpath_test_xdelta))
         cleandir(self.test_tempdir)
 
 
@@ -2570,6 +2494,7 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture, FileAssert
                 do_prompt=False,
                 fallback_timestamp_dt=None,
                 fallback_timestamp_mode="now",
+                skip_cleanup=False,
             ))
 
     @unittest.skipUnless(dontskip, "Takes 0.75s per subtest")
