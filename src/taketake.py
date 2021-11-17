@@ -393,11 +393,16 @@ ExtCmd(
 ExtCmd(
     "play_media_file",
     "Launch an interactive GUI app to play the media file starting at the first non-silence.",
-    "mpv --osd-level=3 --osd-duration=3600000 --osd-playing-msg='{file}\\n->{suggestion}' --player-operation-mode=pseudo-gui --loop=inf {file} --start={start}",
+    r"""mpv --osd-level=3 --osd-duration=3600000
+        --osd-playing-msg=\n{file}{sp}({fsize:,}B)\n\n{sp}Suggested:{sp}{suggested}\n{sp}Final:{sp}{provided}
+        --player-operation-mode=pseudo-gui --loop=inf {file} --start={start}""",
 
     file="The media file to play",
-    suggestion="The suggested filename for renaming",
+    suggested="The suggested filename for renaming",
+    provided="The user-provided filename",
     start="Starting time in seconds (float) for the first non-silence",
+    fsize="File size in bytes",
+    sp="Space separator character", # Work around limitations in ExtCmd parsing
 )
 
 ExtCmd(
@@ -2026,7 +2031,7 @@ def stepped_task(coro:Callable) -> Callable:
 # Filename prompting coroutines
 #============================================================================
 
-def play_media_file(xinfo:TransferInfo) -> subprocess.Popen:
+def play_media_file(xinfo:TransferInfo) -> subprocess.Popen | None:
     """Play the given file in a background process."""
 
     start = 0.0
@@ -2034,9 +2039,28 @@ def play_media_file(xinfo:TransferInfo) -> subprocess.Popen:
     if xinfo.audioinfo.speech_range is not None:
         start = xinfo.audioinfo.speech_range.start
 
-    args = ExtCmd.play_media_file.construct_args(file=xinfo.source_wav,
-                                                 start=start,
-                                                 suggestion=xinfo.fname_guess)
+    # Try the encoded flac file first to avoid unneeded USB transfer
+    fpath = xinfo.wav_progress_dir / Config.flac_encoded_fname
+
+    # Fall back to the wav file on the source drive
+    if not fpath.exists():
+        fpath = xinfo.source_wav
+
+    # Fall back to any in-progress flac if one exists from a prior run
+    if not fpath.exists():
+        fpath = xinfo.wav_progress_dir / Config.flac_progress_fname
+
+    if not fpath.exists():
+        print(f"Could not find a file to play: {xinfo.source_wav}")
+        return None
+
+    args = ExtCmd.play_media_file.construct_args(
+            file=fpath,
+            start=start,
+            suggested=xinfo.fname_guess,
+            provided=xinfo.fname_prompted,
+            fsize=os.path.getsize(fpath),
+            sp="  ")
 
     null = subprocess.DEVNULL
     return subprocess.Popen(args, stdin=null, stdout=null, stderr=null)
