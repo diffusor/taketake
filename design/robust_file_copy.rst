@@ -342,6 +342,28 @@ following properties should be verified::
     VCDIFF target window length:  22670
     000000 019  CPY_0 22670 @0
 
+Unfortunately, xdelta has a maximum window size that is too small, so larger
+files end up with several windows that need to be processed in series to add
+up all the window lengths and offsets.
+
+xdelta3 is largely abandoned
+::::::::::::::::::::::::::::
+
+Options:
+
+* Enhance xdelta parsing to handle multiple windows
+
+* Switch to HDiffPatch (https://github.com/sisong/HDiffPatch)
+
+  Would need to file an issue to add a feature to test if a an hzdiff
+  represents a null change.
+
+* Switch to hashes (md5 or sha1, etc) - does not allow recovery, 2nd copy lost
+
+* Re-encode a new flac and cmp it vs the first.  This does seem to work, but
+  is expensive in both time and disk space.
+
+
 Livetrak support
 ----------------
 Zoom multitrack recording format uses project directories.  To support copying
