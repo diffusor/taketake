@@ -143,7 +143,8 @@ class Config:
     illegal_filechar_re = re.compile(r'[?*/\:<>|"]')
     # Normal Linux pathname limit is 255, but eCryptfs limits it further to 143
     # See ntninja's comment on https://serverfault.com/a/9548
-    max_filename_len = 143
+    # We use 255, but have to subtract the max par2 size or par2 breaks
+    max_filename_len = 255 - len('.vol195+195.par2')
 
     interfile_timestamp_delta_s = 5 # Assumed minimum time between takes
 
@@ -2113,10 +2114,10 @@ async def prompt_for_filename(xinfo:TransferInfo):
         text = get_app().layout.get_buffer_by_name(DEFAULT_BUFFER).text
 
         tsinfo = extract_timestamp_from_str(text)
-        strs = [f"<comment>{len(text)} chars</comment>"]
+        strs = [f"<comment>{len(text)}c {len(text.encode())}B</comment>"]
 
-        if len(text) > Config.max_filename_len:
-            strs.append(f"<style fg='ansired'>&gt; {Config.max_filename_len} MAX</style>")
+        if len(text.encode()) > Config.max_filename_len:
+            strs.append(f"<style fg='ansired'>&gt; {Config.max_filename_len}B MAX</style>")
 
         if tsinfo and tsinfo.timestamp:
             strs.append(f"Parsed {tsinfo.timestamp.strftime(Config.timestamp_fmt_long)}: ")
@@ -2178,9 +2179,9 @@ async def prompt_for_filename(xinfo:TransferInfo):
                         message=f"Filename must not end with .",
                         cursor_position=len(text) - 1)
 
-            if len(text) > Config.max_filename_len:
+            if len(text.encode()) > Config.max_filename_len:
                 raise ValidationError(
-                        message=f"Filename too long - limit is {Config.max_filename_len}",
+                        message=f"Filename too long - limit is {Config.max_filename_len}B",
                         cursor_position=len(text) - 1)
 
             if (m := re.search(r'\s', text)):
