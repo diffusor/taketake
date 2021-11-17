@@ -1118,7 +1118,7 @@ class Test0_format_dest_filename(unittest.TestCase):
                 if expect:
                     expect += "."
                 self.assertEqual(taketake.format_dest_filename(xinfo),
-                        f"piano.19700101-000000-Thu{tag}.{expect}4h33m11s.foobuzz.wow")
+                        f"piano.19700101-000000-Thu{tag}.{expect}4h33m11s.foobuzz.wow.flac")
 
 class Test0_parse_timestamp(unittest.TestCase):
     def test_parse_timestamp(self):

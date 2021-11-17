@@ -137,6 +137,14 @@ class Config:
             r'(?:$|\W|_|\d)'
             , flags=re.IGNORECASE)
 
+    # Most of these are only illegal on Windows.
+    # Linux only forbids /
+    # par2 can't handle * or ? (But Windows can't either)
+    illegal_filechar_re = re.compile(r'[?*/\:<>|"]')
+    # Normal Linux pathname limit is 255, but eCryptfs limits it further to 143
+    # See ntninja's comment on https://serverfault.com/a/9548
+    max_filename_len = 143
+
     interfile_timestamp_delta_s = 5 # Assumed minimum time between takes
 
     prefix = "piano"
@@ -147,7 +155,7 @@ class Config:
     audioinfo_fname = ".audioinfo.json"
     guess_fname = ".filename_guess"
     provided_fname = ".filename_provided"
-    dest_fname_fmt = "{prefix}.{datestamp}{guess_tag}.{notes}{duration}.{instrument}.{orig_fname}"
+    dest_fname_fmt = "{prefix}.{datestamp}{guess_tag}.{notes}{duration}.{instrument}.{orig_fname}.flac"
     flac_progress_fname = ".in_progress.flac"
     flac_interrupted_fname_fmt = ".interrupted-abandoned.{}.flac"
     flac_encoded_fname = ".encoded.flac"
@@ -2098,12 +2106,18 @@ async def prompt_for_filename(xinfo:TransferInfo):
     from prompt_toolkit.application.current import get_app
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.enums import DEFAULT_BUFFER
+    from prompt_toolkit.validation import Validator, ValidationError
+    import html
 
     def toolbar():
         text = get_app().layout.get_buffer_by_name(DEFAULT_BUFFER).text
 
         tsinfo = extract_timestamp_from_str(text)
         strs = [f"<comment>{len(text)} chars</comment>"]
+
+        if len(text) > Config.max_filename_len:
+            strs.append(f"<style fg='ansired'>&gt; {Config.max_filename_len} MAX</style>")
+
         if tsinfo and tsinfo.timestamp:
             strs.append(f"Parsed {tsinfo.timestamp.strftime(Config.timestamp_fmt_long)}: ")
             age = datetime.datetime.now() - tsinfo.timestamp
@@ -2124,8 +2138,10 @@ async def prompt_for_filename(xinfo:TransferInfo):
                 delta = tsinfo.timestamp - ai_timestamp
                 strs.append(f"({short_timedelta(delta)} from guess)")
 
-        if '?' in text or '*' in text:
-            strs.append(f"<style fg='ansired'>ERROR:</style> '*' and '?' not allowed!")
+        if Config.illegal_filechar_re.search(text):
+            strs.append(
+                f"<style fg='ansired'>ERROR:</style> illegal chars in "
+                f"{html.escape(Config.illegal_filechar_re.pattern)} not allowed!")
 
         if not tsinfo:
             strs.append(f"<style fg='ansired'>WARNING:</style> No timestamp found!")
@@ -2149,6 +2165,33 @@ async def prompt_for_filename(xinfo:TransferInfo):
 
         return HTML("  ".join(strs))
 
+    class FilenameValidator(Validator):
+        def validate(self, document):
+            text = document.text
+            if (m := Config.illegal_filechar_re.search(text)):
+                raise ValidationError(
+                        message=f"Filename must not contain {m.re.pattern}",
+                        cursor_position=m.start())
+
+            if text.endswith('.'):
+                raise ValidationError(
+                        message=f"Filename must not end with .",
+                        cursor_position=len(text) - 1)
+
+            if len(text) > Config.max_filename_len:
+                raise ValidationError(
+                        message=f"Filename too long - limit is {Config.max_filename_len}",
+                        cursor_position=len(text) - 1)
+
+            if (m := re.search(r'\s', text)):
+                text = re.sub(r',\s+', ',', text)
+                text = re.sub(r'\s+', '-', text)
+                get_app().layout.get_buffer_by_name(DEFAULT_BUFFER).text = text
+                raise ValidationError(
+                        message="Filename should not contain spaces " \
+                            "(fixing; you must make an edit to confirm, e.g. del -)",
+                        cursor_position=m.start())
+
     bindings = KeyBindings()
     @bindings.add('escape', 'h')
     def _(event):
@@ -2164,22 +2207,28 @@ async def prompt_for_filename(xinfo:TransferInfo):
 
     assert xinfo.fname_guess is not None
     assert xinfo.audioinfo is not None
-    session: PromptSession = PromptSession(key_bindings=bindings)
+    session: PromptSession = PromptSession(
+            key_bindings=bindings,
+            style=style,
+            mouse_support=True,
+            bottom_toolbar=toolbar,
+            auto_suggest=AutoSuggestFromHistory(),
+            validator=FilenameValidator(),
+            validate_while_typing=False,
+            )
     with patch_stdout():
-        xinfo.fname_prompted = Path(await session.prompt_async(HTML(
+        xinfo.fname_prompted = Path(await session.prompt_async(
+            HTML(
                 f"<prompt>* Confirm file rename for</prompt> "
                     f"<fname>{xinfo.source_wav}</fname>"
                 f"\n<prompt>* Recognized speech:</prompt> "
                     f"'<comment>{xinfo.audioinfo.recognized_speech}</comment>' "
                     f"@<guess>{xinfo.audioinfo.speech_range}</guess> "
-                f"\n <guess>Guess</guess>: <fname>{xinfo.fname_guess}</fname> "
+                f"\n <guess>Guess</guess>: <fname>{html.escape(xinfo.fname_guess)}</fname> "
                 f"<comment>({len(xinfo.fname_guess)} chars)</comment>"
                 f"\n <input>Input&gt;</input> "),
-                style=style,
-                default=xinfo.fname_guess,
-                mouse_support=True,
-                bottom_toolbar=toolbar,
-                auto_suggest=AutoSuggestFromHistory()))
+            default=xinfo.fname_guess,
+            ))
 
 
 #===========================================================================
@@ -2589,7 +2638,12 @@ class Step:
                 if act(f"touch {done_processing_fpath}"):
                     done_processing_fpath.touch()
 
-            # b. delete source wav
+            flac_encoded_fpath = xinfo.wav_progress_dir / Config.flac_encoded_fname
+            dest_flac_fpath = xinfo.dest_dir / xinfo.fname_prompted
+            if flac_encoded_fpath.exists() and dest_flac_fpath.exists():
+                raise FileExists(f"Both {flac_encoded_fpath} and {dest_flac_fpath} exist!")
+
+            # b. delete source wav - only after checking if we can copy the flac
             stepper.log(f"{xinfo.token}")
             if xinfo.source_wav.exists():
                 if act(f"Deleting {xinfo.source_wav}"):
@@ -2620,8 +2674,6 @@ class Step:
             if act(f"mkdir {dest_par2_dirpath}"):
                 dest_par2_dirpath.mkdir(exist_ok=True)
 
-            flac_encoded_fpath = xinfo.wav_progress_dir / Config.flac_encoded_fname
-            dest_flac_fpath = xinfo.dest_dir / xinfo.fname_prompted
             if not dest_flac_fpath.exists():
                 prompted_flac_fpath = xinfo.wav_progress_dir / xinfo.fname_prompted
                 if act(f"deleting soon-to-be-broken symlink {prompted_flac_fpath}"):
@@ -2642,9 +2694,6 @@ class Step:
                     if act(f"append '{msg}' to {log_fpath}"):
                         with open(log_fpath, "a") as f:
                             f.write(msg)
-
-            elif flac_encoded_fpath.exists():
-                raise FileExists(f"Both {flac_encoded_fpath} and {dest_flac_fpath} exist!")
 
             # Move over the par2 files
             par2_flac_fpath = dest_par2_dirpath / xinfo.fname_prompted # dest/.par2
