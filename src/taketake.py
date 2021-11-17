@@ -608,11 +608,21 @@ async def check_xdelta(xdelta_file: Path, expected_size: int, target_size: int):
     # Track each required key,value pair.  When a given key,value pair is
     # discovered, the parser sets the value to None so it can't match again.
     expected_vcdiffs: dict[str, Optional[str]] = {
-        "VCDIFF header indicator":      "VCD_APPHEADER",
-        "VCDIFF copy window length":    str(expected_size),
-        "VCDIFF copy window offset":    "0",
-        "VCDIFF target window length":  str(expected_size),
-        "VCDIFF data section length":   "0",
+        "VCDIFF window number":        0,
+
+        # offset, code, type1, size1, addr1, *rest = instr.split()
+        # fail if *rest is not empty, code=019, type1=CPY_0, addr1=@0
+        # offset must equal the two offsets below
+        # size1 must equal the two window lengths below
+        # offset + size1 -> expected offset for next window, or total size
+
+        "VCDIFF window at offset":     0, # not present in window 0
+        "VCDIFF copy window offset":   0,
+
+        "VCDIFF copy window length":   0,
+        "VCDIFF target window length": 0,
+
+        "VCDIFF data section length":  0,
     }
 
     header_line = "Offset Code Type1 Size1 @Addr1 + Type2 Size2 @Addr2"

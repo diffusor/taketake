@@ -351,7 +351,14 @@ xdelta3 is largely abandoned
 
 Options:
 
-* Enhance xdelta parsing to handle multiple windows
+* Enhance xdelta parsing to handle multiple windows.
+
+  Likely this CANNOT work reliably. Problem is that if a window ends within 18
+  bytes of the end of the files, xdelta3 will probably encode those last 18
+  bytes as a literal expansion rather than a CPY, rendering it unable to
+  properly identify a correct match about .0002% of the time.
+
+  The whole xdelta3 verification system is bloated and complicated anyway.
 
 * Switch to HDiffPatch (https://github.com/sisong/HDiffPatch)
 
@@ -362,6 +369,9 @@ Options:
 
 * Re-encode a new flac and cmp it vs the first.  This does seem to work, but
   is expensive in both time and disk space.
+
+* Use cmp directly on the flac decode output vs. the src wav.
+  This is the simplest drop-in replacement - choosing cmp.
 
 
 Livetrak support
