@@ -123,6 +123,7 @@ class Config:
     timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
     timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
     timestamp_fmt_long = "%Y-%m-%d %H:%M:%S %a"
+    timestamp_fmt_us = "%Y-%m-%d %H:%M:%S.%f"
     timestamp_re = re.compile(
             r'(?:^|\D)' # Ensure we don't grab the middle of a number
             r'(?P<fulltime>'
@@ -221,7 +222,6 @@ class TransferInfo:
     timestamp: Optional[datetime.datetime] = None  # from fname_prompted
 
     # Used only between tasks that are skipped when done_processing
-    flac_wavsize: Optional[int] = None
     fname_guess: Optional[str] = None
     timestamp_guess_direction: Optional[str] = None
 
@@ -593,9 +593,10 @@ async def par2_create(f, num_par2_files:int, percent_redundancy:float):
     """
     filesize = os.path.getsize(f)
     num_par2_bytes = filesize * num_par2_files * percent_redundancy // 100
-    min_blocksize = num_par2_bytes // Config.par2_max_num_blocks
+    # Par2's blocksize is based on the total file size, not the resulting par2
+    min_blocksize = filesize // Config.par2_max_num_blocks
     blocksize = get_nearest_n(min_blocksize, Config.par2_base_blocksize)
-    #print(f"{filesize=}\n{num_par2_bytes=}\n{min_blocksize=}\n{blocksize=}")
+    dbg(f"  {filesize=}  {num_par2_bytes=}  {min_blocksize=}  {blocksize=}")
 
     proc = await ExtCmd.par2_create.run_fg(infile=f, blocksize=blocksize,
             redundance=percent_redundancy, numfiles=num_par2_files)
@@ -726,7 +727,7 @@ def get_wavs_in(source, other_wavs=None):
         other_wavs = set()
     for ext in Config.wav_extensions.split():
         other_wavs |= set(source.glob(f"*.{ext}"))
-    return sorted(other_wavs)
+    return list(sorted(other_wavs))
 
 def find_duplicate_basenames(paths):
     """Return a dict mapping duplicate basenames to their full paths."""
@@ -944,7 +945,7 @@ def reverse_hashify(s):
 class TimestampWords:
     days = reverse_hashify("sunday monday tuesday wednesday thursday friday saturday sunday")
     months = reverse_hashify("january february march april may june july august september october november december")
-    corrections = {"why": "one", "oh": "zero"}
+    corrections = {"why": "one", "oh": "zero", "to": "two"}
     ordinals = reverse_hashify(
         "zeroth    first    second  third      fourth     fifth     sixth     seventh     eighth     ninth "
         "tenth     eleventh twelfth thirteenth fourteenth fifteenth sixteenth seventeenth eighteenth nineteenth "
@@ -2354,6 +2355,7 @@ class Step:
 
             worklist.append(xinfo)
             await stepper.put(len(worklist) - 1)
+            stepper.log(f"Set up transfer for {xinfo.source_wav}")
             await asyncio.sleep(0) # Let the work begin
 
         await stepper.put(stepper.end)
@@ -2490,9 +2492,6 @@ class Step:
             if act(f"Rename {flac_progress_fpath} -> {flac_encoded_fpath}"):
                 flac_progress_fpath.rename(flac_encoded_fpath)
 
-        if flac_encoded_fpath.exists():
-            xinfo.flac_wavsize = await get_flac_wav_size(flac_encoded_fpath)
-
         if act(f"Flushing cache of {xinfo.source_wav}"):
             flush_fs_caches(xinfo.source_wav)
 
@@ -2547,8 +2546,7 @@ class Step:
 
         success = None
         if not cmp_results_fpath.exists():
-            if act(f"Verify {wav_fpath} ({xinfo.flac_wavsize} bytes "
-                   f"decoded from {flac_encoded_fpath})"):
+            if act(f"Verify {wav_fpath} decoded from {flac_encoded_fpath})"):
                 success = await cmp_flac_vs_wav(
                         flac_fpath=flac_encoded_fpath,
                         wav_fpath=wav_fpath,
@@ -2774,7 +2772,8 @@ def run_tests_in_subprocess():
 
 def dbg(*args, depth=0, **kwargs):
     if Config.debug:
-        print(f"*{Config.dbg_prog}* -",
+        now = datetime.datetime.now()
+        print(f"{now.strftime(Config.timestamp_fmt_us)} -",
               *args, f"({sys._getframe(1+depth).f_code.co_name})", **kwargs)
 
 
@@ -2958,7 +2957,7 @@ def validate_args(parser: argparse.ArgumentParser, args) -> list[str]:
     if args.continue_from:
         # map basename to fullname
         src_wavs_dict = {w.name: w for w in args.wavs}
-        for wav in args.continue_from.glob("*"):
+        for wav in sorted(args.continue_from.glob("*")):
             if wav.is_dir():
                 wavlink = wav / Config.source_wav_linkname
                 if wav.name not in src_wavs_dict:

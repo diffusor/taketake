@@ -929,6 +929,7 @@ class Test0_words_to_timestamp(unittest.TestCase):
         dt = datetime.datetime(*expect_ymdhms)
         self.check_impl(text, dt)
         self.check_impl(text + " with stuff", dt, "with stuff")
+        self.check_impl(text + " twenty", dt, "twenty")
 
     def test_contrived_examples(self):
         self.check("zero oh one wednesday may nineteenth twenty twenty one",
@@ -960,6 +961,9 @@ class Test0_words_to_timestamp(unittest.TestCase):
                    2021, 3, 21, 13, 0, 0)
         self.check("twenty one forty one thursday march twenty fifth two thousand twenty one",
                    2021, 3, 25, 21, 41, 0)
+        # The final "twenty" here was actually "twitch".  Looks like "to" broke things?
+        self.check("twenty to seventeen tuesday august seventeenth two thousand twenty one",
+                   2021, 8, 17, 22, 17, 0)
 
     def test_no_time(self):
         self.check("may first nineteen thirteen",
