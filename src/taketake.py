@@ -1501,7 +1501,7 @@ def format_dest_filename(xinfo:TransferInfo) -> str:
             notes=notes,
             duration=duration_str,
             instrument=xinfo.instrument,
-            orig_fname=xinfo.source_wav.stem)
+            orig_fname=xinfo.source_wav.stem.lower())
 
 
 #============================================================================
@@ -2204,6 +2204,7 @@ async def prompt_for_filename(xinfo:TransferInfo):
 
     def toolbar():
         text = get_app().layout.get_buffer_by_name(DEFAULT_BUFFER).text
+
         tsinfo = extract_timestamp_from_str(text)
         strs = [f"<comment>{len(text)} chars</comment>"]
         if tsinfo and tsinfo.timestamp:
@@ -2225,6 +2226,9 @@ async def prompt_for_filename(xinfo:TransferInfo):
             if ai_timestamp:
                 delta = tsinfo.timestamp - ai_timestamp
                 strs.append(f"({short_timedelta(delta)} from guess)")
+
+        if '?' in text or '*' in text:
+            strs.append(f"<style fg='ansired'>ERROR:</style> '*' and '?' not allowed!")
 
         if not tsinfo:
             strs.append(f"<style fg='ansired'>WARNING:</style> No timestamp found!")
@@ -2332,7 +2336,9 @@ def listen_to_wav(xinfo:TransferInfo, token:int) -> AudioInfo:
 def sec_to_td(sec: float) -> datetime.timedelta:
     return datetime.timedelta(seconds=sec)
 
-# TODO test this, make it handle canceled tokens
+
+# TODO test this
+# Note par2 fails when ? or * is in the filename.
 def derive_timestamp(worklist:list[TransferInfo], token:int,
         fallback_timestamp_mode:str, fallback_timestamp_dt:datetime.datetime,
         delta:datetime.timedelta) -> None:
@@ -2347,21 +2353,21 @@ def derive_timestamp(worklist:list[TransferInfo], token:int,
 
     if current.audioinfo.parsed_timestamp:
         current.timestamp = current.audioinfo.parsed_timestamp
-        current.timestamp_guess_direction = "@"
+        current.timestamp_guess_direction = '@'
 
     elif prev and prev.timestamp is not None:
         assert prev.audioinfo is not None
         assert prev.audioinfo.duration_s is not None
         current.timestamp = prev.timestamp \
                 + sec_to_td(prev.audioinfo.duration_s) + delta
-        current.timestamp_guess_direction = "+?"
+        current.timestamp_guess_direction = '+'
 
     elif next and next.timestamp is not None:
         assert next.audioinfo is not None
         assert current.audioinfo.duration_s is not None
         current.timestamp = next.timestamp \
                 - sec_to_td(current.audioinfo.duration_s) - delta
-        current.timestamp_guess_direction = "-?"
+        current.timestamp_guess_direction = '-'
 
     else:
         current.timestamp = get_fallback_timestamp(
@@ -2375,9 +2381,9 @@ def derive_timestamp(worklist:list[TransferInfo], token:int,
             assert token == 0
             if fallback_timestamp_mode == 'prior':
                 current.timestamp += delta
-                current.timestamp_guess_direction = "+?"
+                current.timestamp_guess_direction = '+'
             elif fallback_timestamp_mode.endswith('time'):
-                current.timestamp_guess_direction = "?"
+                current.timestamp_guess_direction = '~'
             else:
                 assert fallback_timestamp_mode == 'timestamp+'
                 current.timestamp_guess_direction = ""
@@ -2387,7 +2393,7 @@ def derive_timestamp(worklist:list[TransferInfo], token:int,
             assert token == len(worklist) - 1
             if fallback_timestamp_mode == 'now':
                 current.timestamp -= delta
-                current.timestamp_guess_direction = "-?"
+                current.timestamp_guess_direction = '-'
             else:
                 assert fallback_timestamp_mode == 'timestamp-'
                 current.timestamp_guess_direction = ""
@@ -2560,7 +2566,7 @@ class Step:
 
         load_xinfo_timestamp_from_fname(xinfo)
 
-        # Need to handle @ -? +? tag handling?  We already named the file at this point.
+        # Need to handle @ - + ~ tags?  We already named the file at this point.
 
 
     @staticmethod
