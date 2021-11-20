@@ -5,9 +5,9 @@ Taketake coordinates between to points in the lifetime of a recording:
 * Creation: [talkytime](https://diffusor.github.io/taketake/talkytime.html) facilitates audio tagging of your take
 * Download: [taketake.py](src/taketake.py) handles taking your take from your USB drive
 
-Many digital instruments don't maintain wallclock time.  On these instruments,
-every take you record results in a file on your USB drive that is timestamped
-with some meaningless date and time.
+Many digital instruments don't maintain wall-clock (real-world) time.  On
+these instruments, every take you record results in a file on your USB drive
+that is timestamped with some meaningless date and time.
 
 For example, some Casio digital pianos set the creation and last modified
 times to the same exact point in time.  Roland pianos seem to reset to a
@@ -25,7 +25,7 @@ Talkytime provides a text-to-speech timestamp in a webpage.  When you press the
 
 1. Insert a USB drive into your digital instrument
 2. Connect the audio output of your web-browsing device to your instrument
-   (either via cable, or, for non-iPhone/iPad, via bluetooth)
+   (either via cable, or, for non-iPhone/iPad, via Bluetooth)
 3. Configure your instrument to record to "audio"/"WAV" format
 4. Initiate recording
 5. Click the "Speak" button on [talkytime.html](https://diffusor.github.io/taketake/talkytime.html)
@@ -35,7 +35,7 @@ Talkytime provides a text-to-speech timestamp in a webpage.  When you press the
    download them as losslessly-compressed [FLAC](https://xiph.org/flac/) files
 
 Note that iPad/iPhone won't send speech synthesis to digital pianos over
-bluetooth, even if you configure the bluetooth setting as headphones instead of
+Bluetooth, even if you configure the Bluetooth setting as headphones instead of
 speakers.  You'll have to wire it up physically instead over an
 USB-C-to-analog-audio or Lightning adapter instead.  (Maybe this is because
 Apple considers speech synthesis an accessibility feature that you'd never want
