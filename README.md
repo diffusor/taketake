@@ -10,10 +10,10 @@ these instruments, every take you record results in a file on your USB drive
 that is timestamped with some meaningless date and time.
 
 For example, some Casio digital pianos set the creation and last modified
-times to the same exact point in time.  Roland pianos seem to reset to a
-baked-in date and time on power-on, and then run their clock like normal from
-there.  Relative times between takes in the same session are correct, but
-there is no correlation across power cycles.
+times of all `.wav` files they create to the same exact point in time.  Roland
+pianos seem to reset their clocks on power-on to a baked-in date and time, and
+then run their clock like normal from there.  Relative times between takes in
+the same session are correct, but there is no correlation across power cycles.
 
 # [talkytime](https://diffusor.github.io/taketake/talkytime.html)
 
