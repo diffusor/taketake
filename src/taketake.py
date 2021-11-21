@@ -248,11 +248,11 @@ class TaketakeJsonEncoder(json.JSONEncoder):
         elif isinstance(obj, Path):
             return dict(__Path__=True, path=str(obj))
         elif isinstance(obj, datetime.datetime):
-            # NOTE: does not dump timezone info WARNING TODO FIXME
             d = dict(__datetime__=True, timestamp=obj.timestamp())
             if obj.tzinfo is not None:
-                d['tzoffset']=obj.tzinfo.utcoffset(None).total_seconds()
-                d['tzname']=obj.tzinfo.tzname(None)
+                # utcoffset() returns non-None when tzinfo is non-None
+                d['tzoffset']=obj.utcoffset().total_seconds() # type: ignore
+                d['tzname']=obj.tzname()
             return d
         elif isinstance(obj, datetime.timedelta):
             return dict(__timedelta_=True, total_seconds=obj.total_seconds())
@@ -273,8 +273,8 @@ def taketake_json_decode(d):
             tz = datetime.timezone(datetime.timedelta(seconds=d['tzoffset']), name=d['tzname'])
         else:
             tz = None
-        # TODO convert  - also must be timestamp aware in timestamp parsing and formatting functions
-        return datetime.datetime.fromtimestamp(d["timestamp"], tzinfo=None)
+        # TODO also fix timestamp parsing and formatting functions
+        return datetime.datetime.fromtimestamp(d["timestamp"], tz=tz)
     elif "__timedelta__" in d:
         return datetime.timedelta(seconds=d['total_seconds'])
     else:
