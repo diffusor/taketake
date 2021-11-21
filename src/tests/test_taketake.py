@@ -1590,6 +1590,13 @@ class Test2_json_AudioInfo(TempdirFixture, FileAssertions):
         self.assertDataclassesEqual(self.ai, decoded_ai, f"\n* JSON encode = {s}")
         self.assertEqual(decoded_ai.parsed_timestamp.tzname(), 'UTC')
 
+    def test_json_dumps_loads_localtime(self):
+        self.ai.parsed_timestamp = datetime.datetime.now()
+        s = json.dumps(self.ai, cls=taketake.TaketakeJsonEncoder)
+        decoded_ai = json.loads(s, object_hook=taketake.taketake_json_decode)
+        self.assertDataclassesEqual(self.ai, decoded_ai, f"\n* JSON encode = {s}")
+        self.assertEqual(decoded_ai.parsed_timestamp.tzname(), None)
+
     def test_path_write_read_json(self):
         taketake.write_json(self.jsonfile, self.ai)
         decoded_ai = taketake.read_json(self.jsonfile)
