@@ -471,6 +471,8 @@
       voiceSelect.selectedIndex = selectedIndex;
     }
 
+    // Note: setting hour12=false results in Chrome showing 24:xx for times
+    // past midnight instead of 00:xx.  Note hour12 overrides hourCycle.
     const date_formatter = new Intl.DateTimeFormat('en-us', {
       weekday: 'long',
       year: 'numeric',
@@ -480,9 +482,9 @@
       minute: 'numeric',
       second: 'numeric',
       fractionalSecondDigits: 3,
-      hour12: false,
-      timeZoneName: "long",
-      timeZone: 'PST'
+      hourCycle: 'h23',
+      timeZoneName: "short",
+      timeZone: 'UTC'
     });
 
 
@@ -597,7 +599,7 @@
   <p>Click "Speak!" to get an audio time and date stamp for all your recording needs.</p>
   <div>
     <span>Time format string - use ${key} to substitute possible keys from the list below.</span>
-    <input type="text" id="time-format" value="${hour}:${minute}, ${weekday}. ${month} ${day}, ${year}" />
+    <input type="text" id="time-format" value="${hour}:${minute} zulu. ${weekday}. ${month} ${day}, ${year}" />
   </div>
   <div>
     <span>Timestamp</span>

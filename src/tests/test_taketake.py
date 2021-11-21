@@ -296,7 +296,7 @@ class Test0_grok_digit_pair(check_word_list_grok):
 
 class Test0_grok_time_words(check_word_list_grok):
     def grok_fn(self, word_list):
-        hour, minute, second, rest = taketake.grok_time_words(word_list)
+        hour, minute, second, timezone, rest = taketake.grok_time_words(word_list)
         self.assertEqual(word_list, rest)
         return f"{hour} {minute} {second}"
 
@@ -850,9 +850,10 @@ class Test0_grok_date_words(check_word_list_grok):
 
 class Test0_TimestampGrokError(unittest.TestCase):
     def check(self, text):
-        with self.assertRaisesRegex(taketake.TimestampGrokError,
-                                    self.regex):
-            print(taketake.words_to_timestamp(text))
+        with self.subTest(text=text):
+            with self.assertRaisesRegex(taketake.TimestampGrokError,
+                                        self.regex):
+                print(taketake.words_to_timestamp(text))
 
     def test_no_month(self):
         self.regex = "^Failed to find a month name in "
@@ -878,8 +879,11 @@ class Test0_TimestampGrokError(unittest.TestCase):
     def test_no_nth(self):
         self.regex = "^Could not find Nth-like ordinal in"
         self.check("eighteen twenty one may twenty twenty one")
-        self.check("eighteen twenty one thirteenth of may twenty twenty one")
         # Known example cases
+
+    def test_bad_timezone(self):
+        self.regex = "^Invalid extra words"
+        self.check("eighteen twenty one thirteenth of may twenty twenty one")
         self.check("you mean there are or power or come to new you to do to move them our earnings and no there you didn't do to in june it no you didn't do didn't know ah there are so than it june")
 
     def test_bad_month_day(self):
@@ -916,20 +920,37 @@ class Test0_TimestampGrokError(unittest.TestCase):
 
 
 class Test0_words_to_timestamp(unittest.TestCase):
-    def check_impl(self, text, expect, expected_rem=""):
+    def check_impl(self, text: str, expect: datetime.datetime, expected_rem: str=""):
         """Checks that the given string text decodes to self.expected_value,
         with the given remaining words joined into a string passed in as expected_rem.
         """
-        got_value, extra = taketake.words_to_timestamp(text)
-        got_rem = " ".join(extra)
-        self.assertEqual(got_value, expect)
-        self.assertEqual(got_rem, expected_rem)
+        with self.subTest(tz=None):
+            got_value, extra = taketake.words_to_timestamp(text)
+            got_rem = " ".join(extra)
+            self.assertEqual(got_value, expect)
+            self.assertEqual(got_rem, expected_rem)
+
+        dayre = re.compile(r'\b(tuesday|wednesday|thursday|sunday)\b')
+        if dayre.search(text):
+            for timezone in 'local zulu'.split():
+                tztext = dayre.sub(rf'{timezone} \1', text)
+                with self.subTest(timezone=timezone, tztext=tztext):
+                    match timezone:
+                        case 'zulu':
+                            tz=datetime.timezone.utc
+                        case 'local':
+                            tz=None
+
+                    got_value, extra = taketake.words_to_timestamp(tztext)
+                    got_rem = " ".join(extra)
+                    self.assertEqual(got_value, expect.replace(tzinfo=tz))
+                    self.assertEqual(got_rem, expected_rem)
 
     def check(self, text, *expect_ymdhms):
         dt = datetime.datetime(*expect_ymdhms)
-        self.check_impl(text, dt)
-        self.check_impl(text + " with stuff", dt, "with stuff")
-        self.check_impl(text + " twenty", dt, "twenty")
+        for extra in "", " with stuff", " twenty":
+            with self.subTest(extra=extra):
+                self.check_impl(text + extra, dt, extra.strip())
 
     def test_contrived_examples(self):
         self.check("zero oh one wednesday may nineteenth twenty twenty one",
@@ -1558,7 +1579,7 @@ class Test2_json_AudioInfo(TempdirFixture, FileAssertions):
                 duration_s=34.5,
                 speech_range=taketake.TimeRange(start=3.01, duration=4),
                 recognized_speech=None,
-                parsed_timestamp=datetime.datetime.now(),
+                parsed_timestamp=datetime.datetime.now().replace(tzinfo=datetime.timezone.utc),
                 extra_speech="foobar",
         )
         self.jsonfile = Path(self.tempdir) / "test2.json"

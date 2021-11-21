@@ -248,8 +248,14 @@ class TaketakeJsonEncoder(json.JSONEncoder):
         elif isinstance(obj, Path):
             return dict(__Path__=True, path=str(obj))
         elif isinstance(obj, datetime.datetime):
-            # NOTE: does not dump timezone info
-            return dict(__datetime__=True, timestamp=obj.timestamp())
+            # NOTE: does not dump timezone info WARNING TODO FIXME
+            d = dict(__datetime__=True, timestamp=obj.timestamp())
+            if obj.tzinfo is not None:
+                d['tzoffset']=obj.tzinfo.utcoffset(None).total_seconds()
+                d['tzname']=obj.tzinfo.tzname(None)
+            return d
+        elif isinstance(obj, datetime.timedelta):
+            return dict(__timedelta_=True, total_seconds=obj.total_seconds())
         else:
             return super().default(obj)
 
@@ -263,7 +269,14 @@ def taketake_json_decode(d):
     elif "__Path__" in d:
         return Path(d["path"])
     elif "__datetime__" in d:
-        return datetime.datetime.fromtimestamp(d["timestamp"])
+        if 'tzoffset' in d:
+            tz = datetime.timezone(datetime.timedelta(seconds=d['tzoffset']), name=d['tzname'])
+        else:
+            tz = None
+        # TODO convert  - also must be timestamp aware in timestamp parsing and formatting functions
+        return datetime.datetime.fromtimestamp(d["timestamp"], tzinfo=None)
+    elif "__timedelta__" in d:
+        return datetime.timedelta(seconds=d['total_seconds'])
     else:
         return d
 
@@ -1010,11 +1023,16 @@ def grok_digit_pair(word_list):
     return value
 
 
-def grok_time_words(word_list: list[str]) -> tuple[int, int, int, list[str]]:
-    """Returns a triplet of (hour, minutes, seconds, extra) from the word_list
+def grok_time_words(word_list: list[str]) -> tuple[int, int, int, str, list[str]]:
+    """Returns (hour, minutes, seconds, timezone, extra) from the word_list
 
-    The final list contains any unparsed words."""
+    If no timezone is present, "" is returned.  Timezone words supported:
 
+     * zulu - UTC (universal coordinated time)
+     * local - local timezone
+
+    The final list "extra" contains any unparsed words.
+    """
     done = False
     second = None
 
@@ -1050,8 +1068,10 @@ def grok_time_words(word_list: list[str]) -> tuple[int, int, int, list[str]]:
         second = grok_digit_pair(word_list)
         pop_optional_words(word_list, "second seconds")
 
+    timezone = pop_optional_words(word_list, "zulu local")
+
     assert second is not None
-    return hour, minute, second, list(word_list)
+    return hour, minute, second, timezone, list(word_list)
 
 
 def grok_day_of_month(word_list):
@@ -1237,15 +1257,15 @@ def grok_date_words(word_list):
     return year, month, day, day_of_week, list(word_list)
 
 
-def words_to_timestamp(text):
+def words_to_timestamp(text: str) -> tuple[datetime.datetime, list[str]]:
     """Converts the given text to a feasible timestamp, followed by any
     remaining comments or notes encoded in the time string.
 
     Returns a pair of (datetime, str) containing the timestamp and any comments.
     """
     # Sample recognized text for this TalkyTime setup:
-    #   format:  ${hour}:${minute}, ${weekday}. ${month} ${day}, ${year}
-    #   example: 19:38, Wednesday. May 19, 2021
+    #   format:  ${hour}:${minute} timezone. ${weekday}. ${month} ${day}, ${year}
+    #   example: 19:38 zulu. Wednesday. May 19, 2021
 
     if text is None:
         raise TimestampGrokError(f"Given text is None")
@@ -1268,15 +1288,29 @@ def words_to_timestamp(text):
         raise TimestampGrokError(f"Failed to find a month name in '{text}'")
 
     #print(f"  Time: {time_words}")
-    hour, minute, second, extra = grok_time_words(time_words)
+    hour, minute, second, timezone, extra = grok_time_words(time_words)
     #print(f"-> {hour:02d}:{minute:02d}:{second:02d} (extra: {extra})")
+
+    if extra:
+        raise TimestampGrokError(f"Invalid extra words (timezone?) "
+                f"'{' '.join(extra)}' in '{text}'")
 
     #print(f"  Date: {date_words}")
     year, month, day, day_of_week, extra = grok_date_words(date_words)
     #print(f"-> {year}-{month}-{day} {day_of_week} (extra: {extra})")
     #print(f"-> {year:04d}-{month:02d}-{day:02d} {day_of_week} (extra: {extra})")
 
-    return datetime.datetime(year, month, day, hour, minute, second), extra
+    match timezone:
+        case 'zulu':
+            tz=datetime.timezone.utc
+        case 'local':
+            tz=None
+        case '':
+            tz=None
+        case _:
+            raise TimestampGrokError(f"Invalid timezone {timezone} in '{text}'")
+
+    return datetime.datetime(year, month, day, hour, minute, second, tzinfo=tz), extra
 
 
 #============================================================================
