@@ -1144,33 +1144,34 @@ class Test0_format_dest_filename(unittest.TestCase):
 class Test0_parse_timestamp(unittest.TestCase):
     def test_parse_timestamp(self):
         for in_str in (
-                "20210113-125657",
-                "19301012-005638",
-                "21351201-230002",
+                "20210113-125657+0000",
+                "19301012-005638-0100",
+                "21351201-230002+1145",
                 ):
-            for sep in "_", " ":
-                s = in_str.replace("-", sep)
+            for sep in "-", "_", " ":
+                s = in_str.replace("-", sep, 1)
+
+                def parse_timestamp(timestr):
+                    tsinfo = taketake.extract_timestamp_from_str(timestr)
+                    return tsinfo.timestamp.strftime(f"%Y%m%d{sep}%H%M%S%z")
 
                 for day in "Wed Mon wed sat tue".split():
                     with_seconds = s
                     with self.subTest(with_seconds=with_seconds):
-                        out = taketake.parse_timestamp(with_seconds).strftime(f"%Y%m%d{sep}%H%M%S")
-                        self.assertEqual(out, with_seconds)
+                        self.assertEqual(parse_timestamp(with_seconds), with_seconds)
 
                     with_seconds_and_day = f"{with_seconds}{sep}{day}"
                     with self.subTest(with_seconds_and_day=with_seconds_and_day):
-                        out = taketake.parse_timestamp(with_seconds_and_day).strftime(f"%Y%m%d{sep}%H%M%S")
-                        self.assertEqual(out, with_seconds)
+                        self.assertEqual(parse_timestamp(with_seconds_and_day), with_seconds)
 
-                    no_seconds = s[:-2]
+                    no_seconds = s[:13] + s[15:]
+                    zero_seconds = s[:13] + "00" + s[15:]
                     with self.subTest(no_seconds=no_seconds):
-                        out = taketake.parse_timestamp(no_seconds).strftime(f"%Y%m%d{sep}%H%M%S")
-                        self.assertEqual(out, no_seconds+"00")
+                        self.assertEqual(parse_timestamp(no_seconds), zero_seconds)
 
                     no_seconds_and_day = f"{no_seconds}{sep}{day}"
                     with self.subTest(no_seconds_and_day=no_seconds_and_day):
-                        out = taketake.parse_timestamp(no_seconds_and_day).strftime(f"%Y%m%d{sep}%H%M%S")
-                        self.assertEqual(out, no_seconds+"00")
+                        self.assertEqual(parse_timestamp(no_seconds_and_day), zero_seconds)
 
     def test_parse_timestamp_bad(self):
         for s in (

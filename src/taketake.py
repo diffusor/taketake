@@ -823,37 +823,6 @@ def inject_timestamp(template: str, when: datetime.datetime=None) -> str:
         when = datetime.datetime.now()
     return template.format(when.strftime(Config.timestamp_fmt_compact))
 
-def parse_timestamp(s:str) -> Optional[datetime.datetime]:
-    """Parses time from strings like YYYYmmdd-HHMM and YYYYmmdd-HHMMSS.
-
-    Valid date-to-time separators are -, _, and ' ' (a single space).
-
-    Handles optional -shortweekday at the end, but not long weekday names.
-    The weekday is not checked and may mismatch the given date.
-
-    Returns the datetime result, or None if the parse failed.
-    """
-    result = None
-
-    s = re.sub(r'[_ ]', '-', s)
-
-    def try_parse(f):
-        nonlocal result
-        try:
-            result = datetime.datetime.strptime(s, f)
-            return True
-        except ValueError as e:
-            #print(f"{s}: {e}")
-            return False
-
-    for fmt in (Config.timestamp_fmt_compact, ):
-        dayless_fmt = fmt.replace("-%a", "")
-        if try_parse(fmt):
-            break
-        if try_parse(dayless_fmt):
-            break
-    return result
-
 class ParsedTimestamp(NamedTuple):
     matchobj: re.Match # note: matchobj.start('timestamp') or .end('weekday')
     timestamp: datetime.datetime
@@ -871,7 +840,8 @@ def extract_timestamp_from_str(s:str) -> Optional[ParsedTimestamp]:
                 if v and (k in "year month day hour minute second".split())}
 
         if m['timezone']:
-            timedict['tzinfo'] = datetime.datetime.strptime("+0400", "%z").tzinfo
+            # Use the parsed timezone
+            timedict['tzinfo'] = datetime.datetime.strptime(m['timezone'], "%z").tzinfo
         else:
             # Determine the current timezone
             timedict['tzinfo'] = datetime.datetime.now().astimezone().tzinfo
