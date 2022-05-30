@@ -2154,8 +2154,8 @@ class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
         test to pass, which is okay.
         """
 
-        tfmt = taketake.Config.timestamp_fmt_with_seconds
-        tstr = "20210526-131148-Wed"
+        tfmt = taketake.Config.timestamp_fmt_compact
+        tstr = "20210526-131148-0400-Wed"
         dt = datetime.datetime.strptime(tstr, tfmt)
         pstr = dt.strftime(tstr + " %z")
 
@@ -2167,7 +2167,7 @@ class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
 
         # Check that stating the file from Python matches the timestamp
         mtime_after = os.stat(fpath).st_mtime
-        dt_after = datetime.datetime.fromtimestamp(mtime_after)
+        dt_after = datetime.datetime.fromtimestamp(mtime_after).astimezone(dt.tzinfo)
         self.assertEqual(dt, dt_after)
 
         # Checking our assumptions that strftime round-trips the strptime
@@ -2177,8 +2177,10 @@ class Test6_ext_commands_tempdir(TempdirFixture, FileAssertions):
         # Check that ls agrees on the timestamp as well
         p = subprocess.run(("ls", "-l", "--time-style", "+" + tfmt, fpath),
                 capture_output=True, text=True, check=True)
+        dt_local = dt_after.astimezone()
+        tstr_local = dt_local.strftime(tfmt)
         self.assertRegex(p.stdout.strip(),
-                fr" {tstr} {fpath}")
+                fr" {tstr_local} {fpath}")
 
 
     def test_flac_decode_encode(self):
