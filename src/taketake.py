@@ -80,6 +80,7 @@ import itertools
 import collections
 import subprocess
 import datetime
+import zoneinfo
 import types
 import ctypes
 import dataclasses
@@ -145,6 +146,8 @@ class Config:
             r')'
             r'(?=$|\W|_)'
             , flags=re.IGNORECASE)
+
+    timezone_offset_re = re.compile(r'^[-+]\d{4}$')
 
     # Most of these are only illegal on Windows.
     # Linux only forbids /
@@ -230,6 +233,9 @@ class TransferInfo:
     wav_progress_dir:Path
     instrument:str
 
+    # When None, the local timezone is used
+    target_timezone: Optional[datetime.tzinfo] = None
+
     done_processing: bool = False  # TODO test this
     failures: list[Exception] = field(default_factory=list)
 
@@ -260,6 +266,7 @@ class TaketakeJsonEncoder(json.JSONEncoder):
             d = dict(__datetime__=True, timestamp=obj.timestamp())
             if obj.tzinfo is not None:
                 # utcoffset() returns non-None when tzinfo is non-None
+                # FIXME this is probably broken, utcoffset needs a datetime
                 d['tzoffset']=obj.utcoffset().total_seconds() # type: ignore
                 d['tzname']=obj.tzname()
             return d
@@ -1415,7 +1422,8 @@ def format_dest_filename(xinfo:TransferInfo) -> str:
     assert xinfo.audioinfo.extra_speech is not None
 
     # TODO - consider adding a command line argument to specify the target timezone
-    timestamp_str = xinfo.timestamp.astimezone().strftime(Config.timestamp_fmt_compact)
+    dt = xinfo.timestamp.astimezone(xinfo.target_timezone)
+    timestamp_str = dt.strftime(Config.timestamp_fmt_compact)
     duration_str = format_duration(xinfo.audioinfo.duration_s)
     if xinfo.audioinfo.extra_speech:
         notes = "-".join(xinfo.audioinfo.extra_speech) + "."
@@ -1431,6 +1439,34 @@ def format_dest_filename(xinfo:TransferInfo) -> str:
             instrument=xinfo.instrument,
             orig_fname=xinfo.source_wav.stem.lower())
 
+
+#============================================================================
+# Timezone utilities
+#============================================================================
+
+def parse_timezone(tzstr:str) -> Optional[datetime.tzinfo]:
+    """Returns the timezone as specified by the --target-timezone argument.
+
+    None is returned if the local timezone is requested.
+    """
+
+    if not tzstr or tzstr.lower() in "local list".split():
+        return None
+    elif Config.timezone_offset_re.match(tzstr):
+        return datetime.datetime.strptime(tzstr, "%z").tzinfo
+    elif tzstr.lower() in "z zulu".split():
+        return datetime.timezone.utc
+    else:
+        return zoneinfo.ZoneInfo(tzstr)
+
+def list_timezones():
+    now = datetime.datetime.now()
+    zones = {z: now.astimezone(zoneinfo.ZoneInfo(z)).strftime("%z")
+            for z in zoneinfo.available_timezones()}
+    sorted_zones = {z: offset for z, offset in
+            sorted(zones.items(), key=lambda pair: f"{pair[1]}.{pair[0]}")}
+    for z, offset in sorted_zones.items():
+        print(f"{offset}: {z}")
 
 #============================================================================
 # Signaling interface
@@ -2419,6 +2455,7 @@ class Step:
                     dest_dir=cmdargs.dest,
                     wav_progress_dir=progress_dir / wav.name,
                     instrument=cmdargs.instrument,
+                    target_timezone=cmdargs.target_timezone,
                 )
 
             # TODO - test cases where the wav dir or symlink doesn't exist
@@ -2921,6 +2958,12 @@ def validate_args(parser: argparse.ArgumentParser, args) -> list[str]:
     if args.sources and args.dest is None:
         args.dest = args.sources.pop()
 
+    # Process the requested timezone
+    try:
+        args.target_timezone = parse_timezone(args.requested_timezone)
+    except zoneinfo.ZoneInfoNotFoundError as e:
+        err(f"Invalid --target-timezone '{args.requested_timezone}': {e}")
+
     # Check and fix --fallback-timestamp
     args.fallback_timestamp_mode = args.fallback_timestamp
     args.fallback_timestamp_dt = None
@@ -3104,6 +3147,20 @@ def process_args(argv: Optional[list[str]]=None) \
     arg('-i', '--instrument', action='store',
         help=f"Inject the given instrument name into the resulting filenames")
 
+    arg('-z', '--tz', '--target-timezone', dest='requested_timezone',
+        metavar='TIMEZONE', action='store',
+        help="""Use the given timezone to render timestamps in generated filenames.
+The timestamp extracted from each input WAV file will be shown in the given timezone.
+Possible timezones are:
+
+    * local (default) - The local timezone is used
+    * [-+]NNNN - A simple offset timezone
+    * Z, zulu - Synonyms for UTC
+    * IANA abbreviation, like PST or GMT - these are locale specific
+    * IANA full name
+    * list - print a list of timezone names
+    """)
+
     arg('-f', '--fallback-timestamp',
         metavar='TIMESTAMP_MODE',
         action='store', default="mtime",
@@ -3197,6 +3254,12 @@ def format_errors(errors):
 
 def main():
     parser, args, errors = process_args()
+
+    if args.requested_timezone == "list":
+        list_timezones()
+        if not errors:
+            return 0
+        # Otherwise, fall through to the error reporting
 
     # Report errors
     if errors:

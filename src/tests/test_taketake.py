@@ -1133,6 +1133,7 @@ class Test0_format_dest_filename(unittest.TestCase):
                     ),
                 timestamp=datetime.datetime.fromtimestamp(0,
                     tz=datetime.timezone(datetime.timedelta(0))),
+                target_timezone=datetime.timezone.utc,
                 )
 
         for extra, tag in ("", "+?"), ("bark", "@"), ("these are extra words", ""):
