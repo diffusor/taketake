@@ -2,6 +2,8 @@
 
 # TODO support transfering from flac files?
 # TODO use template instead of string formating for config formats (Minor security issue)
+# TODO use https://audiodiff.readthedocs.io/en/latest/ to diff flac vs. wav
+#       PX-S3000 appends an extra 44B chunk at the end of its wavs that flac doesn't store
 
 """Transfer wav files into flac files.
 
@@ -603,17 +605,27 @@ async def cmp_flac_vs_wav(
         return p_cmp.returncode == 0
 
 
-def check_cmp_results_file(cmp_results_fpath: Path):
+def check_cmp_results_file(cmp_results_fpath: Path, wav_fpath: Path):
     """Raise CmpMismatch if the given cmp_results_fpath file shows a difference.
+
+    HACK: the PX-S3000 appends an extra 44B chunk at the end of its WAVs that
+    flac doesn't transport.  Consider using audiodiff or ffmpeg instead.
+    In the meantime, we just ignore any reports of extra bytes.
     """
     if not cmp_results_fpath.exists():
         raise CmpMismatch(
                 f"cmp check failed - {cmp_results_fpath} does not exist!")
 
     elif (contents := cmp_results_fpath.read_text().strip()) != "":
-        raise CmpMismatch(
-                f"cmp check failed - Source and target files don't match:"
-                f"\n  {contents}")
+        # Work around the extra 44 byte chunk some pianos append to their WAVs
+        #
+        filesize = os.path.getsize(wav_fpath)
+        if re.match(fr'cmp: EOF on - after byte {filesize - 44}, in line \d+$', contents):
+            print(f"*** Warning: WAV file '{wav_fpath}' has an extra 44 bytes not"
+                  f" transported by its flac; proceeding anyway since some pianos do this")
+        else:
+            raise CmpMismatch(
+                    f"cmp check failed - Source and target files don't match: {contents}")
 
 
 def get_nearest_n(x, n):
@@ -2680,15 +2692,15 @@ class Step:
                         wav_fpath=wav_fpath,
                         cmp_results_fpath=cmp_results_fpath)
                 if not success:
-                    check_cmp_results_file(cmp_results_fpath)
-                    raise CmpMismatch(
-                            f"cmp failed, but check_cmp_results_file did not detect it!"
-                            f"\n  {cmp_results_fpath}"
-                            f"\n  {xinfo.source_wav}")
+                    check_cmp_results_file(cmp_results_fpath, wav_fpath)
+                    #raise CmpMismatch(
+                    #        f"cmp failed, but check_cmp_results_file did not detect it!"
+                    #        f"\n  {cmp_results_fpath}"
+                    #        f"\n  {xinfo.source_wav}")
 
         if cmp_results_fpath.exists():
             # When resuming, make sure .cmp_results represents a successful check
-            check_cmp_results_file(cmp_results_fpath)
+            check_cmp_results_file(cmp_results_fpath, wav_fpath)
 
 
     @staticmethod
