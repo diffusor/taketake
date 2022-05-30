@@ -1671,6 +1671,8 @@ class CmdArgsFixture(CdTempdirFixture):
                 fallback_timestamp='mtime',
                 fallback_timestamp_dt=None,
                 fallback_timestamp_mode='mtime',
+                requested_timezone=None,
+                target_timezone=None,
                 instrument='inst1',
                 sources=[],
                 wavs=[])
@@ -2549,6 +2551,7 @@ class Test8_tasks(unittest.IsolatedAsyncioTestCase, CdTempdirFixture, FileAssert
                 dest=Path("dest_foo"),
                 wavs=wavpaths,
                 instrument="foobar",
+                target_timezone=None,
                 do_prompt=False,
                 fallback_timestamp_dt=None,
                 fallback_timestamp_mode="now",
@@ -2635,6 +2638,7 @@ class StepSetupBase(unittest.IsolatedAsyncioTestCase,
                 wavs=self.wavpaths,
                 do_prompt=False,
                 instrument="foobaz",
+                target_timezone=None,
         )
         self.stepper = DummyStepper()
         self.maxDiff = None
