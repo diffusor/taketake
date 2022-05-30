@@ -1414,7 +1414,8 @@ def format_dest_filename(xinfo:TransferInfo) -> str:
     assert xinfo.audioinfo.duration_s is not None
     assert xinfo.audioinfo.extra_speech is not None
 
-    timestamp_str = xinfo.timestamp.strftime(Config.timestamp_fmt_compact)
+    # TODO - consider adding a command line argument to specify the target timezone
+    timestamp_str = xinfo.timestamp.astimezone().strftime(Config.timestamp_fmt_compact)
     duration_str = format_duration(xinfo.audioinfo.duration_s)
     if xinfo.audioinfo.extra_speech:
         notes = "-".join(xinfo.audioinfo.extra_speech) + "."
