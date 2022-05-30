@@ -1,17 +1,19 @@
 #!/usr/bin/env python3.10
 
 # TODO support transfering from flac files?
+# TODO use template instead of string formating for config formats (Minor security issue)
 
 """Transfer wav files into flac files.
 
 This is meant for convenient but robust download from digitial piano USB drives.
+taketake performs the following steps:
 
-* Suggest file names based on spoken timestamp information in each wav
-* Prompt the user to rename the file, allowing listening to it via Alt-h
-* Encode par2 recovery files for the destination flac
-* Flush cached data and verify the copied/encoded contents
-* Automatically delete the source wav file
-* Copy the encoded flac and par2 files back onto the USB for archival
+* Suggests file names based on spoken timestamp information in each wav
+* Prompts the user to rename the file, allowing listening to it via Alt-h
+* Encodes par2 recovery files for the destination flac
+* Flushes cached data and verify the copied/encoded contents
+* Automatically deletes the source wav file
+* Copies the encoded flac and par2 files back onto the USB for archival
 * If the process hits an error or is interrupted, it can be resumed
 
 When using TalkyTime to timestamp a recording, this eases management of the
@@ -120,16 +122,23 @@ class Config:
     # after a flush before the fincore operation completes.
     fincore_rate_vs_fs = 100  # fincore runs at 100x filesystem read speed
 
-    timestamp_fmt_no_seconds   = "%Y%m%d-%H%M-%a"
-    timestamp_fmt_with_seconds = "%Y%m%d-%H%M%S-%a"
-    timestamp_fmt_long = "%Y-%m-%d %H:%M:%S %a"
-    timestamp_fmt_us = "%Y-%m-%d %H:%M:%S.%f"
+    # This is the "one true format" for timestamps in filenames
+    timestamp_fmt_compact = "%Y%m%d-%H%M%S%z-%a" # '20220529-160002-0700-Sun'
+    timestamp_fmt_long = "%Y-%m-%d %H:%M:%S%z %a"
+    timestamp_fmt_us = "%Y-%m-%d %H:%M:%S.%f%z"
     timestamp_re = re.compile(
             r'(?:^|\D)' # Ensure we don't grab the middle of a number
             r'(?P<fulltime>'
-                r'(?P<timestamp>\d{8}[- _]\d{4}(?:\d{2})?)'
+                r'(?P<timestamp>'
+                 r'(?P<year>\d{4})'
+                 r'(?P<month>\d{2})'
+                 r'(?P<day>\d{2})[- _]'
+                 r'(?P<hour>\d{2})'
+                 r'(?P<minute>\d{2})'
+                 r'(?P<second>\d{2})?'
+                 r'(?P<timezone>[-+]\d{4})?)'
                 r'[- _]?'   # timestamp-weekday_name separator
-                r'(?P<fullweekday>'
+                r'(?P<dayname>'
                     r'(?P<weekday>sun|mon|tue|wed|thu|fri|sat)'
                     r'(?P<weekdaysuffix>day|sday|nesday|rsday|urday)?'
                 r')?'
@@ -779,7 +788,7 @@ def get_fallback_timestamp(
     Otherwise, it simply returns the given fallback_timestamp string.
 
     The return timestamp format is intended to match the
-    Config.timestamp_fmt_with_seconds.
+    Config.timestamp_fmt_compact.
     """
     if fallback_timestamp_mode == "now":
         dt = datetime.datetime.now()
@@ -806,13 +815,13 @@ def inject_timestamp(template: str, when: datetime.datetime=None) -> str:
     """Format the time into the given template string.
 
     template must contain a single {} which indicates where the timestamp goes.
-    Config.timestamp_fmt_with_seconds is used to format the time.
+    Config.timestamp_fmt_compact is used to format the time.
     If when is None, the current time is encoded.
     Otherwise, when should be an object for which strftime is defined.
     """
     if when is None:
         when = datetime.datetime.now()
-    return template.format(when.strftime(Config.timestamp_fmt_with_seconds))
+    return template.format(when.strftime(Config.timestamp_fmt_compact))
 
 def parse_timestamp(s:str) -> Optional[datetime.datetime]:
     """Parses time from strings like YYYYmmdd-HHMM and YYYYmmdd-HHMMSS.
@@ -820,6 +829,7 @@ def parse_timestamp(s:str) -> Optional[datetime.datetime]:
     Valid date-to-time separators are -, _, and ' ' (a single space).
 
     Handles optional -shortweekday at the end, but not long weekday names.
+    The weekday is not checked and may mismatch the given date.
 
     Returns the datetime result, or None if the parse failed.
     """
@@ -836,7 +846,7 @@ def parse_timestamp(s:str) -> Optional[datetime.datetime]:
             #print(f"{s}: {e}")
             return False
 
-    for fmt in Config.timestamp_fmt_no_seconds, Config.timestamp_fmt_with_seconds:
+    for fmt in (Config.timestamp_fmt_compact, ):
         dayless_fmt = fmt.replace("-%a", "")
         if try_parse(fmt):
             break
@@ -857,16 +867,27 @@ def extract_timestamp_from_str(s:str) -> Optional[ParsedTimestamp]:
     Returns the datetime result, or None if the parse failed.
     """
     if m := Config.timestamp_re.search(s):
-        if dt := parse_timestamp(m['timestamp']):
-            expect_weekday = dt.strftime("%a")
-            if m['weekday'] is not None:
-                weekday_correct = m['weekday'].lower() == expect_weekday.lower()
-            else:
-                weekday_correct = None
-            return ParsedTimestamp(
-                    matchobj=m,
-                    timestamp=dt,
-                    weekday_correct=weekday_correct)
+        timedict = {k: int(v) for k, v in m.groupdict().items()
+                if v and (k in "year month day hour minute second".split())}
+
+        if m['timezone']:
+            timedict['tzinfo'] = datetime.datetime.strptime("+0400", "%z").tzinfo
+        else:
+            # Determine the current timezone
+            timedict['tzinfo'] = datetime.datetime.now().astimezone().tzinfo
+
+        dt = datetime.datetime(**timedict)
+
+        expect_weekday = dt.strftime("%a")
+        if m['weekday'] is not None:
+            weekday_correct = m['weekday'].lower() == expect_weekday.lower()
+        else:
+            weekday_correct = None
+
+        return ParsedTimestamp(
+                matchobj=m,
+                timestamp=dt,
+                weekday_correct=weekday_correct)
 
     return None
 
@@ -1408,7 +1429,7 @@ def format_dest_filename(xinfo:TransferInfo) -> str:
     assert xinfo.audioinfo.duration_s is not None
     assert xinfo.audioinfo.extra_speech is not None
 
-    timestamp_str = xinfo.timestamp.strftime(Config.timestamp_fmt_with_seconds)
+    timestamp_str = xinfo.timestamp.strftime(Config.timestamp_fmt_compact)
     duration_str = format_duration(xinfo.audioinfo.duration_s)
     if xinfo.audioinfo.extra_speech:
         notes = "-".join(xinfo.audioinfo.extra_speech) + "."
@@ -2196,7 +2217,7 @@ async def prompt_for_filename(xinfo:TransferInfo):
                     f"Weekday mismatch: timestamp is on a "
                     f"<style bg='ansigreen'>{tsinfo.timestamp.strftime('%A')}</style>, "
                     f"but the text says "
-                    f"<style bg='ansired'>{tsinfo.matchobj.group('fullweekday')}</style>")
+                    f"<style bg='ansired'>{tsinfo.matchobj.group('dayname')}</style>")
 
         return HTML("  ".join(strs))
 
@@ -2918,17 +2939,15 @@ def validate_args(parser: argparse.ArgumentParser, args) -> list[str]:
     args.fallback_timestamp_mode = args.fallback_timestamp
     args.fallback_timestamp_dt = None
     if args.fallback_timestamp[-1] in "+-" \
-            and (dt := parse_timestamp(args.fallback_timestamp[:-1])): # Omit trailing -+
-        pto = extract_timestamp_from_str(args.fallback_timestamp)
-        assert pto, f"parse_timestamp should already have ensured "\
-                    f"'{args.fallback_timestamp}' contains a timestamp!"
-        if not pto.weekday_correct:
+            and (tsinfo := extract_timestamp_from_str(args.fallback_timestamp)):
+
+        if not tsinfo.weekday_correct:
             err(f"Mismatched weekday in --fallback-timestamp: "
-                f"{args.fallback_timestamp}, expected {dt.strftime('%a')}")
+                f"{args.fallback_timestamp}, expected {tsinfo.timestamp.strftime('%a')}")
 
         else:
             args.fallback_timestamp_mode = "timestamp" + args.fallback_timestamp[-1]
-            args.fallback_timestamp_dt = dt
+            args.fallback_timestamp_dt = tsinfo.timestamp
 
     elif args.fallback_timestamp not in 'prior mtime ctime atime now'.split():
         err(f"Invalid --fallback-timestamp: '{args.fallback_timestamp}'"

@@ -417,3 +417,29 @@ Smarter time guessing
 * When adding or subtracting timestamps, assume a 5 second minimum delta
   between recordings: When adding, add an extra 5.  When subtracting, subtract
   an extra five
+
+
+Timezone support
+----------------
+Python 3.9 has a built-in IANA timezone implementation in the zoneinfo module.
+
+But you can get a timezone-aware local time without that module as follows::
+
+    >>> t = datetime.now()
+    >>> tlocal = t.astimezone()
+    >>> str(tlocal)
+    '2022-05-29 16:00:02.640261-07:00'
+
+    >>> tz = tlocal.tzinfo
+    >>> tz.tzname(tlocal)
+    'MST'
+
+    >>> tlocal.strftime("%Y%m%d-%H%M%S%Z")
+    '20220529-160002MST'
+
+    >>> tlocal.strftime("%Y%m%d-%H%M%S%z")
+    '20220529-160002-0700'
+
+    >>> cur_tzinfo = datetime.datetime.now().astimezone().tzinfo
+
+With this, we probably don't need the zoneinfo module.

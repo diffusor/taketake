@@ -1139,7 +1139,7 @@ class Test0_format_dest_filename(unittest.TestCase):
                 if expect:
                     expect += "."
                 self.assertEqual(taketake.format_dest_filename(xinfo),
-                        f"piano.19700101-000000-Thu{tag}.{expect}4h33m11s.foobuzz.wow.flac")
+                        f"piano.19700101-000000+0000-Thu{tag}.{expect}4h33m11s.foobuzz.wow.flac")
 
 class Test0_parse_timestamp(unittest.TestCase):
     def test_parse_timestamp(self):
@@ -1681,8 +1681,8 @@ class CmdArgsFixture(CdTempdirFixture):
                 else:
                     unmatched_errpats.append(errpat)
             self.assertFalse(remaining_errors or unmatched_errpats,
-                msg=f"\nExtra argparse errors:{fmterr(remaining_errors)}"
-                    f"\nUnused error patterns:{fmterr(unmatched_errpats)}")
+                msg=f"\nUnmatched argparse-triggered errors:{fmterr(remaining_errors)}"
+                    f"\nUnused expected-error patterns:{fmterr(unmatched_errpats)}")
 
         else:
             # Ensure there are no errors
@@ -2066,22 +2066,26 @@ class Test6_fallback_timestamp_arg(CmdArgsFixture):
 
     def test_arg_fallback_timestamp_minus(self):
         tss = "20211223-091134-Thu"
+        cur_tzinfo = datetime.datetime.now().astimezone().tzinfo
+        dt = datetime.datetime(2021, 12, 23, 9, 11, 34, tzinfo=cur_tzinfo)
         self.check_fallback(f"{tss}-",
                 fallback_timestamp=f"{tss}-",
-                fallback_timestamp_dt=datetime.datetime(2021, 12, 23, 9, 11, 34),
+                fallback_timestamp_dt=dt,
                 fallback_timestamp_mode='timestamp-')
 
     def test_arg_fallback_timestamp_plus(self):
-        tss = "20211223-091134-Thu"
+        tss = "20211223-091134+0400-Thu"
+        tz = datetime.datetime.strptime("+0400", "%z").tzinfo
+        dt = datetime.datetime(2021, 12, 23, 9, 11, 34, tzinfo=tz)
         self.check_fallback(f"{tss}+",
                 fallback_timestamp=f"{tss}+",
-                fallback_timestamp_dt=datetime.datetime(2021, 12, 23, 9, 11, 34),
+                fallback_timestamp_dt=dt,
                 fallback_timestamp_mode='timestamp+')
 
     def test_arg_fallback_timestamp_bad_weekday(self):
-        tss = "20211223-091134-Sat"
+        tss = "20211223-091134+0000-Sat"
         self.check_fallback(f"{tss}-",
-                f"Mismatched weekday in --fallback-timestamp: {tss}-, expected Thu")
+                f"Mismatched weekday in --fallback-timestamp: {re.escape(tss)}-, expected Thu")
 
     def test_arg_fallback_timestamp_invalid(self):
         tss = "foobaz"
