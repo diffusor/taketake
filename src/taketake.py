@@ -127,7 +127,7 @@ class Config:
     timestamp_fmt_long = "%Y-%m-%d %H:%M:%S%z %a"
     timestamp_fmt_us = "%Y-%m-%d %H:%M:%S.%f%z"
     timestamp_re = re.compile(
-            r'(?=^|\D)' # Ensure we don't grab the middle of a number
+            r'(?:^|(?<=\D))' # Ensure we don't grab the middle of a number
             r'(?P<fulltime>'
                 r'(?P<timestamp>'
                  r'(?P<year>\d{4})'
@@ -143,7 +143,7 @@ class Config:
                      r'(?P<weekdaysuffix>day|sday|nesday|rsday|urday)?'
                 r'))?'
             r')'
-            r'(?=$|\W|_|\d)'
+            r'(?=$|\W|_)'
             , flags=re.IGNORECASE)
 
     # Most of these are only illegal on Windows.
@@ -2161,7 +2161,7 @@ async def prompt_for_filename(xinfo:TransferInfo):
 
         if tsinfo and tsinfo.timestamp:
             strs.append(f"Parsed {tsinfo.timestamp.strftime(Config.timestamp_fmt_long)}: ")
-            age = datetime.datetime.now() - tsinfo.timestamp
+            age = datetime.datetime.now().astimezone() - tsinfo.timestamp.astimezone()
             if age < datetime.timedelta(0):
                 strs.append("<style fg='ansired'>That's "
                         f"{short_timedelta(-age)} "
