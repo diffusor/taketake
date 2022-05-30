@@ -127,7 +127,7 @@ class Config:
     timestamp_fmt_long = "%Y-%m-%d %H:%M:%S%z %a"
     timestamp_fmt_us = "%Y-%m-%d %H:%M:%S.%f%z"
     timestamp_re = re.compile(
-            r'(?:^|\D)' # Ensure we don't grab the middle of a number
+            r'(?=^|\D)' # Ensure we don't grab the middle of a number
             r'(?P<fulltime>'
                 r'(?P<timestamp>'
                  r'(?P<year>\d{4})'
@@ -137,13 +137,13 @@ class Config:
                  r'(?P<minute>\d{2})'
                  r'(?P<second>\d{2})?'
                  r'(?P<timezone>[-+]\d{4})?)'
-                r'[- _]?'   # timestamp-weekday_name separator
-                r'(?P<dayname>'
-                    r'(?P<weekday>sun|mon|tue|wed|thu|fri|sat)'
-                    r'(?P<weekdaysuffix>day|sday|nesday|rsday|urday)?'
-                r')?'
+                r'(?:[- _.]?'   # timestamp-weekday_name separator
+                 r'(?P<dayname>'
+                     r'(?P<weekday>sun|mon|tue|wed|thu|fri|sat)'
+                     r'(?P<weekdaysuffix>day|sday|nesday|rsday|urday)?'
+                r'))?'
             r')'
-            r'(?:$|\W|_|\d)'
+            r'(?=$|\W|_|\d)'
             , flags=re.IGNORECASE)
 
     # Most of these are only illegal on Windows.
@@ -833,7 +833,7 @@ def extract_timestamp_from_str(s:str) -> Optional[ParsedTimestamp]:
 
     Looks for timestamps of the form YYYYmmdd-HHMM(SS).
 
-    Returns the datetime result, or None if the parse failed.
+    Returns the ParsedTimestamp result, or None if the parse failed.
     """
     if m := Config.timestamp_re.search(s):
         timedict = {k: int(v) for k, v in m.groupdict().items()
@@ -860,6 +860,21 @@ def extract_timestamp_from_str(s:str) -> Optional[ParsedTimestamp]:
                 weekday_correct=weekday_correct)
 
     return None
+
+def parse_timestamp(s:str) -> Optional[datetime.datetime]:
+    """Uses extract_timestamp_from_str to interpret s as a timestamp.
+
+    Returns the datetime.datetime result if parsing succeeds, or None if
+    parsing fails or if there are any leading or trailing characters,
+    or if the weekday mismatches.
+    """
+    tsinfo = extract_timestamp_from_str(s)
+    if tsinfo and tsinfo.matchobj.start() == 0 \
+              and tsinfo.matchobj.end() == len(s) \
+              and (not tsinfo.matchobj['weekday'] or tsinfo.weekday_correct):
+        return tsinfo.timestamp
+    else:
+        return None
 
 
 #============================================================================
@@ -2175,9 +2190,9 @@ async def prompt_for_filename(xinfo:TransferInfo):
         elif tsinfo.timestamp is None:
             strs.append(f"<style fg='ansired'>WARNING:</style> Timestamp couldn't be parsed!")
 
-        elif tsinfo.matchobj.group('weekday') is None:
+        elif tsinfo.matchobj['weekday'] is None:
             strs.append(f"<style fg='ansired'>WARNING:</style> "
-                    f"No weekday in '{tsinfo.matchobj.group('fulltime')}' found!")
+                    f"No weekday in '{tsinfo.matchobj['fulltime']}' found!")
 
         elif tsinfo.weekday_correct:
             strs.append(f"<style bg='ansigreen'>Weekday matches</style>")
@@ -2187,7 +2202,7 @@ async def prompt_for_filename(xinfo:TransferInfo):
                     f"Weekday mismatch: timestamp is on a "
                     f"<style bg='ansigreen'>{tsinfo.timestamp.strftime('%A')}</style>, "
                     f"but the text says "
-                    f"<style bg='ansired'>{tsinfo.matchobj.group('dayname')}</style>")
+                    f"<style bg='ansired'>{tsinfo.matchobj['dayname']}</style>")
 
         return HTML("  ".join(strs))
 

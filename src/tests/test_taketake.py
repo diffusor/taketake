@@ -30,6 +30,10 @@ from pathlib import Path
 import dataclasses
 import json
 
+# Don't elide even longish strings.
+# thanks to https://stackoverflow.com/a/61345284
+unittest.util._MAX_LENGTH = 4096
+
 keeptemp = int(os.environ.get("TEST_TAKETAKE_KEEPTEMP", "0"))
 dontskip = int(os.environ.get("TEST_TAKETAKE_DONTSKIP", "0"))
 testflac = "testdata/audio.20210318-2020-Thu.timestamp-wrong-weekday-Monday.flac"
@@ -150,6 +154,7 @@ class FileAssertions():
 
 class TempdirFixture(unittest.TestCase):
     def setUp(self):
+        self.maxDiff=None
         timestamp = time.strftime("%Y%m%d-%H%M%S-%a")
         self.tempdir = tempfile.mkdtemp(
                 prefix=f'{self.__class__.__name__}.{timestamp}.')
@@ -1151,27 +1156,38 @@ class Test0_parse_timestamp(unittest.TestCase):
             for sep in "-", "_", " ":
                 s = in_str.replace("-", sep, 1)
 
-                def parse_timestamp(timestr):
-                    tsinfo = taketake.extract_timestamp_from_str(timestr)
-                    return tsinfo.timestamp.strftime(f"%Y%m%d{sep}%H%M%S%z")
+                for day in "Wed Monday wed saturday tue".split():
 
-                for day in "Wed Mon wed sat tue".split():
+                    def check_ts(in_ts, expected_ts, expected_day=None):
+                        tsinfo = taketake.extract_timestamp_from_str(in_ts)
+                        reformatted_ts = tsinfo.timestamp.strftime(f"%Y%m%d{sep}%H%M%S%z")
+                        self.assertEqual(reformatted_ts, expected_ts)
+                        self.assertEqual(tsinfo.matchobj['dayname'], expected_day)
+                        self.assertEqual(tsinfo.matchobj.start(), 0)
+                        self.assertEqual(tsinfo.matchobj.end(), len(in_ts))
+
                     with_seconds = s
-                    with self.subTest(with_seconds=with_seconds):
-                        self.assertEqual(parse_timestamp(with_seconds), with_seconds)
+                    timestr = with_seconds
+                    with self.subTest(with_seconds=timestr):
+                        check_ts(timestr, with_seconds)
 
-                    with_seconds_and_day = f"{with_seconds}{sep}{day}"
-                    with self.subTest(with_seconds_and_day=with_seconds_and_day):
-                        self.assertEqual(parse_timestamp(with_seconds_and_day), with_seconds)
+                    timestr = f"{with_seconds}{sep}{day}"
+                    with self.subTest(with_seconds_and_day=timestr):
+                        check_ts(timestr, with_seconds, day)
+
+                    timestr = f"{with_seconds}{day}"
+                    with self.subTest(with_seconds_and_day_no_sep=timestr):
+                        check_ts(timestr, with_seconds, day)
 
                     no_seconds = s[:13] + s[15:]
                     zero_seconds = s[:13] + "00" + s[15:]
-                    with self.subTest(no_seconds=no_seconds):
-                        self.assertEqual(parse_timestamp(no_seconds), zero_seconds)
+                    timestr = no_seconds
+                    with self.subTest(no_seconds=timestr):
+                        check_ts(timestr, zero_seconds)
 
-                    no_seconds_and_day = f"{no_seconds}{sep}{day}"
-                    with self.subTest(no_seconds_and_day=no_seconds_and_day):
-                        self.assertEqual(parse_timestamp(no_seconds_and_day), zero_seconds)
+                    timestr = f"{no_seconds}{sep}{day}"
+                    with self.subTest(no_seconds_and_day=timestr):
+                        check_ts(timestr, zero_seconds, day)
 
     def test_parse_timestamp_bad(self):
         for s in (
@@ -1182,15 +1198,15 @@ class Test0_parse_timestamp(unittest.TestCase):
                 "19301012-005638-Wxd",
                 "19301012-005638-Monday",
                 "19301012-005638-Mo",
-                "19301012-005638-",
+                "19301012-005639-",
                 "",
                 "foo",
                 "2021-11-01 11:42 -0700 Mon",
                 "2021-11-01 11:42",
                 ):
             with self.subTest(s=s):
-                out = taketake.parse_timestamp(s)
-                self.assertEqual(out, None)
+                dt = taketake.parse_timestamp(s)
+                self.assertEqual(dt, None)
 
 #===========================================================================
 # Test1 - Queues and Steppers
